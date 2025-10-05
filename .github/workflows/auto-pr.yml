@@ -1,0 +1,24 @@
+name: Auto Create Pull Request (manual)
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  create-pr:
+    runs-on: ubuntu-latest
+    # Kept for manual runs only; local post-push hook handles auto PR creation
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "feat: Auto-generated PR for ${{ github.ref_name }}"
+          labels: auto-generated
+          base: main
+          branch: ${{ github.ref_name }}
+          delete-branch: false

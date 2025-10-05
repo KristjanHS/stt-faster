@@ -1,0 +1,119 @@
+name: Semgrep
+
+on:
+  pull_request:
+  workflow_dispatch: # Allow manual triggering
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  semgrep:
+    name: Sec Scan
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+
+    # Add timeout to prevent hanging jobs
+    timeout-minutes: 30
+
+    # Use concurrency to cancel in-progress jobs on new commits
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          clean: false # avoid deleting untracked files under act --bind
+          fetch-depth: 2
+
+      - name: Semgrep scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: auto
+          publishToken: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+      # Security findings are available in GitHub's Security tab
+      # No local summary needed - rely on GitHub's Security tab as source of truth
+
+      # Note: Semgrep results are automatically published to the semgrep platform
+      # via the publishToken in the semgrep-action step above
+
+      - name: Comment PR with findings
+        if: ${{ github.event_name == 'pull_request' && hashFiles('semgrep.sarif') != '' }}
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            try {
+              const sarif = JSON.parse(fs.readFileSync('semgrep.sarif', 'utf8'));
+              const results = sarif?.runs?.[0]?.results || [];
+              const findings = results.length;
+              if (findings > 0) {
+                const listItems = results.slice(0, 10).map((r, i) => {
+                  const ruleId = r.ruleId || r?.rule?.id || 'unknown-rule';
+                  const level = r.level || r?.properties?.severity || 'note';
+                  const message = r?.message?.text || '(no message)';
+                  const loc = r?.locations?.[0]?.physicalLocation || {};
+                  const file = loc?.artifactLocation?.uri || 'unknown-file';
+                  const line = loc?.region?.startLine || 1;
+                  return `- ${i+1}. [${level}] ${ruleId} at ${file}:${line}\n  ${message}`;
+                }).join('\n');
+                const comment = `## Semgrep Security Scan Results\n\n` +
+                  `🔍 **${findings} security findings** detected` +
+                  `\n\nTop findings (max 10):\n${listItems}\n\n` +
+                  `_Full details available in the Semgrep platform._`;
+                github.rest.issues.createComment({
+                  issue_number: context.issue.number,
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  body: comment
+                });
+              } else {
+                console.log('Semgrep findings: 0. Skipping PR comment.');
+              }
+            } catch (error) {
+              console.error('Error processing semgrep.sarif:', error.message);
+            }
+
+  local_semgrep:
+    name: Local Semgrep Scan (isolated env)
+    # Run ONLY under local Act; never on GitHub
+    if: ${{ github.actor == 'nektos/act' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          clean: false # avoid deleting untracked files under act --bind
+          fetch-depth: 0
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+
+      - name: Run Semgrep scan (no metrics) via uvx
+        run: |
+          uvx --from semgrep semgrep ci \
+            --config auto \
+            --metrics off \
+            --sarif \
+            --output semgrep_local.sarif
+
+      # Local scan complete - results available in semgrep_local.sarif
+      # For production scans, check GitHub's Security tab
+
+      - name: Quick local summary
+        if: ${{ always() }}
+        run: |
+          if [ -f "semgrep_local.sarif" ]; then
+            echo "Local Semgrep scan complete. Check semgrep_local.sarif for details."
+            echo "For production results, see GitHub's Security tab."
+          fi

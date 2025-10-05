@@ -1,0 +1,107 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environments
+.venv/
+venv/
+ENV/
+env/
+.env
+node_modules/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Build/test artifacts and caches
+reports/
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.cache/
+model_cache/
+.run_id
+.test-build.hash
+.test-build-timestamp
+
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
+
+# Development data (mounted as volume in test environment)
+data/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Tests (mounted as volume in test environment)
+tests/
+test_*
+*_test.py
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+.travis.yml
+.circleci/
+
+# Docker
+Dockerfile*
+docker-compose*
+.dockerignore
+
+# Security
+.secrets.baseline
+
+# Local development
+.local/
+local/
+
+# OS
+.DS_Store

@@ -1,0 +1,66 @@
+name: Meta linters (workflows, YAML, Dockerfiles)
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**/*.yml"
+      - ".github/workflows/**/*.yaml"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "Dockerfile"
+      - "docker/**"
+  push:
+    paths:
+      - ".github/workflows/**/*.yml"
+      - ".github/workflows/**/*.yaml"
+      - "**/*.yml"
+      - "**/*.yaml"
+      - "Dockerfile"
+      - "docker/**"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meta-linters-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: Actionlint (workflows)
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false # avoid deleting untracked files under act --bind
+      - name: Run actionlint
+        uses: docker://rhysd/actionlint:latest
+        with:
+          args: -color
+  yamlfmt:
+    name: "Yamlfmt (repo YAML)"
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false # avoid deleting untracked files under act --bind
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      - name: Yamlfmt via Makefile
+        run: make yamlfmt
+  hadolint:
+    name: Hadolint (Dockerfiles)
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false # avoid deleting untracked files under act --bind
+      - name: Run hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: docker/app.Dockerfile
+          format: github

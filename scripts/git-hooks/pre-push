@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+# Git pre-push hook (template) for running local CI with act
+# - Skips gracefully if `act` is not installed
+# - Supports skipping security scans locally via SKIP_LOCAL_SEC_SCANS=1
+# - Includes yamlfmt support for YAML formatting validation
+# - Uses log prefixing for better output readability
+
+set -Eeuo pipefail
+
+# Source the shared config file
+# shellcheck source=../common.sh
+source "$(git rev-parse --show-toplevel)/scripts/common.sh"
+
+# Provide both lowercase and uppercase names for compatibility with helper scripts
+script_name="pre-push"
+SCRIPT_NAME="pre-push"
+
+LOG_FILE=$(init_script_logging "$script_name")
+enable_error_trap "$LOG_FILE" "$script_name"
+enable_debug_trace "$LOG_FILE"
+
+# Duplicate all subsequent stdout/stderr to both console and log file without using tee
+exec > >(while IFS= read -r line; do echo "$line"; echo "$line" >&3; done) 2>&1
+
+log INFO "Starting pre-push checks"
+
+# - The local CI (Act cli) runs GitHub Actions inside Docker, often as root or another UID.
+# - uv's default global cache can become root-owned or rely on hardlinks that fail on overlay/volume FS.
+# - Use a repo-local cache and copy mode to avoid permission issues and cross-repo contamination.
+export UV_LINK_MODE=copy
+export UV_CACHE_DIR="$(git rev-parse --show-toplevel)/.uv-cache-hooks"
+mkdir -p "$UV_CACHE_DIR"
+
+# Default to skipping heavy security scans locally for faster pushes.
+SKIP_LOCAL_SEC_SCANS=${SKIP_LOCAL_SEC_SCANS:-1}
+SKIP_LINT=${SKIP_LINT:-1}
+SKIP_PYRIGHT=${SKIP_PYRIGHT:-1}
+SKIP_TESTS=${SKIP_TESTS:-0}
+
+# Detect if 'act' and Docker are available; toggle local security scans accordingly
+if command -v act >/dev/null 2>&1; then
+  # Verify Docker is available since act requires it
+  if ! (command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1); then
+    log WARN "'act' found but Docker is unavailable. Disabling act-based steps (e.g., CodeQL)."
+    SKIP_LOCAL_SEC_SCANS=1
+  fi
+else
+  log WARN "'act' not found. Disabling act-based steps (e.g., CodeQL). Install: https://github.com/nektos/act"
+  SKIP_LOCAL_SEC_SCANS=1
+fi
+
+## Ruff via Makefile (format + autofix)
+if [[ "$SKIP_LINT" != "1" ]]; then
+    log INFO "Running ruff format (make ruff-format) …"
+    make ruff-format 2>&1 | sed 's/^/[ruff] /'
+    log INFO "Running ruff autofix (make ruff-fix) …"
+    make ruff-fix 2>&1 | sed 's/^/[ruff] /'
+else
+  log INFO "Skipping ruff due to SKIP_LINT=1"
+fi
+
+## Yamlfmt via Makefile target (uses uv + pre-commit under the hood)
+if [[ "$SKIP_LINT" != "1" ]]; then
+    log INFO "Running yamlfmt (make yamlfmt) …"
+    make yamlfmt 2>&1 | sed 's/^/[yamlfmt] /' || true
+else
+  log INFO "Skipping yamlfmt due to SKIP_LINT=1"
+fi
+
+## Pyright via Makefile target (uv run pyright)
+if [[ "$SKIP_PYRIGHT" != "1" ]]; then
+    log INFO "Running pyright (make pyright) …"
+    make pyright 2>&1 | sed 's/^/[pyright] /'
+else
+  log INFO "Skipping pyright due to SKIP_PYRIGHT=1"
+fi
+
+## Unit tests: prefer running GA job via act; fallback to local make
+if [[ "$SKIP_TESTS" != "1" ]]; then
+  if command -v act >/dev/null 2>&1 \
+     && command -v docker >/dev/null 2>&1 \
+     && docker info >/dev/null 2>&1; then
+    log INFO "Running unit tests via act (workflow: python-lint-test.yml, job: unit_tests) …"
+    # Run only the unit_tests job; do not fallback on test failures (block push instead).
+    # Fallback to local run only when act/docker are unavailable (handled by the outer condition).
+    act -W .github/workflows/python-lint-test.yml -j unit_tests \
+      --pull=false --log-prefix-job-id 2>&1
+  else
+    log WARN "'act' or Docker unavailable. Falling back to local tests (make unit)."
+    make unit 2>&1 | sed 's/^/[unit] /'
+  fi
+else
+  log INFO "Skipping unit tests due to SKIP_TESTS=1"
+fi
+
+## Semgrep via Makefile (uvx semgrep ci)
+if [[ "$SKIP_LOCAL_SEC_SCANS" != "1" ]]; then
+    log INFO "Running Semgrep (make semgrep) …"
+    make semgrep 2>&1 | sed 's/^/[semgrep] /' || true
+else
+  log INFO "Skipping Semgrep due to SKIP_LOCAL_SEC_SCANS=1"
+fi
+
+# Optional: run CodeQL locally (informational)
+if [[ "$SKIP_LOCAL_SEC_SCANS" != "1" ]]; then
+  log INFO "Running CodeQL via act …"
+  act workflow_dispatch -W .github/workflows/codeql.yml --pull=false --rm --log-prefix-job-id 2>&1 || true
+else
+  log INFO "Skipping CodeQL due to SKIP_LOCAL_SEC_SCANS=1"
+fi
+
+log INFO "Pre-push checks complete"
+exit 0

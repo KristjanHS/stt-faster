@@ -1,0 +1,27 @@
+name: Local Semgrep
+
+on:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  local_semgrep:
+    name: Local Semgrep Scan (isolated env)
+    # Run ONLY under local Act; never on GitHub
+    if: ${{ github.actor == 'nektos/act' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          clean: false # avoid deleting untracked files under act --bind
+          fetch-depth: 0
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+
+      - name: Run Semgrep via Makefile
+        run: make semgrep-local

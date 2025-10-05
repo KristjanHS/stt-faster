@@ -1,0 +1,153 @@
+name: CI
+# IMPORTANT: Integration and E2E tests require the full Docker stack and are excluded
+# from GitHub CI runs entirely. They only run locally via act (nektos/act) on manual
+# workflow_dispatch or scheduled runs. This prevents CI failures due to GitHub runner
+# limitations with Docker services.
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  workflow_dispatch: {} # Allows manual triggering for slow tests
+  schedule:
+    - cron: "0 2 * * 0" # Weekly on Sunday at 2 AM for slow tests
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # ⬅️ do not store token in git config
+      - name: Ruff static analysis
+        uses: astral-sh/ruff-action@v1
+        with:
+          version: "0.12.9"
+          args: check --fix .
+      - name: Ruff formatting check
+        uses: astral-sh/ruff-action@v1
+        with:
+          version: "0.12.9"
+          args: format --check .
+
+  unit_tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # ⬅️ do not store token in git config
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      #- name: Seed pip in .venv
+      #  run: uv venv --seed
+      - name: Sync test env + check
+        run: |
+          uv sync --group test --frozen
+          uv pip check
+      - name: Run unit tests (Makefile)
+        run: make unit
+      # Keep the cache small in CI (safe to no-op locally).
+      #- name: Prune uv cache for CI
+      #  run: uv cache prune --ci
+      - name: Upload unit test reports
+        # Skip under act (local GitHub Actions emulator) because ACTIONS_RUNTIME_TOKEN is not available.
+        # On real GitHub runners, this will upload the reports/ directory as a build artifact.
+        if: ${{ github.actor != 'nektos/act' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-unit
+          path: reports/
+
+  pyright:
+    name: Pyright
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # ⬅️ do not store token in git config
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      #- name: Seed pip in .venv
+      #  run: uv venv --seed
+      - name: Sync test env
+        run: |
+          uv sync --group test --frozen
+      - name: Pyright (Makefile)
+        run: make pyright
+
+
+  integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: unit_tests
+    if: ${{ github.actor == 'nektos/act' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # ⬅️ do not store token in git config
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      - name: Build and start services
+        run: docker compose -f docker/docker-compose.yml up -d --build
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for Ollama..."
+          timeout 180s bash -c 'until docker compose -f docker/docker-compose.yml exec -T ollama ollama list; do sleep 5; done'
+      - name: Prepare reports directories
+        run: mkdir -p reports
+      - name: Run integration tests
+        run: >-
+          uv run -m pytest tests/integration -q --junitxml=reports/junit_integration.xml
+      - name: Tear down services
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v
+      - name: Upload integration test reports
+        if: ${{ always() && github.actor != 'nektos/act' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-integration
+          path: reports/
+
+  e2e:
+    name: E2E Tests
+    runs-on: ubuntu-latest
+    needs: unit_tests
+    if: ${{ github.actor == 'nektos/act' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false # ⬅️ do not store token in git config
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      - name: Build and start services
+        run: docker compose -f docker/docker-compose.yml up -d --build
+      - name: Wait for services to be ready
+        run: |
+          echo "Waiting for Ollama..."
+          timeout 180s bash -c 'until docker compose -f docker/docker-compose.yml exec -T ollama ollama list; do sleep 5; done'
+      - name: Prepare reports directories
+        run: mkdir -p reports
+      - name: Run E2E tests
+        run: >-
+          uv run -m pytest tests/e2e -q --junitxml=reports/junit_e2e.xml
+      - name: Tear down services
+        if: always()
+        run: docker compose -f docker/docker-compose.yml down -v
+      - name: Upload E2E test reports
+        if: ${{ always() && github.actor != 'nektos/act' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports-e2e
+          path: reports/

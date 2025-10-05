@@ -1,0 +1,20 @@
+name: Test Pyright Local
+
+on:
+  workflow_dispatch:
+
+jobs:
+  pyright:
+    name: Pyright
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          clean: false # avoid deleting untracked files under act --bind
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      - name: Sync test env (Makefile)
+        run: make uv-sync-test
+      - name: Pyright (Makefile)
+        run: make pyright
