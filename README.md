@@ -14,13 +14,13 @@
 
 ## Quick Start
 
-# Create .venv and install dev/test toolchain (editable install): `./run_uv.sh`
-# Run pre-commit via uv (uses the venv): `uv run pre-commit run --all-files`
-# Quick integration test run: `make integration-local`
-# Start Docker services (if needed): `docker compose -f docker/docker-compose.yml up -d --build`
+- Create .venv and install dev/test toolchain (editable install): `./run_uv.sh`
+- Run pre-commit via uv (uses the venv): `uv run pre-commit run --all-files`
+- Quick integration test run: `make integration-local`
+- Start Docker services (if needed): `docker compose -f docker/docker-compose.yml up -d --build`
 
-# Fallback to pip/venv: 
-- Generate requirements.txt based on uv.lock: `make export-reqs`
+- Fallback to pip/venv: 
+Generate requirements.txt based on uv.lock: `make export-reqs`
 
 ## Local CI with Act
 - Act is supported for local CI parity. See `docs/AI_instructions.md` for setup and usage.

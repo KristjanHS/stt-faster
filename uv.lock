@@ -609,72 +609,6 @@ wheels = [
 ]
 
 [[package]]
-name = "llm-eng-template"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "ctranslate2" },
-    { name = "faster-whisper" },
-    { name = "hf-transfer" },
-    { name = "huggingface-hub" },
-    { name = "langchain" },
-    { name = "langchain-community" },
-    { name = "python-dotenv" },
-    { name = "rich" },
-    { name = "sentence-transformers" },
-    { name = "torch", version = "2.8.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
-    { name = "torch", version = "2.8.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "bandit" },
-    { name = "pre-commit" },
-    { name = "pyright", extra = ["nodejs"] },
-    { name = "ruff" },
-]
-test = [
-    { name = "pytest" },
-    { name = "pytest-cov" },
-    { name = "pytest-docker" },
-    { name = "pytest-html" },
-    { name = "pytest-mock" },
-    { name = "pytest-socket" },
-    { name = "pytest-xdist" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "ctranslate2", specifier = "==4.4.0" },
-    { name = "faster-whisper", specifier = ">=1.0.0,<2.0.0" },
-    { name = "hf-transfer", specifier = ">=0.1.0,<1.0.0" },
-    { name = "huggingface-hub", specifier = ">=0.26.0,<1.0.0" },
-    { name = "langchain", specifier = ">=0.3.27,<0.4.0" },
-    { name = "langchain-community", specifier = ">=0.3.27,<0.4.0" },
-    { name = "python-dotenv", specifier = ">=1.1.1,<2.0.0" },
-    { name = "rich", specifier = ">=14.1.0,<15.0.0" },
-    { name = "sentence-transformers", specifier = ">=5.1.0,<6.0.0" },
-    { name = "torch", specifier = ">=2.8.0,<3.0.0", index = "https://download.pytorch.org/whl/cpu" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "bandit", extras = ["toml"], specifier = ">=1.8.6,<2.0.0" },
-    { name = "pre-commit", specifier = ">=4.3.0,<5.0.0" },
-    { name = "pyright", extras = ["nodejs"], specifier = ">=1.1.405,<2.0.0" },
-    { name = "ruff", specifier = ">=0.12.12,<0.13.0" },
-]
-test = [
-    { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
-    { name = "pytest-cov", specifier = ">=6.3.0,<7.0.0" },
-    { name = "pytest-docker", specifier = ">=3.2.3,<4.0.0" },
-    { name = "pytest-html", specifier = ">=4.1.1,<5.0.0" },
-    { name = "pytest-mock", specifier = ">=3.15.0,<4.0.0" },
-    { name = "pytest-socket", specifier = ">=0.7.0,<0.8.0" },
-    { name = "pytest-xdist", specifier = ">=3.8.0,<4.0.0" },
-]
-
-[[package]]
 name = "markdown-it-py"
 version = "4.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1405,6 +1339,72 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/2a/5f/8418daad5c353300b7661dd8ce2574b0410a6316a8be650a189d5c68d938/stevedore-5.5.0.tar.gz", hash = "sha256:d31496a4f4df9825e1a1e4f1f74d19abb0154aff311c3b376fcc89dae8fccd73", size = 513878, upload-time = "2025-08-25T12:54:26.806Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/80/c5/0c06759b95747882bb50abda18f5fb48c3e9b0fbfc6ebc0e23550b52415d/stevedore-5.5.0-py3-none-any.whl", hash = "sha256:18363d4d268181e8e8452e71a38cd77630f345b2ef6b4a8d5614dac5ee0d18cf", size = 49518, upload-time = "2025-08-25T12:54:25.445Z" },
+]
+
+[[package]]
+name = "stt-faster"
+version = "0.1.0"
+source = { editable = "." }
+dependencies = [
+    { name = "ctranslate2" },
+    { name = "faster-whisper" },
+    { name = "hf-transfer" },
+    { name = "huggingface-hub" },
+    { name = "langchain" },
+    { name = "langchain-community" },
+    { name = "python-dotenv" },
+    { name = "rich" },
+    { name = "sentence-transformers" },
+    { name = "torch", version = "2.8.0", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
+    { name = "torch", version = "2.8.0+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "bandit" },
+    { name = "pre-commit" },
+    { name = "pyright", extra = ["nodejs"] },
+    { name = "ruff" },
+]
+test = [
+    { name = "pytest" },
+    { name = "pytest-cov" },
+    { name = "pytest-docker" },
+    { name = "pytest-html" },
+    { name = "pytest-mock" },
+    { name = "pytest-socket" },
+    { name = "pytest-xdist" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "ctranslate2", specifier = "==4.4.0" },
+    { name = "faster-whisper", specifier = ">=1.0.0,<2.0.0" },
+    { name = "hf-transfer", specifier = ">=0.1.0,<1.0.0" },
+    { name = "huggingface-hub", specifier = ">=0.26.0,<1.0.0" },
+    { name = "langchain", specifier = ">=0.3.27,<0.4.0" },
+    { name = "langchain-community", specifier = ">=0.3.27,<0.4.0" },
+    { name = "python-dotenv", specifier = ">=1.1.1,<2.0.0" },
+    { name = "rich", specifier = ">=14.1.0,<15.0.0" },
+    { name = "sentence-transformers", specifier = ">=5.1.0,<6.0.0" },
+    { name = "torch", specifier = ">=2.8.0,<3.0.0", index = "https://download.pytorch.org/whl/cpu" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "bandit", extras = ["toml"], specifier = ">=1.8.6,<2.0.0" },
+    { name = "pre-commit", specifier = ">=4.3.0,<5.0.0" },
+    { name = "pyright", extras = ["nodejs"], specifier = ">=1.1.405,<2.0.0" },
+    { name = "ruff", specifier = ">=0.12.12,<0.13.0" },
+]
+test = [
+    { name = "pytest", specifier = ">=8.4.2,<9.0.0" },
+    { name = "pytest-cov", specifier = ">=6.3.0,<7.0.0" },
+    { name = "pytest-docker", specifier = ">=3.2.3,<4.0.0" },
+    { name = "pytest-html", specifier = ">=4.1.1,<5.0.0" },
+    { name = "pytest-mock", specifier = ">=3.15.0,<4.0.0" },
+    { name = "pytest-socket", specifier = ">=0.7.0,<0.8.0" },
+    { name = "pytest-xdist", specifier = ">=3.8.0,<4.0.0" },
 ]
 
 [[package]]
