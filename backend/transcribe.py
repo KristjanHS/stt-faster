@@ -1,5 +1,5 @@
 """
-MINIMALISTIC solution to convert wav to text:
+MINIMALISTIC solution to convert wav to a structured JSON transcript:
 
 SYSTRAN/faster-whisper — a faster Whisper reimplementation (≈18.4k ⭐ as of Oct 5, 2025).
 Why it’s popular: up to ~4× faster and lower memory via CTranslate2; easy Python API; great on CPU or modest GPUs.
@@ -23,14 +23,19 @@ export HF_HUB_ENABLE_HF_TRANSFER=1
 python transcribe.py
 """
 
+import json
+import logging
 import os
 from collections.abc import Iterable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Dict, List
 
 from faster_whisper import WhisperModel
 
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
+
+
+LOGGER = logging.getLogger(__name__)
 
 
 def pick_model(preset: str = "turbo") -> WhisperModel:
@@ -47,41 +52,78 @@ def pick_model(preset: str = "turbo") -> WhisperModel:
     return WhisperModel("small", device="cpu", compute_type="int8")
 
 
-def transcribe(path: str, preset: str = "distil") -> str:
-    model = pick_model(preset)
-    segments: Iterable["Segment"]
-    _info: "TranscriptionInfo"
-    segments, _info = model.transcribe(path, beam_size=5)
-    return " ".join(s.text.strip() for s in segments)
+def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
+    data: Dict[str, Any] = {
+        "id": getattr(segment, "id", None),
+        "start": getattr(segment, "start", None),
+        "end": getattr(segment, "end", None),
+        "text": segment.text.strip(),
+    }
+
+    optional_attrs = (
+        "avg_logprob",
+        "compression_ratio",
+        "no_speech_prob",
+    )
+    for attr in optional_attrs:
+        value = getattr(segment, attr, None)
+        if value is not None:
+            data[attr] = value
+
+    speaker = getattr(segment, "speaker", None)
+    if speaker is not None:
+        data["speaker"] = speaker
+
+    words_payload: List[Dict[str, Any]] = []
+    words = getattr(segment, "words", None)
+    if words:
+        for word in words:
+            word_payload: Dict[str, Any] = {
+                "start": getattr(word, "start", None),
+                "end": getattr(word, "end", None),
+                "text": getattr(word, "word", "").strip(),
+            }
+            probability = getattr(word, "probability", None)
+            if probability is not None:
+                word_payload["probability"] = probability
+            # Drop keys with None values to keep payload compact.
+            words_payload.append({key: value for key, value in word_payload.items() if value is not None})
+    if words_payload:
+        data["words"] = words_payload
+
+    return {key: value for key, value in data.items() if value is not None}
 
 
-def transcribe_to_md(audio_path: str, md_path: str, preset: str = "distil") -> None:
+def transcribe(path: str, preset: str = "distil") -> Dict[str, Any]:
     model = pick_model(preset)
     segments: Iterable["Segment"]
     info: "TranscriptionInfo"
-    segments, info = model.transcribe(audio_path, beam_size=5)
+    segments, info = model.transcribe(path, beam_size=5, word_timestamps=True)
 
-    lines: list[str] = []
-    lines.append(f"# Transcript of `{os.path.basename(audio_path)}`\n")
-    lines.append(f"**Detected language**: {info.language}  \n")
-    lines.append(f"**Language probability**: {info.language_probability:.4f}\n")
-    lines.append("---\n")
+    segment_payloads = [_segment_to_payload(segment) for segment in segments]
+    payload: Dict[str, Any] = {
+        "audio": os.path.basename(path),
+        "language": getattr(info, "language", None),
+        "language_probability": getattr(info, "language_probability", None),
+        "segments": segment_payloads,
+    }
 
-    for seg in segments:
-        start = getattr(seg, "start", None)
-        end = getattr(seg, "end", None)
-        if start is not None and end is not None:
-            lines.append(f"**{start:.1f}s -> {end:.1f}s**  \n")
-        lines.append(seg.text.strip() + "\n\n")
+    duration = getattr(info, "duration", None)
+    if duration is not None:
+        payload["duration"] = duration
 
-    md_text = "\n".join(lines)
+    return {key: value for key, value in payload.items() if value is not None}
 
-    with open(md_path, "w", encoding="utf-8") as md_file:
-        md_file.write(md_text)
+
+def transcribe_to_json(audio_path: str, json_path: str, preset: str = "distil") -> None:
+    payload = transcribe(audio_path, preset)
+    with open(json_path, "w", encoding="utf-8") as json_file:
+        json.dump(payload, json_file, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
-    input_audio = "RelMan.wav"
-    output_md = os.path.splitext(input_audio)[0] + ".md"
-    transcribe_to_md(input_audio, output_md, preset="distil")
-    print(f"Wrote markdown transcript to {output_md}")
+    logging.basicConfig(level=logging.INFO)
+    input_audio = os.path.join("..", "UserData", "RelMan.wav")
+    output_json = os.path.splitext(input_audio)[0] + ".json"
+    transcribe_to_json(input_audio, output_json, preset="distil")
+    LOGGER.info("Wrote JSON transcript to %s", output_json)
