@@ -84,16 +84,6 @@ def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
         "text": segment.text.strip(),
     }
 
-    optional_attrs = (
-        "avg_logprob",
-        "compression_ratio",
-        "no_speech_prob",
-    )
-    for attr in optional_attrs:
-        value = getattr(segment, attr, None)
-        if value is not None:
-            data[attr] = value
-
     speaker = getattr(segment, "speaker", None)
     if speaker is not None:
         data["speaker"] = speaker
