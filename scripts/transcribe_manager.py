@@ -149,9 +149,9 @@ def main() -> int:
     )
     process_parser.add_argument(
         "--preset",
-        default="distil",
-        choices=["turbo", "distil", "large8gb"],
-        help="Model preset to use (default: distil)",
+        default="et-large",
+        choices=["turbo", "distil", "large8gb", "et-large"],
+        help="Model preset to use (default: et-large)",
     )
 
     # Status command

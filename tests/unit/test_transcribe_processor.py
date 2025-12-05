@@ -43,7 +43,7 @@ def test_processor_initialization(temp_db: TranscriptionDatabase, temp_folder: P
 
     assert processor.db == temp_db
     assert processor.input_folder == temp_folder
-    assert processor.preset == "distil"
+    assert processor.preset == "et-large"
     assert processor.processed_folder.exists()
     assert processor.failed_folder.exists()
 

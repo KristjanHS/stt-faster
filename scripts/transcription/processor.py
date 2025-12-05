@@ -19,14 +19,14 @@ class TranscriptionProcessor:
         self,
         db: TranscriptionDatabase,
         input_folder: str | Path,
-        preset: str = "distil",
+        preset: str = "et-large",
     ) -> None:
         """Initialize the processor.
 
         Args:
             db: Database instance for tracking state
             input_folder: Folder containing audio files to process
-            preset: Model preset for transcription (default: 'distil')
+            preset: Model preset for transcription (default: 'et-large')
         """
         self.db = db
         self.input_folder = Path(input_folder)
