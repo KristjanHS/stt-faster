@@ -6,7 +6,7 @@ from typing import Iterator
 
 import pytest
 
-from scripts.transcription.database import TranscriptionDatabase
+from backend.database import TranscriptionDatabase
 
 
 @pytest.fixture(scope="session", autouse=True)

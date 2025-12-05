@@ -14,8 +14,8 @@ import logging
 import sys
 from pathlib import Path
 
-from transcription.database import TranscriptionDatabase
-from transcription.processor import TranscriptionProcessor
+from backend.database import TranscriptionDatabase
+from backend.processor import TranscriptionProcessor
 
 # Setup logging
 logging.basicConfig(
@@ -132,8 +132,8 @@ def main() -> int:
 
     parser.add_argument(
         "--db-path",
-        default="transcribe_state.db",
-        help="Path to SQLite database (default: transcribe_state.db)",
+        default=None,
+        help="Path to SQLite database (default: XDG data home, typically ~/.local/share/stt-faster/)",
     )
 
     subparsers = parser.add_subparsers(dest="command", help="Available commands")

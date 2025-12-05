@@ -1,27 +1,38 @@
 # Testing Approach
 
-A high-level guide to testing with real local models and external services.
+A high-level guide to testing with clear separation between unit, integration, and E2E tests.
 
 ## Quick Start
 
 ```bash
-# Run unit tests (fast, isolated)
+# Run unit tests (fast, isolated, no network)
 .venv/bin/python -m pytest tests/unit/ -v
 
-# Run integration tests (with real models)
+# Run integration tests (mocked external dependencies)
 .venv/bin/python -m pytest tests/integration/ -v
 
-# Run GPU tests (requires GPU hardware)
-.venv/bin/python -m pytest -m gpu -v
+# Run E2E tests (real models, real transcription)
+.venv/bin/python -m pytest tests/e2e/ -v
+
+# Skip slow tests (useful during development)
+.venv/bin/python -m pytest -m "not slow" -v
 
 # Skip GPU tests
 .venv/bin/python -m pytest -m "not gpu" -v
 ```
 
+## Test Hierarchy
+
+| Test Level | Speed | Mocking Strategy | When to Use |
+|-----------|-------|------------------|-------------|
+| **Unit** (`tests/unit/`) | Fast (<5s) | Mock everything external | Test single components in isolation |
+| **Integration** (`tests/integration/`) | Medium (~30s) | Mock only external APIs/models | Test component interactions |
+| **E2E** (`tests/e2e/`) | Slow (minutes) | No mocks, real everything | Validate end-to-end workflows |
+
 ## Core Principles
 
 1. **Test Isolation**: Each test runs independently without state leakage
-2. **Real Model Testing**: Use real local models for ML validation, mock external services
+2. **Clear Boundaries**: Unit tests mock external calls; integration tests mock external systems; E2E tests use real everything
 3. **Readability**: Clear setup → action → assertion phases in tests
 4. **pytest-Native**: Prefer pytest features over unittest patterns
 5. **DRY Fixtures**: Shared test setup in `conftest.py` files, not duplicated in tests
@@ -99,15 +110,42 @@ Tests declare service dependencies using pytest markers and use the `integration
 
 ## Testing Strategy Guidelines
 
-### When to Use Real Models vs Mocks
+### What to Mock at Each Level
 
-| Component Type | Recommended Approach | Reasoning |
-|---|---|---|
-| **ML Models** (Whisper) | **Real Local Models** | Need to validate actual model behavior, performance, and component interactions |
-| **Database Operations** | **Mock** | Test data isolation, avoid external dependencies |
-| **File I/O Operations** | **Mock** | Filesystem operations can be slow and unreliable |
-| **Network APIs** | **Mock** | External API calls introduce latency and unreliability |
-| **Configuration Systems** | **Real** | Need to test actual config loading and environment variables |
+| Component | Unit Tests | Integration Tests | E2E Tests |
+|-----------|-----------|-------------------|-----------|
+| **Model Loading** (`pick_model`) | ✅ Mock | ✅ Mock | ❌ Real |
+| **Transcription Logic** | ✅ Mock | ❌ Real (with mocked model) | ❌ Real |
+| **Database Operations** | ❌ Real (temp DB) | ❌ Real (temp DB) | ❌ Real (temp DB) |
+| **File Operations** | ❌ Real (temp files) | ❌ Real (temp files) | ❌ Real (temp files) |
+| **HuggingFace API** | ✅ Mock | ✅ Mock | ❌ Real |
+| **Network Calls** | ✅ Blocked (pytest-socket) | ✅ Mock | ❌ Real |
+
+### Example Mocking Patterns
+
+**Unit Tests** - Mock external function calls:
+```python
+@patch("backend.transcribe.pick_model")
+def test_process_file(mock_model):
+    mock_model.return_value = MagicMock(...)
+```
+
+**Integration Tests** - Mock model loading, test logic flow:
+```python
+@patch("backend.transcribe.pick_model")
+def test_cli_to_database_flow(mock_model):
+    # Tests real CLI → Processor → Database integration
+    # Only mocks the model loading
+```
+
+**E2E Tests** - No mocks, real models:
+```python
+@pytest.mark.slow
+def test_real_transcription():
+    # Real CLI subprocess call
+    # Real model download/loading
+    # Real transcription
+```
 
 ## Test Markers
 

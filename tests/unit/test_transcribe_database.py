@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from scripts.transcription.database import TranscriptionDatabase
+from backend.database import TranscriptionDatabase
 
 
 def test_database_initialization(temp_db: TranscriptionDatabase) -> None:

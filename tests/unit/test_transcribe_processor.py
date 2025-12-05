@@ -3,8 +3,8 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from scripts.transcription.database import TranscriptionDatabase
-from scripts.transcription.processor import TranscriptionProcessor
+from backend.database import TranscriptionDatabase
+from backend.processor import TranscriptionProcessor
 
 
 def test_processor_initialization(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
@@ -96,7 +96,7 @@ def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, 
     assert str(audio_file) in files
 
 
-@patch("scripts.transcription.processor.transcribe_to_json")
+@patch("backend.processor.transcribe_to_json")
 def test_process_file_success(
     mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
@@ -126,7 +126,7 @@ def test_process_file_success(
     assert (processor.processed_folder / "audio1.wav").exists()
 
 
-@patch("scripts.transcription.processor.transcribe_to_json")
+@patch("backend.processor.transcribe_to_json")
 def test_process_file_failure(
     mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
@@ -178,7 +178,7 @@ def test_process_file_not_found(temp_db: TranscriptionDatabase, temp_folder: Pat
     assert "not found" in status["error_message"].lower()
 
 
-@patch("scripts.transcription.processor.transcribe_to_json")
+@patch("backend.processor.transcribe_to_json")
 def test_process_all_files(
     mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
@@ -198,7 +198,7 @@ def test_process_all_files(
     assert results["failed"] == 0
 
 
-@patch("scripts.transcription.processor.transcribe_to_json")
+@patch("backend.processor.transcribe_to_json")
 def test_process_folder(
     mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
@@ -219,8 +219,8 @@ def test_process_folder(
     assert results["failed"] == 0
 
 
-@patch("scripts.transcription.processor.transcribe_to_json")
-@patch("scripts.transcription.processor.shutil.move")
+@patch("backend.processor.transcribe_to_json")
+@patch("backend.processor.shutil.move")
 def test_process_file_move_failure_keeps_pending_status(
     mock_move: MagicMock,
     mock_transcribe: MagicMock,
