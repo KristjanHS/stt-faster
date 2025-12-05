@@ -44,7 +44,7 @@ def _get_estonian_model_path(model_id: str) -> str:
     """Download Estonian model and return path to CT2 subfolder.
 
     Estonian models from TalTechNLP store CT2 files in a 'ct2' subdirectory.
-    This helper downloads the model and returns the correct path.
+    This helper downloads only the CT2 files, skipping unnecessary formats.
 
     Args:
         model_id: HuggingFace model ID (e.g., 'TalTechNLP/whisper-large-v3-turbo-et-verbatim')
@@ -55,7 +55,8 @@ def _get_estonian_model_path(model_id: str) -> str:
     Raises:
         FileNotFoundError: If CT2 folder doesn't exist in model
     """
-    model_path = snapshot_download(model_id)  # nosec B615
+    # Only download ct2 folder, skip transformers/native formats
+    model_path = snapshot_download(model_id, allow_patterns=["ct2/*"])  # nosec B615
     ct2_path = Path(model_path) / "ct2"
     if not ct2_path.exists():
         raise FileNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
