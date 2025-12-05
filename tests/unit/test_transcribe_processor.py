@@ -1,40 +1,10 @@
 """Unit tests for transcription processor."""
 
-import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from scripts.transcription.database import TranscriptionDatabase
 from scripts.transcription.processor import TranscriptionProcessor
-
-
-@pytest.fixture
-def temp_db() -> TranscriptionDatabase:
-    """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
-
-    db = TranscriptionDatabase(db_path)
-    yield db
-    db.close()
-
-    # Cleanup
-    Path(db_path).unlink(missing_ok=True)
-
-
-@pytest.fixture
-def temp_folder() -> Path:
-    """Create a temporary folder for testing."""
-    temp_dir = Path(tempfile.mkdtemp())
-    yield temp_dir
-
-    # Cleanup
-    import shutil
-
-    if temp_dir.exists():
-        shutil.rmtree(temp_dir)
 
 
 def test_processor_initialization(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:

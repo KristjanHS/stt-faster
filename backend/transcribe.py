@@ -33,6 +33,8 @@ from typing import TYPE_CHECKING, Any, Dict, cast
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
 
+from backend.exceptions import ModelLoadError, ModelNotFoundError
+
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
 
@@ -53,13 +55,13 @@ def _get_estonian_model_path(model_id: str) -> str:
         Path to the CT2 model directory
 
     Raises:
-        FileNotFoundError: If CT2 folder doesn't exist in model
+        ModelNotFoundError: If CT2 folder doesn't exist in model
     """
     # Only download ct2 folder, skip transformers/native formats
     model_path = snapshot_download(model_id, allow_patterns=["ct2/*"])  # nosec B615
     ct2_path = Path(model_path) / "ct2"
     if not ct2_path.exists():
-        raise FileNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
+        raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
     return str(ct2_path)
 
 
@@ -75,7 +77,12 @@ def pick_model(preset: str = "et-large") -> WhisperModel:
                 error,
                 exc_info=True,
             )
-            return WhisperModel(model_name, device="cpu", compute_type="int8")
+            try:
+                return WhisperModel(model_name, device="cpu", compute_type="int8")
+            except Exception as cpu_error:
+                raise ModelLoadError(
+                    f"Failed to load model {model_name} on both GPU and CPU: {cpu_error}"
+                ) from cpu_error
 
     # Estonian models (default)
     if preset == "et-large":

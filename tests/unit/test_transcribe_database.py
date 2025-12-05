@@ -1,25 +1,8 @@
 """Unit tests for transcription database operations."""
 
-import tempfile
 from pathlib import Path
 
-import pytest
-
 from scripts.transcription.database import TranscriptionDatabase
-
-
-@pytest.fixture
-def temp_db() -> TranscriptionDatabase:
-    """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
-        db_path = tmp.name
-
-    db = TranscriptionDatabase(db_path)
-    yield db
-    db.close()
-
-    # Cleanup
-    Path(db_path).unlink(missing_ok=True)
 
 
 def test_database_initialization(temp_db: TranscriptionDatabase) -> None:
