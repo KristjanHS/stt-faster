@@ -56,7 +56,7 @@ def cmd_process(args: argparse.Namespace) -> int:
 
             LOGGER.info("=" * 60)
             LOGGER.info("Processing Summary:")
-            LOGGER.info("  New files discovered: %d", results.get("new_files", 0))
+            LOGGER.info("  Files found: %d", results.get("files_found", 0))
             LOGGER.info("  Successfully processed: %d", results.get("succeeded", 0))
             LOGGER.info("  Failed: %d", results.get("failed", 0))
             LOGGER.info("=" * 60)

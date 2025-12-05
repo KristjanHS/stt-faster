@@ -58,23 +58,20 @@ class TranscriptionProcessor:
         LOGGER.info("Found %d audio files in %s", len(file_paths), self.input_folder)
         return file_paths
 
-    def register_files(self) -> int:
-        """Scan folder and register any new files in the database.
+    def get_files_to_process(self) -> list[str]:
+        """Get list of files to process (all files in input folder).
+
+        File location is the source of truth:
+        - Files in input folder = need processing
+        - Files in processed/ = already done
+        - Files in failed/ = previously failed
 
         Returns:
-            Number of new files registered
+            List of file paths to process
         """
         audio_files = self.scan_folder()
-        new_files = 0
-
-        for file_path in audio_files:
-            existing = self.db.get_status(file_path)
-            if not existing:
-                self.db.add_file(file_path, "pending")
-                new_files += 1
-
-        LOGGER.info("Registered %d new files", new_files)
-        return new_files
+        LOGGER.info("Found %d files to process", len(audio_files))
+        return audio_files
 
     def process_file(self, file_path: str) -> bool:
         """Process a single audio file.
@@ -103,10 +100,10 @@ class TranscriptionProcessor:
             transcribe_to_json(str(file_path_obj), str(json_path), self.preset)
 
             # Move both audio and JSON to processed folder
-            # (must succeed before marking as completed in database)
             self._move_to_processed(file_path_obj, json_path)
 
-            # Update database status only after successful move
+            # Log success in database (for history/statistics)
+            # Note: File location is source of truth, not database status
             self.db.update_status(file_path, "completed")
 
             LOGGER.info("Successfully processed: %s", file_path)
@@ -156,25 +153,25 @@ class TranscriptionProcessor:
         except Exception as error:
             LOGGER.warning("Failed to move file to failed folder: %s", error)
 
-    def process_pending(self) -> dict[str, int]:
-        """Process all pending files.
+    def process_all_files(self, file_paths: list[str]) -> dict[str, int]:
+        """Process all files in the provided list.
+
+        Args:
+            file_paths: List of file paths to process
 
         Returns:
             Dictionary with counts of succeeded and failed files
         """
-        pending_files = self.db.get_files_by_status("pending")
-
-        if not pending_files:
-            LOGGER.info("No pending files to process")
+        if not file_paths:
+            LOGGER.info("No files to process")
             return {"succeeded": 0, "failed": 0}
 
-        LOGGER.info("Processing %d pending files", len(pending_files))
+        LOGGER.info("Processing %d files", len(file_paths))
 
         succeeded = 0
         failed = 0
 
-        for file_info in pending_files:
-            file_path = file_info["file_path"]
+        for file_path in file_paths:
             if self.process_file(file_path):
                 succeeded += 1
             else:
@@ -189,18 +186,21 @@ class TranscriptionProcessor:
         return {"succeeded": succeeded, "failed": failed}
 
     def process_folder(self) -> dict[str, Any]:
-        """Main entry point: scan folder, register files, and process them.
+        """Main entry point: scan folder and process all files found.
+
+        File location is the source of truth - if file is in the input folder,
+        it needs processing. No database checks for "completed" status.
 
         Returns:
             Dictionary with processing results
         """
         LOGGER.info("Starting folder processing")
 
-        # Register any new files
-        new_files = self.register_files()
+        # Get all files in the input folder
+        files_to_process = self.get_files_to_process()
 
-        # Process all pending files
-        results = self.process_pending()
-        results["new_files"] = new_files
+        # Process them all
+        results = self.process_all_files(files_to_process)
+        results["files_found"] = len(files_to_process)
 
         return results

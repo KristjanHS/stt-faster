@@ -96,38 +96,34 @@ def test_scan_folder_ignores_subdirectories(temp_db: TranscriptionDatabase, temp
     assert "audio1.wav" in files[0]
 
 
-def test_register_files(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
-    """Test registering new files in the database."""
+def test_get_files_to_process(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+    """Test getting list of files to process from folder."""
     # Create test audio files
     (temp_folder / "audio1.wav").touch()
     (temp_folder / "audio2.wav").touch()
 
     processor = TranscriptionProcessor(temp_db, temp_folder)
-    new_count = processor.register_files()
+    files = processor.get_files_to_process()
 
-    assert new_count == 2
-
-    # Verify files are in database
-    all_files = temp_db.get_all_files()
-    assert len(all_files) == 2
+    assert len(files) == 2
+    assert any("audio1.wav" in f for f in files)
+    assert any("audio2.wav" in f for f in files)
 
 
-def test_register_files_skips_existing(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
-    """Test that registering files skips already registered ones."""
+def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+    """Test that get_files_to_process returns all files regardless of database state."""
     audio_file = temp_folder / "audio1.wav"
     audio_file.touch()
 
-    # Pre-register one file
-    temp_db.add_file(str(audio_file), "pending")
+    # Mark file as completed in database
+    temp_db.add_file(str(audio_file), "completed")
 
     processor = TranscriptionProcessor(temp_db, temp_folder)
-    new_count = processor.register_files()
+    files = processor.get_files_to_process()
 
-    assert new_count == 0
-
-    # Verify only one file in database
-    all_files = temp_db.get_all_files()
-    assert len(all_files) == 1
+    # File should still be returned - file location is source of truth
+    assert len(files) == 1
+    assert str(audio_file) in files
 
 
 @patch("scripts.transcription.processor.transcribe_to_json")
@@ -213,24 +209,20 @@ def test_process_file_not_found(temp_db: TranscriptionDatabase, temp_folder: Pat
 
 
 @patch("scripts.transcription.processor.transcribe_to_json")
-def test_process_pending(
+def test_process_all_files(
     mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
-    """Test processing all pending files."""
+    """Test processing all files in provided list."""
     # Create test audio files
     audio1 = temp_folder / "audio1.wav"
     audio2 = temp_folder / "audio2.wav"
     audio1.touch()
     audio2.touch()
 
-    # Register files
-    temp_db.add_file(str(audio1), "pending")
-    temp_db.add_file(str(audio2), "pending")
-
     processor = TranscriptionProcessor(temp_db, temp_folder)
-    results = processor.process_pending()
+    results = processor.process_all_files([str(audio1), str(audio2)])
 
     assert results["succeeded"] == 2
     assert results["failed"] == 0
@@ -252,7 +244,7 @@ def test_process_folder(
     processor = TranscriptionProcessor(temp_db, temp_folder)
     results = processor.process_folder()
 
-    assert results["new_files"] == 2
+    assert results["files_found"] == 2
     assert results["succeeded"] == 2
     assert results["failed"] == 0
 

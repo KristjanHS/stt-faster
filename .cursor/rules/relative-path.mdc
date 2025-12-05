@@ -1,0 +1,11 @@
+---
+description: "When using any file or bash tools, always use workspace-relative paths"
+type: agent-select
+alwaysApply: true
+---
+
+- Assume the working directory is the project root.
+- When using any file or bash tools, always use workspace-relative paths,
+  e.g. `./src/foo.py` or `src/foo.py`.
+- Do **not** use absolute paths (no `/home/...`, `/mnt/...`, etc.) for files
+  inside this project.
