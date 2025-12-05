@@ -2,7 +2,7 @@
 # Meta
 .PHONY: help
 # Setup
-.PHONY: setup-hooks setup-uv export-reqs
+.PHONY: setup-hooks setup-uv export-reqs install-act setup-act
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
@@ -30,6 +30,8 @@ help:
 	@echo "  setup-hooks        - Configure Git hooks path"
 	@echo "  setup-uv           - Create venv and sync dev/test via uv"
 	@echo "  export-reqs        - Export requirements.txt from uv.lock"
+	@echo "  install-act        - Install Act CLI for local CI runs"
+	@echo "  setup-act          - Install and verify Act + Docker setup"
 	@echo ""
 	@echo "  -- Lint & Type Check --"
 	@echo "  ruff-format        - Auto-format code with Ruff"
@@ -64,6 +66,45 @@ setup-hooks:
 # uv-based setup
 setup-uv:
 	@./run_uv.sh
+
+# Install Act CLI for local CI runs
+install-act:
+	@echo ">> Installing Act CLI..."
+	@if command -v act >/dev/null 2>&1; then \
+		echo "✅ act is already installed (version: $$(act --version | head -1))"; \
+	elif command -v brew >/dev/null 2>&1; then \
+		echo "Installing act via Homebrew..."; \
+		brew install act; \
+		echo "✅ act installed successfully"; \
+	else \
+		echo "Installing act via official installer..."; \
+		curl -fsSL https://raw.githubusercontent.com/nektos/act/master/install.sh | sudo bash; \
+		echo "✅ act installed successfully"; \
+	fi
+	@act --version
+
+# Setup Act: install + verify Docker availability
+setup-act: install-act
+	@echo ""
+	@echo ">> Verifying Docker availability..."
+	@if ! command -v docker >/dev/null 2>&1; then \
+		echo "⚠️  Docker command not found. Install Docker Desktop for WSL2 integration."; \
+		echo "   See: https://docs.docker.com/desktop/wsl/"; \
+		exit 1; \
+	elif ! docker info >/dev/null 2>&1; then \
+		echo "⚠️  Docker is installed but not running. Start Docker Desktop to use act."; \
+		echo "   After starting Docker, verify with: docker info"; \
+		exit 1; \
+	else \
+		echo "✅ Docker is available and running"; \
+	fi
+	@echo ""
+	@echo "✅ Act setup complete!"
+	@echo ""
+	@echo "Try these commands:"
+	@echo "  act -l                                    # List all workflows"
+	@echo "  act -W .github/workflows/python-lint-test.yml -j unit_tests"
+	@echo "  make pre-push                              # Run with all checks enabled"
 
 # Run local integration tests; prefer uv if available
 integration:
