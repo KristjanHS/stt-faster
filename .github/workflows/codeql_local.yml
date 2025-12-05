@@ -26,17 +26,21 @@ jobs:
 
       - name: Download and cache CodeQL CLI
         run: |
-          if [[ ! -x "${HOME}/codeql-cli/codeql/codeql" ]]; then
-            CODEQL_VERSION="2.18.2"
+          # Version 2.20.3+ required for compatibility with python-queries pack (compiled with 2.23.7)
+          # When running via Act, this path is mounted from host ~/.cache/act-codeql for persistence
+          CODEQL_HOME="${HOME}/codeql-cli"
+          if [[ ! -x "${CODEQL_HOME}/codeql/codeql" ]]; then
+            CODEQL_VERSION="2.20.3"
             echo "Downloading CodeQL CLI v${CODEQL_VERSION}..."
             wget -q "https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip" -O /tmp/codeql.zip
-            mkdir -p "${HOME}/codeql-cli"
-            unzip -q /tmp/codeql.zip -d "${HOME}/codeql-cli"
+            mkdir -p "${CODEQL_HOME}"
+            unzip -q /tmp/codeql.zip -d "${CODEQL_HOME}"
             rm /tmp/codeql.zip
+            echo "✅ CodeQL CLI installed to ${CODEQL_HOME}"
           else
-            echo "Using cached CodeQL CLI."
+            echo "✅ Using cached CodeQL CLI from ${CODEQL_HOME}"
           fi
-          echo "${HOME}/codeql-cli/codeql" >> "$GITHUB_PATH"
+          echo "${CODEQL_HOME}/codeql" >> "$GITHUB_PATH"
 
       - name: Download CodeQL Python query pack
         run: codeql pack download codeql/python-queries
