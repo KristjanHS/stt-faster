@@ -109,38 +109,47 @@ class TestPickModel:
         with pytest.raises(ModelLoadError, match="Failed to load model .* on both GPU and CPU"):
             pick_model("et-large")
 
+    @patch("backend.transcribe.snapshot_download")
     @patch("backend.transcribe.WhisperModel")
-    def test_turbo_preset(self, mock_whisper: Mock) -> None:
+    def test_turbo_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
         """Test turbo preset initialization."""
         mock_model = Mock()
         mock_whisper.return_value = mock_model
+        mock_snapshot.return_value = "/tmp/model/turbo"
 
         result = pick_model("turbo")
 
         assert result == mock_model
-        mock_whisper.assert_called_once_with("large-v3-turbo", device="cuda", compute_type="float16")
+        mock_snapshot.assert_called_once_with("Systran/faster-whisper-large-v3-turbo")
+        mock_whisper.assert_called_once_with("/tmp/model/turbo", device="cuda", compute_type="float16")
 
+    @patch("backend.transcribe.snapshot_download")
     @patch("backend.transcribe.WhisperModel")
-    def test_distil_preset(self, mock_whisper: Mock) -> None:
+    def test_distil_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
         """Test distil preset initialization."""
         mock_model = Mock()
         mock_whisper.return_value = mock_model
+        mock_snapshot.return_value = "/tmp/model/distil"
 
         result = pick_model("distil")
 
         assert result == mock_model
-        mock_whisper.assert_called_once_with("distil-large-v3", device="cuda", compute_type="float16")
+        mock_snapshot.assert_called_once_with("Systran/faster-distil-whisper-large-v3")
+        mock_whisper.assert_called_once_with("/tmp/model/distil", device="cuda", compute_type="float16")
 
+    @patch("backend.transcribe.snapshot_download")
     @patch("backend.transcribe.WhisperModel")
-    def test_large8gb_preset(self, mock_whisper: Mock) -> None:
+    def test_large8gb_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
         """Test large8gb preset initialization."""
         mock_model = Mock()
         mock_whisper.return_value = mock_model
+        mock_snapshot.return_value = "/tmp/model/large-v3"
 
         result = pick_model("large8gb")
 
         assert result == mock_model
-        mock_whisper.assert_called_once_with("large-v3", device="cuda", compute_type="int8_float16")
+        mock_snapshot.assert_called_once_with("Systran/faster-whisper-large-v3")
+        mock_whisper.assert_called_once_with("/tmp/model/large-v3", device="cuda", compute_type="int8_float16")
 
     @patch("backend.transcribe.WhisperModel")
     def test_fallback_preset(self, mock_whisper: Mock) -> None:
