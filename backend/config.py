@@ -10,17 +10,7 @@ from rich.logging import RichHandler
 # Load environment variables from the project root .env (if present)
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-# Model names (single source of truth)
-DEFAULT_EMBEDDING_MODEL = "sentence-transformers/all-MiniLM-L6-v2"
-DEFAULT_RERANKER_MODEL = "cross-encoder/ms-marco-MiniLM-L-6-v2"
-DEFAULT_OLLAMA_MODEL = "cas/mistral-7b-instruct-v0.3"
-
-# Working model names (with environment variable overrides)
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", DEFAULT_EMBEDDING_MODEL)
-RERANKER_MODEL = os.getenv("RERANK_MODEL", DEFAULT_RERANKER_MODEL)
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
-
-# Model paths and caching
+# Model paths and caching for Hugging Face models (e.g., Whisper)
 HF_CACHE_DIR = os.getenv("HF_HOME", "/data/hf")
 
 
@@ -84,7 +74,7 @@ def _setup_logging() -> None:
                 )
 
             file_handler = TimedRotatingFileHandler(
-                filename=log_dir / "rag_system.log",
+                filename=log_dir / "transcription.log",
                 when="midnight",
                 backupCount=backup_count,
                 encoding="utf-8",
@@ -101,14 +91,9 @@ def _setup_logging() -> None:
         "httpx",
         "urllib3",
         "requests",
-        "sentence_transformers",
         "transformers",
-        "torch",
     ):
         logging.getLogger(noisy).setLevel(logging.WARNING)
-    # Very noisy PDF internals
-    logging.getLogger("pypdf").setLevel(logging.ERROR)
-    logging.getLogger("pypdf.generic._base").setLevel(logging.ERROR)
 
     # Forward warnings module messages to logging
     logging.captureWarnings(True)

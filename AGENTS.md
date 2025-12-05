@@ -5,11 +5,10 @@ explicitly overrides them.
 
 ## Repo profile (read me first)  
 - **Project root:** `stt-faster`  
-- **Primary stack:** Python 3.12 (via `.venv`), Ollama, Docker Compose.  
+- **Primary stack:** Python 3.12 (via `.venv`), faster-whisper, Docker Compose.  
 - **Top modules:**  
-  - `backend/` — ..., config.  
-  - `frontend/` — ...
-  - `scripts/` — developer helpers
+  - `backend/` — transcription logic, config.  
+  - `scripts/` — CLI tools and helpers
   - `tests/` — `unit/`, `integration/`, `e2e/` with `conftest.py`.  
   - `docker/` — compose + Dockerfile.  
   - `reports/` — artifacts, coverage.
@@ -51,9 +50,6 @@ explicitly overrides them.
 ## Safe edit policy  
 - For risky edits (schema changes, cross-module refactors), propose a plan in the Tasklist first.  
 - Never change Dockerfiles, Compose, or security-sensitive configs without clearly stating risks and mitigations.  
-
-## Glossary (min spec for agents)  
-- **Ollama:** local model runner backing embeddings/LLM endpoints.  
 
 ## Agent etiquette  
 - When in doubt about security or data handling, stop and request human guidance.
