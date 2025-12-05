@@ -98,6 +98,7 @@ markers = [
     "slow: Tests that take longer to run (>30s)",
     "docker: Tests requiring a running Docker daemon",
     "requires_ollama: Tests that require Ollama service",
+    "gpu: Tests that require GPU/CUDA hardware and drivers",
 ]
 testpaths = [
     "tests/unit",

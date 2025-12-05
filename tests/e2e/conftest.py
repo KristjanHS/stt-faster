@@ -1,12 +1,10 @@
 #!/usr/bin/env python3
-"""E2E test configuration and fixtures."""
+"""E2E test configuration and fixtures.
 
-from pathlib import Path
+Note: The project_root fixture has been moved to tests/conftest.py
+to be available across all test types (unit, integration, e2e).
+"""
 
-import pytest
+from __future__ import annotations
 
-
-@pytest.fixture(scope="session")
-def project_root():
-    """Provides the absolute path to the project root directory."""
-    return Path(__file__).parent.parent
+# E2E-specific fixtures can be added here
