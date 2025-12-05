@@ -22,6 +22,32 @@
 - Fallback to pip/venv: 
 Generate requirements.txt based on uv.lock: `make export-reqs`
 
+## Audio Transcription
+
+Batch audio transcription with Estonian (default) and English models. [Technical details →](docs/TRANSCRIPTION_SOLUTION.md)
+
+### Quick Start
+
+**Windows (WSL)**: Copy `scripts/windows/transcribe_estonian.bat` or `transcribe_english.bat` to your audio folder and double-click.
+
+**Command line**:
+```bash
+# Process folder (Estonian default)
+.venv/bin/python scripts/transcribe_manager.py process /path/to/audio
+
+# Check status
+.venv/bin/python scripts/transcribe_manager.py status --verbose
+
+# Use different model
+.venv/bin/python scripts/transcribe_manager.py process /path/to/audio --preset large8gb
+```
+
+**Model presets**: `et-large` (Estonian, default), `large8gb` (English/multi, best accuracy), `turbo` (fast), `distil` (fastest)
+
+**Output**: Files moved to `processed/` subfolder with JSON transcripts. Failed files in `failed/` subfolder.
+
+**Troubleshooting**: For WSL paths use `/mnt/c/Users/...`. Delete `transcribe_state.db` to reset tracking.
+
 ## Local CI with Act
 - Act is supported for local CI parity. See `docs/AI_instructions.md` for setup and usage.
 
