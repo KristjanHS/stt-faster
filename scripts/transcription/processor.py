@@ -11,6 +11,13 @@ from .database import TranscriptionDatabase
 
 LOGGER = logging.getLogger(__name__)
 
+# Supported audio file extensions
+SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
+
+# Folder names for processed and failed files
+PROCESSED_FOLDER_NAME = "processed"
+FAILED_FOLDER_NAME = "failed"
+
 
 class TranscriptionProcessor:
     """Processes audio files and manages their lifecycle."""
@@ -33,8 +40,8 @@ class TranscriptionProcessor:
         self.preset = preset
 
         # Create subdirectories for processed and failed files
-        self.processed_folder = self.input_folder / "processed"
-        self.failed_folder = self.input_folder / "failed"
+        self.processed_folder = self.input_folder / PROCESSED_FOLDER_NAME
+        self.failed_folder = self.input_folder / FAILED_FOLDER_NAME
         self.processed_folder.mkdir(exist_ok=True)
         self.failed_folder.mkdir(exist_ok=True)
 
@@ -46,10 +53,9 @@ class TranscriptionProcessor:
         Returns:
             List of audio file paths found
         """
-        audio_extensions = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
         audio_files: list[Path] = []
 
-        for ext in audio_extensions:
+        for ext in SUPPORTED_AUDIO_EXTENSIONS:
             audio_files.extend(list(self.input_folder.glob(f"*{ext}")))
 
         # Convert to strings and filter out files in subdirectories

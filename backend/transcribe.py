@@ -41,6 +41,14 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
+# Default transcription parameters
+DEFAULT_BEAM_SIZE = 5
+DEFAULT_WORD_TIMESTAMPS = False
+DEFAULT_TASK = "transcribe"
+
+# Float rounding precision for JSON output
+FLOAT_PRECISION = 3
+
 
 def _get_estonian_model_path(model_id: str) -> str:
     """Download Estonian model and return path to CT2 subfolder.
@@ -119,7 +127,7 @@ def pick_model(preset: str = "et-large") -> WhisperModel:
     return WhisperModel("small", device="cpu", compute_type="int8")
 
 
-def _round_floats(value: Any, places: int = 3) -> Any:
+def _round_floats(value: Any, places: int = FLOAT_PRECISION) -> Any:
     if isinstance(value, dict):
         return {key: _round_floats(item, places) for key, item in cast(dict[Any, Any], value).items()}
     if isinstance(value, list):
@@ -155,10 +163,10 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
 
     segments, info = model.transcribe(
         path,
-        beam_size=5,
-        word_timestamps=False,
+        beam_size=DEFAULT_BEAM_SIZE,
+        word_timestamps=DEFAULT_WORD_TIMESTAMPS,
         language=language,
-        task="transcribe",
+        task=DEFAULT_TASK,
     )
 
     segment_payloads = [_segment_to_payload(segment) for segment in segments]
