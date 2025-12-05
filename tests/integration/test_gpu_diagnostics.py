@@ -152,9 +152,11 @@ class TestFasterWhisper:
         with caplog.at_level(logging.INFO):
             try:
                 model = WhisperModel("tiny", device="cuda", compute_type="int8")
-                assert model is not None
             except Exception as e:
                 pytest.fail(f"Failed to load tiny model on GPU: {e}")
+
+            # Assert outside try/except to avoid catching assertion failures
+            assert model is not None, "Model should not be None after loading"
 
 
 class TestGPUDiagnosticsSummary:
@@ -231,8 +233,8 @@ class TestGPUDiagnosticsSummary:
 
         sys.stdout.write(output + "\n")
 
-        # Test always passes - it's just for information
-        assert True
+        # This test is informational - it prints GPU diagnostic info for debugging
+        # No assertions needed as it's purely for information display
 
 
 @pytest.fixture(scope="module", autouse=True)

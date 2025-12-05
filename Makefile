@@ -6,7 +6,7 @@
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
-.PHONY: unit integration
+.PHONY: unit integration e2e
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
@@ -41,6 +41,7 @@ help:
 	@echo "  -- Tests --"
 	@echo "  unit         - Run unit tests (local) and write reports"
 	@echo "  integration  - Run integration tests (uv preferred)"
+	@echo "  e2e          - Run e2e tests (local) and write reports"
 	@echo ""
 	@echo "  -- Docker --"
 	@echo "  docker-back  - Build and start services in background"
@@ -99,6 +100,15 @@ unit:
 		.venv/bin/python -m pytest tests/unit -n auto --maxfail=1 -q --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
 	else \
 		uv run -m pytest tests/unit -n auto --maxfail=1 -q --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
+	fi
+
+# E2E test target
+e2e:
+	mkdir -p reports
+	@if [ -x .venv/bin/python ]; then \
+		.venv/bin/python -m pytest tests/e2e -n auto --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
+	else \
+		uv run -m pytest tests/e2e -n auto --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
 	fi
 
 
