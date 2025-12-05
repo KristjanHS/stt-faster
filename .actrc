@@ -19,7 +19,7 @@
 
 --actor=nektos/act
 
---container-options "--volume=${HOME}/.cache/uv:/uv-cache --volume=${HOME}/.cache/act-codeql:/root/codeql-cli"
+--container-options "-v=${HOME}/.cache/uv:/uv-cache"
 --env UV_CACHE_DIR=/uv-cache
 
 # Because the workspace lives in the container's filesystem and the cache is a mounted volume, uv can't hardlink.
