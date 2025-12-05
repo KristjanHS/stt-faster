@@ -84,6 +84,17 @@ def pick_model(preset: str = "et-large") -> WhisperModel:
                     f"Failed to load model {model_name} on both GPU and CPU: {cpu_error}"
                 ) from cpu_error
 
+    def _get_cached_model_path(model_id: str) -> str:
+        """Download/retrieve cached Whisper model from HuggingFace.
+
+        Args:
+            model_id: HuggingFace model ID (e.g., 'Systran/faster-whisper-large-v3')
+
+        Returns:
+            Path to the cached model directory
+        """
+        return snapshot_download(model_id)  # nosec B615
+
     # Estonian models (default)
     if preset == "et-large":
         # TalTech Estonian Whisper large-v3-turbo (newest, Sep 2025)
@@ -91,16 +102,19 @@ def pick_model(preset: str = "et-large") -> WhisperModel:
         model_path = _get_estonian_model_path("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
         return _load(model_path, default_device="cuda", default_type="int8_float16")
 
-    # Original English/multilingual models (keep existing ones below)
+    # Original English/multilingual models (use cached paths)
     if preset == "turbo":
         # Best default for 8 GB
-        return _load("large-v3-turbo", default_device="cuda", default_type="float16")
+        model_path = _get_cached_model_path("Systran/faster-whisper-large-v3-turbo")
+        return _load(model_path, default_device="cuda", default_type="float16")
     if preset == "distil":
         # English-only; very fast; near large-v3 accuracy
-        return _load("distil-large-v3", default_device="cuda", default_type="float16")
+        model_path = _get_cached_model_path("Systran/faster-distil-whisper-large-v3")
+        return _load(model_path, default_device="cuda", default_type="float16")
     if preset == "large8gb":
         # Try original large-v3 with mixed INT8/FP16 to fit in 8 GB
-        return _load("large-v3", default_device="cuda", default_type="int8_float16")
+        model_path = _get_cached_model_path("Systran/faster-whisper-large-v3")
+        return _load(model_path, default_device="cuda", default_type="int8_float16")
     # Fallback (portable): CPU int8
     return WhisperModel("small", device="cpu", compute_type="int8")
 
