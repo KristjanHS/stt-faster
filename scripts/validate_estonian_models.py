@@ -27,7 +27,7 @@ def check_huggingface_access() -> bool:
     try:
         from huggingface_hub import HfApi
 
-        api = HfApi()
+        _api = HfApi()
         LOGGER.info("✓ Hugging Face Hub access: OK")
         return True
     except ImportError:
@@ -83,7 +83,7 @@ def check_faster_whisper_compatibility(model_id: str, use_cpu: bool = True) -> b
         LOGGER.info("  - Compute type: %s", compute_type)
 
         # This will download the model if not cached
-        model = WhisperModel(model_id, device=device, compute_type=compute_type)
+        _model = WhisperModel(model_id, device=device, compute_type=compute_type)
 
         LOGGER.info("✓ Model '%s' loaded successfully with faster-whisper", model_id)
         return True
