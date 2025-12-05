@@ -1,7 +1,7 @@
 [project]
 name = "stt-faster"
 version = "0.1.0"
-description = "template for LLM experimentation"
+description = "Fast audio transcription tool using Whisper models"
 authors = [{ name=""}]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -10,12 +10,8 @@ dependencies = [
     "faster-whisper>=1.0.0,<2.0.0",
     "hf-transfer>=0.1.0,<1.0.0",
     "huggingface-hub>=0.26.0,<1.0.0",
-    "langchain>=0.3.27,<0.4.0",
-    "langchain-community>=0.3.27,<0.4.0",
     "python-dotenv>=1.1.1,<2.0.0",
     "rich>=14.1.0,<15.0.0",
-    "sentence-transformers>=5.1.0,<6.0.0",
-    "torch>=2.8.0,<3.0.0",
 ]
 
 [dependency-groups]
@@ -44,14 +40,6 @@ url = "https://download.pytorch.org/whl/cpu"
 # Add the PyTorch index, but mark it EXPLICIT so nothing comes from it
 # unless we explicitly say so in [tool.uv.sources].
 explicit = true
-
-# for GPU:
-# name = "pytorch-cu128"
-# url = "https://download.pytorch.org/whl/cu128"
-
-[tool.uv.sources]
-# Only these names are allowed to resolve from that index:
-torch = { index = "pytorch-cpu" }
 # for GPU:
 # torch = { index = "pytorch-cu128"}
 
@@ -59,10 +47,9 @@ torch = { index = "pytorch-cpu" }
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
-# Limit package discovery to the Python code under `backend/` to avoid
-# setuptools attempting to package non-Python top-level folders like `docker/` or `logs/`.
+# Limit package discovery to Python code to avoid setuptools packaging non-Python folders
 [tool.setuptools.packages.find]
-include = ["backend*"]
+include = ["backend*", "scripts*"]
 
 [tool.ruff]
 line-length = 120
@@ -97,7 +84,6 @@ addopts = [
 markers = [
     "slow: Tests that take longer to run (>30s)",
     "docker: Tests requiring a running Docker daemon",
-    "requires_ollama: Tests that require Ollama service",
     "gpu: Tests that require GPU/CUDA hardware and drivers",
 ]
 testpaths = [
@@ -141,6 +127,3 @@ source = ["backend"]
 disable_warnings = ["no-data-collected"]
 data_file = "reports/coverage/.coverage"
 
-# Service health check endpoints
-[tool.integration.services]
-ollama = { health_endpoint = "/api/version" }
