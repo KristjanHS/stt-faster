@@ -5,9 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from backend.database import TranscriptionDatabase
 from backend.transcribe import transcribe_to_json
-
-from .database import TranscriptionDatabase
 
 LOGGER = logging.getLogger(__name__)
 

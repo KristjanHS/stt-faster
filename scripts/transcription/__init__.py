@@ -1,6 +1,10 @@
-"""Transcription processing and database modules."""
+"""Transcription processing and database modules.
 
-from scripts.transcription.database import TranscriptionDatabase
-from scripts.transcription.processor import TranscriptionProcessor
+DEPRECATED: This module is deprecated. Use backend.database and backend.processor instead.
+This module is kept for backward compatibility only.
+"""
+
+from backend.database import TranscriptionDatabase
+from backend.processor import TranscriptionProcessor
 
 __all__ = ["TranscriptionDatabase", "TranscriptionProcessor"]
