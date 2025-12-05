@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -13,40 +12,8 @@ import pytest
 if TYPE_CHECKING:
     pass
 
-
-@pytest.fixture
-def cli_test_folder(tmp_path: Path) -> Path:
-    """Create a temporary folder with test audio files."""
-    test_folder = tmp_path / "test_audio"
-    test_folder.mkdir()
-
-    # Create test audio files (empty for now, as real models would be too heavy)
-    (test_folder / "audio1.wav").touch()
-    (test_folder / "audio2.mp3").touch()
-    (test_folder / "audio3.m4a").touch()
-
-    return test_folder
-
-
-@pytest.fixture
-def real_audio_test_folder(tmp_path: Path) -> Path:
-    """Create a temporary folder with the actual test.mp3 file."""
-    test_folder = tmp_path / "test_audio_real"
-    test_folder.mkdir()
-
-    # Copy the actual test.mp3 file to the test folder
-    source_mp3 = Path("tests/test.mp3")
-    if source_mp3.exists():
-        dest_mp3 = test_folder / "test.mp3"
-        shutil.copy2(source_mp3, dest_mp3)
-
-    return test_folder
-
-
-@pytest.fixture
-def cli_test_db(tmp_path: Path) -> Path:
-    """Create a temporary database path."""
-    return tmp_path / "test_cli.db"
+# Note: Fixtures cli_test_folder, real_audio_test_folder, and cli_test_db
+# are now defined in tests/integration/conftest.py for reuse across integration tests
 
 
 class TestProcessCommand:

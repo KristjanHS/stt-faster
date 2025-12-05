@@ -33,3 +33,12 @@ def pytest_sessionstart(session: pytest.Session) -> None:  # noqa: D401
 # Set up a logger for this module
 logger = logging.getLogger(__name__)
 console = Console()
+
+
+@pytest.fixture(scope="session")
+def project_root() -> Path:
+    """Provides the absolute path to the project root directory.
+
+    Moved from e2e/conftest.py to be available across all test types.
+    """
+    return Path(__file__).parent.parent
