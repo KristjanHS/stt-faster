@@ -28,7 +28,7 @@ import logging
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, cast
 
 from faster_whisper import WhisperModel
 
@@ -68,9 +68,9 @@ def pick_model(preset: str = "turbo") -> WhisperModel:
 
 def _round_floats(value: Any, places: int = 3) -> Any:
     if isinstance(value, dict):
-        return {key: _round_floats(item, places) for key, item in value.items()}
+        return {key: _round_floats(item, places) for key, item in cast(dict[Any, Any], value).items()}
     if isinstance(value, list):
-        return [_round_floats(item, places) for item in value]
+        return [_round_floats(item, places) for item in cast(list[Any], value)]
     if isinstance(value, float):
         return round(value, places)
     return value
