@@ -86,6 +86,14 @@ reports/
 .coverage*
 coverage/
 
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-shm
+*.db-wal
+
 # Analysis & Scan Reports
 *.sarif
 

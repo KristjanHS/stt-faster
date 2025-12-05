@@ -2,7 +2,7 @@
 MINIMALISTIC solution to convert wav to a structured JSON transcript:
 
 SYSTRAN/faster-whisper — a faster Whisper reimplementation (≈18.4k ⭐ as of Oct 5, 2025).
-Why it’s popular: up to ~4× faster and lower memory via CTranslate2; easy Python API; great on CPU or modest GPUs.
+Why it's popular: up to ~4× faster and lower memory via CTranslate2; easy Python API; great on CPU or modest GPUs.
 
 # Run these commands TO INITIALIZE:
 source .venv/bin/activate
@@ -28,9 +28,12 @@ import logging
 import os
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, cast
 
 from faster_whisper import WhisperModel
+from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+
+from backend.exceptions import ModelLoadError, ModelNotFoundError
 
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
@@ -39,7 +42,30 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def pick_model(preset: str = "turbo") -> WhisperModel:
+def _get_estonian_model_path(model_id: str) -> str:
+    """Download Estonian model and return path to CT2 subfolder.
+
+    Estonian models from TalTechNLP store CT2 files in a 'ct2' subdirectory.
+    This helper downloads only the CT2 files, skipping unnecessary formats.
+
+    Args:
+        model_id: HuggingFace model ID (e.g., 'TalTechNLP/whisper-large-v3-turbo-et-verbatim')
+
+    Returns:
+        Path to the CT2 model directory
+
+    Raises:
+        ModelNotFoundError: If CT2 folder doesn't exist in model
+    """
+    # Only download ct2 folder, skip transformers/native formats
+    model_path = snapshot_download(model_id, allow_patterns=["ct2/*"])  # nosec B615
+    ct2_path = Path(model_path) / "ct2"
+    if not ct2_path.exists():
+        raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
+    return str(ct2_path)
+
+
+def pick_model(preset: str = "et-large") -> WhisperModel:
     def _load(model_name: str, *, default_device: str, default_type: str) -> WhisperModel:
         try:
             return WhisperModel(model_name, device=default_device, compute_type=default_type)
@@ -51,8 +77,21 @@ def pick_model(preset: str = "turbo") -> WhisperModel:
                 error,
                 exc_info=True,
             )
-            return WhisperModel(model_name, device="cpu", compute_type="int8")
+            try:
+                return WhisperModel(model_name, device="cpu", compute_type="int8")
+            except Exception as cpu_error:
+                raise ModelLoadError(
+                    f"Failed to load model {model_name} on both GPU and CPU: {cpu_error}"
+                ) from cpu_error
 
+    # Estonian models (default)
+    if preset == "et-large":
+        # TalTech Estonian Whisper large-v3-turbo (newest, Sep 2025)
+        # Fine-tuned on 1400 hours of Estonian verbatim transcriptions
+        model_path = _get_estonian_model_path("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
+        return _load(model_path, default_device="cuda", default_type="int8_float16")
+
+    # Original English/multilingual models (keep existing ones below)
     if preset == "turbo":
         # Best default for 8 GB
         return _load("large-v3-turbo", default_device="cuda", default_type="float16")
@@ -68,9 +107,9 @@ def pick_model(preset: str = "turbo") -> WhisperModel:
 
 def _round_floats(value: Any, places: int = 3) -> Any:
     if isinstance(value, dict):
-        return {key: _round_floats(item, places) for key, item in value.items()}
+        return {key: _round_floats(item, places) for key, item in cast(dict[Any, Any], value).items()}
     if isinstance(value, list):
-        return [_round_floats(item, places) for item in value]
+        return [_round_floats(item, places) for item in cast(list[Any], value)]
     if isinstance(value, float):
         return round(value, places)
     return value
@@ -92,11 +131,21 @@ def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     return _round_floats(cleaned)
 
 
-def transcribe(path: str, preset: str = "distil") -> Dict[str, Any]:
+def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     model = pick_model(preset)
     segments: Iterable["Segment"]
     info: "TranscriptionInfo"
-    segments, info = model.transcribe(path, beam_size=5, word_timestamps=False)
+
+    # Force Estonian language for Estonian models
+    language = "et" if preset.startswith("et-") else None
+
+    segments, info = model.transcribe(
+        path,
+        beam_size=5,
+        word_timestamps=False,
+        language=language,
+        task="transcribe",
+    )
 
     segment_payloads = [_segment_to_payload(segment) for segment in segments]
     payload: Dict[str, Any] = {
@@ -114,7 +163,7 @@ def transcribe(path: str, preset: str = "distil") -> Dict[str, Any]:
     return _round_floats(cleaned)
 
 
-def transcribe_to_json(audio_path: str, json_path: str, preset: str = "distil") -> None:
+def transcribe_to_json(audio_path: str, json_path: str, preset: str = "et-large") -> None:
     payload = transcribe(audio_path, preset)
     with open(json_path, "w", encoding="utf-8") as json_file:
         json.dump(payload, json_file, ensure_ascii=False, indent=2)
@@ -127,5 +176,5 @@ if __name__ == "__main__":
     input_audio_path = project_root / "UserData" / "RelMan.wav"
     output_json_path = input_audio_path.with_suffix(".json")
 
-    transcribe_to_json(str(input_audio_path), str(output_json_path), preset="distil")
+    transcribe_to_json(str(input_audio_path), str(output_json_path), preset="et-large")
     LOGGER.info("Wrote JSON transcript to %s", output_json_path)
