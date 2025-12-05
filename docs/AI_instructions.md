@@ -2,23 +2,16 @@
 
 Action-first cheatsheet for automations.
 
-Ports: app `http://localhost:8501`, Ollama `http://localhost:11434`.
-
 ### Core Policies
 
 - **No PYTHONPATH**: Use editable install and `-m` execution
-- **Absolute imports**: `from backend.config import EMBEDDING_MODEL`
+- **Absolute imports**: `from backend.config import HF_CACHE_DIR`
 - **Module execution**: `.venv/bin/python -m backend.config`
 - **Renovate validation**: `npx --package renovate renovate-config-validator renovate.json`
 
 ### Project Structure
 
-- **Key Directories**: `backend/`, `frontend/`, `tests/`, `docker/`, `scripts/`
-
-### ML Strategy
-
-Client-side vectorization and reranking with centralized model loading:
-- Models configured in `backend/config.py` with environment overrides
+- **Key Directories**: `backend/`, `tests/`, `docker/`, `scripts/`
 
 ## Testing Strategy
 
@@ -28,21 +21,7 @@ agent-specific integration details and health checks.
 
 ### Environment Configuration
 
-**Configuration**: Centralized in `pyproject.toml` under `[tool.integration]`
-
-**Health Checks**:
-- Ollama: `http://ollama:11434/api/version`
-
-### Integration Test Patterns
-
-**Ollama Integration:**
-- Get service URL via `integration["get_service_url"]("ollama")`
-- Make HTTP requests to `/api/generate` endpoint
-- Validate response status and content structure
-- Test with various prompts and parameters
-
-**Multi-Service Integration:**
-- Get URLs for both services via integration fixture
+**Configuration**: Centralized in `pyproject.toml`
 
 ### Real Model Testing Patterns
 
@@ -55,7 +34,7 @@ agent-specific integration details and health checks.
 ### Model Cache Management
 
 **Session-scoped caching**: Models loaded once per session and reused across tests
-**Environment-based paths**: `HF_HOME` and `SENTENCE_TRANSFORMERS_HOME` control storage
+**Environment-based paths**: `HF_HOME` controls Hugging Face model cache storage
 **Automatic cleanup**: Cache directories cleared after test sessions
 
 **Cache Management Best Practices:**

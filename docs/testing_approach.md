@@ -89,13 +89,7 @@ Fixtures are organized hierarchically through `conftest.py` files:
 
 ## Environment Configuration
 
-**Service URLs**: Use explicit environment variables for service endpoints
-- `OLLAMA_URL` → Ollama service endpoint (default: `http://localhost:11434`)
-
-**Docker/Compose**: Services set URLs for intra-container communication
-- `OLLAMA_URL=http://ollama:11434`
-
-**Configuration**: Service URLs can be overridden via environment variables
+**Configuration**: Environment variables can be used to override default behaviors
 
 ## Key Testing Concepts
 
@@ -108,9 +102,8 @@ Tests declare service dependencies using pytest markers and use the `integration
 ### When to Use Real Models vs Mocks
 
 | Component Type | Recommended Approach | Reasoning |
-|---|---|---|---|
-| **ML Models** (SentenceTransformer, CrossEncoder) | **Real Local Models** | Need to validate actual model behavior, performance, and component interactions |
-| **External Services** (Ollama) | **Mock** | Network calls slow tests, external dependencies unreliable |
+|---|---|---|
+| **ML Models** (Whisper) | **Real Local Models** | Need to validate actual model behavior, performance, and component interactions |
 | **Database Operations** | **Mock** | Test data isolation, avoid external dependencies |
 | **File I/O Operations** | **Mock** | Filesystem operations can be slow and unreliable |
 | **Network APIs** | **Mock** | External API calls introduce latency and unreliability |
