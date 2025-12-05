@@ -137,7 +137,7 @@ class TestStatusCommand:
         assert "No files tracked" in output or "Total files: 0" in output
 
     def test_status_command_verbose_flag(self, cli_test_db: Path) -> None:
-        """Test status command with verbose flag."""
+        """Test status command with verbose flag produces output."""
         result = subprocess.run(
             [
                 sys.executable,
@@ -153,6 +153,9 @@ class TestStatusCommand:
         )
 
         assert result.returncode == 0
+        output = result.stdout + result.stderr
+        # Verify that verbose flag produces output (even if database is empty)
+        assert len(output.strip()) > 0, "Verbose flag should produce output"
 
 
 class TestCLIHelp:
