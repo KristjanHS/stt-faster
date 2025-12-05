@@ -62,7 +62,9 @@ fi
 ## Yamlfmt via Makefile target (uses uv + pre-commit under the hood)
 if [[ "$SKIP_LINT" != "1" ]]; then
     log INFO "Running yamlfmt (make yamlfmt) …"
-    make yamlfmt 2>&1 | sed 's/^/[yamlfmt] /' || true
+    if ! make yamlfmt 2>&1 | sed 's/^/[yamlfmt] /'; then
+        log WARN "yamlfmt failed (non-blocking)"
+    fi
 else
   log INFO "Skipping yamlfmt due to SKIP_LINT=1"
 fi
@@ -96,7 +98,9 @@ fi
 ## Semgrep via Makefile (uvx semgrep ci)
 if [[ "$SKIP_LOCAL_SEC_SCANS" != "1" ]]; then
     log INFO "Running Semgrep (make semgrep) …"
-    make semgrep 2>&1 | sed 's/^/[semgrep] /' || true
+    if ! make semgrep 2>&1 | sed 's/^/[semgrep] /'; then
+        log WARN "Semgrep scan failed (non-blocking, informational only)"
+    fi
 else
   log INFO "Skipping Semgrep due to SKIP_LOCAL_SEC_SCANS=1"
 fi
@@ -104,7 +108,10 @@ fi
 # Optional: run CodeQL locally (informational)
 if [[ "$SKIP_LOCAL_SEC_SCANS" != "1" ]]; then
   log INFO "Running CodeQL via act …"
-  act workflow_dispatch -W .github/workflows/codeql.yml --pull=false --rm --log-prefix-job-id 2>&1 || true
+  if ! act workflow_dispatch -W .github/workflows/codeql.yml --pull=false --rm --log-prefix-job-id 2>&1; then
+    log WARN "CodeQL scan failed (non-blocking, informational only)"
+    log WARN "This is expected if CodeQL CLI version needs updating or queries are incompatible"
+  fi
 else
   log INFO "Skipping CodeQL due to SKIP_LOCAL_SEC_SCANS=1"
 fi
