@@ -70,7 +70,7 @@ class TestPickModel:
 
         assert result == mock_model
         mock_get_path.assert_called_once_with("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
-        mock_whisper.assert_called_once_with("/tmp/model/ct2", device="cuda", compute_type="int8_float16")
+        mock_whisper.assert_called_once_with("/tmp/model/ct2", device="cuda", compute_type="float16")
 
     @patch("backend.transcribe._get_estonian_model_path")
     @patch("backend.transcribe.WhisperModel")
@@ -84,17 +84,17 @@ class TestPickModel:
         mock_cpu_model = Mock()
         mock_whisper.side_effect = [RuntimeError("CUDA not available"), mock_cpu_model]
 
-        with caplog.at_level(logging.ERROR):
+        with caplog.at_level(logging.WARNING):
             result = pick_model("et-large")
 
         assert result == mock_cpu_model
         assert mock_whisper.call_count == 2
         assert mock_whisper.call_args_list[0][1] == {
             "device": "cuda",
-            "compute_type": "int8_float16",
+            "compute_type": "float16",
         }
         assert mock_whisper.call_args_list[1][1] == {"device": "cpu", "compute_type": "int8"}
-        assert "GPU initialisation failed" in caplog.text
+        assert "GPU initialization failed" in caplog.text
 
     @patch("backend.transcribe._get_estonian_model_path")
     @patch("backend.transcribe.WhisperModel")
@@ -120,7 +120,7 @@ class TestPickModel:
         result = pick_model("turbo")
 
         assert result == mock_model
-        mock_snapshot.assert_called_once_with("Systran/faster-whisper-large-v3-turbo")
+        mock_snapshot.assert_called_once_with("Systran/faster-distil-whisper-large-v3")
         mock_whisper.assert_called_once_with("/tmp/model/turbo", device="cuda", compute_type="float16")
 
     @patch("backend.transcribe.snapshot_download")

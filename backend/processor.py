@@ -95,7 +95,7 @@ class TranscriptionProcessor:
             self.db.update_status(file_path, "failed", error_msg)
             return False
 
-        LOGGER.info("Processing file: %s", file_path)
+        LOGGER.debug("Processing file: %s", file_path)
 
         try:
             # Generate output JSON path (same name, .json extension)
