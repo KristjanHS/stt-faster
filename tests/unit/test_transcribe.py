@@ -412,7 +412,7 @@ class TestTranscribeToJson:
 
         transcribe_to_json("test.wav", "test.json", preset="et-large")
 
-        mock_transcribe.assert_called_once_with("test.wav", "et-large")
+        mock_transcribe.assert_called_once_with("test.wav", "et-large", language=None)
         mock_file.assert_called_once_with("test.json", "w", encoding="utf-8")
         mock_json_dump.assert_called_once()
 
@@ -431,4 +431,4 @@ class TestTranscribeToJson:
 
         transcribe_to_json("test.wav", "test.json", preset="turbo")
 
-        mock_transcribe.assert_called_once_with("test.wav", "turbo")
+        mock_transcribe.assert_called_once_with("test.wav", "turbo", language=None)
