@@ -295,7 +295,7 @@ class TestProductionCloudNative:
             "echo $HF_HOME",
         )
         hf_home = result.stdout.strip()
-        assert hf_home == "/home/appuser/.cache/huggingface"
+        assert hf_home == "/home/appuser/.cache/hf"
 
     def test_uses_debian_snapshot(self, production_image: str) -> None:
         """Verify Debian snapshot is configured for reproducible builds."""
@@ -441,13 +441,13 @@ class TestProductionVolumes:
                 "run",
                 "--rm",
                 "-v",
-                f"{tmpdir}:/home/appuser/.cache/huggingface",
+                f"{tmpdir}:/home/appuser/.cache/hf",
                 "--entrypoint",
                 "",
                 production_image,
                 "sh",
                 "-c",
-                "ls -ld /home/appuser/.cache/huggingface && touch /home/appuser/.cache/huggingface/test",
+                "ls -ld /home/appuser/.cache/hf && touch /home/appuser/.cache/hf/test",
             )
             assert result.returncode == 0
             # Verify file was created on host
@@ -471,7 +471,7 @@ class TestProductionTranscription:
                 command_args=["status"],
                 volumes=[
                     (tmpdir, "/workspace"),
-                    (f"{tmpdir}/.cache", "/home/appuser/.cache/huggingface"),
+                    (f"{tmpdir}/.cache", "/home/appuser/.cache/hf"),
                     (f"{tmpdir}/.local/share/stt-faster", "/home/appuser/.local/share/stt-faster"),
                 ],
                 env_vars={"HF_TOKEN": HF_TOKEN} if HF_TOKEN else None,
@@ -522,7 +522,7 @@ class TestProductionTranscription:
             # Use local HF cache to avoid re-downloading models
             import os
 
-            local_hf_cache = os.path.expanduser(os.getenv("HF_HOME", "~/.cache/huggingface"))
+            local_hf_cache = os.path.expanduser(os.getenv("HF_HOME", "~/.cache/hf"))
             logger.info(f"Using local HF cache: {local_hf_cache}")
 
             # Create data directory for transcription state
@@ -541,7 +541,7 @@ class TestProductionTranscription:
                 command_args=["process", "/workspace", "--preset", "et-large"],
                 volumes=[
                     (str(workspace_audio), "/workspace"),
-                    (local_hf_cache, "/home/appuser/.cache/huggingface"),
+                    (local_hf_cache, "/home/appuser/.cache/hf"),
                     (str(data_dir), "/home/appuser/.local/share/stt-faster"),
                 ],
                 env_vars={"HF_TOKEN": HF_TOKEN},

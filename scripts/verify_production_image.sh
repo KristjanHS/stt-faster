@@ -80,12 +80,12 @@ echo -n "Checking environment variables... "
 PYTHONUNBUFFERED=$(docker run --rm --entrypoint="" "${IMAGE_NAME}" sh -c 'echo $PYTHONUNBUFFERED')
 HF_HOME=$(docker run --rm --entrypoint="" "${IMAGE_NAME}" sh -c 'echo $HF_HOME')
 
-if [[ "${PYTHONUNBUFFERED}" == "1" ]] && [[ "${HF_HOME}" == "/home/appuser/.cache/huggingface" ]]; then
+if [[ "${PYTHONUNBUFFERED}" == "1" ]] && [[ "${HF_HOME}" == "/home/appuser/.cache/hf" ]]; then
     echo "✅ Environment configured correctly"
 else
     echo "❌ Environment misconfigured"
     echo "   PYTHONUNBUFFERED=${PYTHONUNBUFFERED} (expected: 1)"
-    echo "   HF_HOME=${HF_HOME} (expected: /home/appuser/.cache/huggingface)"
+    echo "   HF_HOME=${HF_HOME} (expected: /home/appuser/.cache/hf)"
     exit 1
 fi
 

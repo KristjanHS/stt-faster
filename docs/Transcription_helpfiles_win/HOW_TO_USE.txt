@@ -1,0 +1,90 @@
+========================================
+AUDIO TRANSCRIPTION - HOW TO USE
+========================================
+
+QUICK START:
+1. Drop audio files into this folder (%USERPROFILE%\Downloads\transcribe\)
+2. Double-click "transcribe.bat"
+3. Wait for processing to complete
+4. Find transcripts in the "processed" folder
+
+========================================
+
+BATCH FILES:
+------------
+
+📁 transcribe.bat (RECOMMENDED)
+   - Processes all audio files with DISTIL preset (balanced speed/accuracy)
+   - Creates JSON transcripts with timestamps
+   - Moves completed files to "processed" folder
+   - Moves failed files to "failed" folder
+
+🚀 transcribe_accurate.bat
+   - Same as above but uses LARGE preset (best accuracy, slower)
+   - Use for important transcriptions requiring highest quality
+
+📊 check_status.bat
+   - Shows summary of all processed files
+   - Displays counts: pending, completed, failed
+
+========================================
+
+SUPPORTED FORMATS:
+-----------------
+✓ .wav
+✓ .mp3
+✓ .m4a
+✓ .flac
+✓ .ogg
+
+========================================
+
+OUTPUT:
+-------
+Each audio file generates a .json file with:
+- Full transcript text
+- Individual segments with timestamps
+- Detected language
+- Language probability
+
+Example: "audio.m4a" → "audio.json"
+
+========================================
+
+FOLDERS CREATED:
+---------------
+📂 processed/  - Successfully transcribed files + JSON outputs
+📂 failed/     - Files that failed processing
+
+========================================
+
+NOTES:
+------
+- Processing is automatic and safe to run multiple times
+- File location determines status:
+  * Files in main folder → will be processed
+  * Files in "processed" folder → already done
+  * Files in "failed" folder → previously failed
+- Want to reprocess with different preset? Just move the file back!
+- Processing time: ~2 seconds per minute of audio (40min audio = ~80sec)
+
+========================================
+
+TROUBLESHOOTING:
+---------------
+If transcribe.bat doesn't work:
+1. Make sure WSL2 is running
+2. Check that the Python environment exists
+3. Run check_status.bat to see database state
+
+For help, contact the system administrator.
+
+
+
+
+
+
+
+
+
+

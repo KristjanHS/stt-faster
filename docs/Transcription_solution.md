@@ -27,7 +27,7 @@ scripts/windows/*.bat          # Windows one-click launchers
 | `turbo` | Whisper large-v3-turbo | ~1.5GB | Multi | Fast + accurate |
 | `distil` | Distilled Whisper | ~756MB | English | Fastest |
 
-**Caching**: All models use `snapshot_download()` for HuggingFace cache (`~/.cache/huggingface/hub/`). Download once, reuse forever.
+**Caching**: All models use `snapshot_download()` for HuggingFace cache (`~/.cache/hf/hub/`). Download once, reuse forever.
 
 ## Database
 

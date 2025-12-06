@@ -42,7 +42,7 @@ docker run --rm -v $(pwd):/workspace stt-faster:latest process /workspace/audio.
 - ✅ No Python installation required
 - ✅ No dependency management needed
 - ✅ Minimal image size (production deps only)
-- ✅ Models cached in `~/.cache/huggingface`
+- ✅ Models cached in `~/.cache/hf`
 - ✅ State persisted in `~/.local/share/stt-faster`
 
 ### Volume Mounts
@@ -50,7 +50,7 @@ docker run --rm -v $(pwd):/workspace stt-faster:latest process /workspace/audio.
 | Host Path | Container Path | Purpose |
 |-----------|----------------|---------|
 | `$(pwd)` | `/workspace` | Audio files to process |
-| `~/.cache/huggingface` | `/home/appuser/.cache/huggingface` | Whisper model cache |
+| `~/.cache/hf` | `/home/appuser/.cache/hf` | Whisper model cache |
 | `~/.local/share/stt-faster` | `/home/appuser/.local/share/stt-faster` | Transcription state DB |
 
 ### Examples
@@ -222,8 +222,8 @@ docker run --rm -u $(id -u):$(id -g) -v $(pwd):/workspace stt-faster:latest
 **Model download fails:**
 ```bash
 # Ensure HF cache directory is writable
-mkdir -p ~/.cache/huggingface
-chmod 755 ~/.cache/huggingface
+mkdir -p ~/.cache/hf
+chmod 755 ~/.cache/hf
 ```
 
 ### Dev/Test Docker
