@@ -45,9 +45,13 @@ help:
 	@echo "  integration  - Run integration tests (uv preferred)"
 	@echo "  e2e          - Run e2e tests (local) and write reports"
 	@echo ""
-	@echo "  -- Docker --"
-	@echo "  docker-back  - Build and start services in background"
-	@echo "  docker-unit  - Run unit tests inside app container"
+	@echo "  -- Docker (Production) --"
+	@echo "  docker-build-prod    - Build production Docker image for end users"
+	@echo "  docker-run-prod      - Run production Docker container (shows help)"
+	@echo ""
+	@echo "  -- Docker (Dev/Test) --"
+	@echo "  docker-back          - Build and start dev/test services in background"
+	@echo "  docker-unit          - Run unit tests inside dev container"
 	@echo ""
 	@echo "  -- Security / CI linters --"
 	@echo "  pip-audit          - Export from uv.lock and audit prod/dev+test deps"
@@ -228,11 +232,31 @@ semgrep:
 		exit 1; \
 	fi
 
-# Build and start docker services in background
+# --- Production Docker (for end users) ---
+.PHONY: docker-build-prod docker-run-prod
+
+docker-build-prod:
+	@echo ">> Building production Docker image..."
+	docker build -t stt-faster:latest .
+	@echo "✅ Production image built: stt-faster:latest"
+	@echo "   Usage: ./scripts/transcribe-docker process /path/to/audio --preset turbo"
+
+docker-run-prod:
+	@echo ">> Running production Docker container..."
+	@if ! docker image inspect stt-faster:latest >/dev/null 2>&1; then \
+		echo "⚠️  Image not found. Building..."; \
+		$(MAKE) docker-build-prod; \
+	fi
+	./scripts/transcribe-docker --help
+
+# --- Dev/Test Docker (for developers and CI) ---
+.PHONY: docker-back docker-unit
+
+# Build and start dev/test docker services in background
 docker-back:
 	docker compose -f docker/docker-compose.yml up -d --build
 
-# Run unit tests inside the app container (venv-safe)
+# Run unit tests inside the dev app container (venv-safe)
 docker-unit:
 	@# Ensure the app service is running before exec
 	@if ! docker compose -f docker/docker-compose.yml ps -q app | xargs -r docker inspect -f '{{.State.Running}}' 2>/dev/null | grep -q true; then \

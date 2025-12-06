@@ -85,11 +85,13 @@ markers = [
     "slow: Tests that take longer to run (>30s)",
     "docker: Tests requiring a running Docker daemon",
     "gpu: Tests that require GPU/CUDA hardware and drivers",
+    "network: Tests requiring internet connectivity (HuggingFace API, model downloads)",
 ]
+# Default: Run unit + integration tests only (skip E2E)
+# To run E2E tests: pytest tests/e2e/
 testpaths = [
     "tests/unit",
     "tests/integration",
-    "tests/e2e",
 ]
 
 # Unified logging configuration
