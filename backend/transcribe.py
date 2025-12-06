@@ -26,6 +26,7 @@ python transcribe.py
 import json
 import logging
 import os
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, cast
@@ -75,18 +76,55 @@ def _get_estonian_model_path(model_id: str) -> str:
 
 def pick_model(preset: str = "et-large") -> WhisperModel:
     def _load(model_name: str, *, default_device: str, default_type: str) -> WhisperModel:
+        """Load a Whisper model with automatic GPU->CPU fallback.
+
+        Device selection priority:
+        1. STT_DEVICE environment variable (cpu/cuda)
+        2. default_device parameter
+        3. Auto-fallback to CPU if GPU fails
+
+        In production containers, set STT_DEVICE=cpu for portability.
+        Local runs will auto-detect GPU.
+        """
+        # Check environment variable first
+        env_device = os.getenv("STT_DEVICE", "").lower()
+        if env_device in ("cpu", "cuda"):
+            device = env_device
+            compute_type = "int8" if device == "cpu" else default_type
+            LOGGER.info("Using device from STT_DEVICE env: %s", device)
+        else:
+            device = default_device
+            compute_type = default_type
+
+        # If device is CPU, use it directly
+        if device == "cpu":
+            LOGGER.info("Using CPU device for model: %s", model_name)
+            start_time = time.time()
+            model = WhisperModel(model_name, device="cpu", compute_type=compute_type)
+            load_time = time.time() - start_time
+            LOGGER.info("⏱️  Model loaded in %.2f seconds", load_time)
+            return model
+
+        # Try GPU first, fall back to CPU if it fails
         try:
-            return WhisperModel(model_name, device=default_device, compute_type=default_type)
+            LOGGER.info("Attempting to load model on GPU: %s", model_name)
+            start_time = time.time()
+            model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            load_time = time.time() - start_time
+            LOGGER.info("⏱️  Model loaded on GPU in %.2f seconds", load_time)
+            return model
         except Exception as error:  # fall back to CPU when GPU libs are missing
-            LOGGER.error(
-                "GPU initialisation failed for %s (%s). Falling back to CPU int8; expect slower transcription. "
-                "Verify CUDA/cuDNN installation if GPU acceleration is desired.",
+            LOGGER.warning(
+                "GPU initialization failed for %s: %s. Falling back to CPU int8; expect slower transcription.",
                 model_name,
                 error,
-                exc_info=True,
             )
             try:
-                return WhisperModel(model_name, device="cpu", compute_type="int8")
+                start_time = time.time()
+                model = WhisperModel(model_name, device="cpu", compute_type="int8")
+                load_time = time.time() - start_time
+                LOGGER.info("⏱️  Model loaded on CPU in %.2f seconds", load_time)
+                return model
             except Exception as cpu_error:
                 raise ModelLoadError(
                     f"Failed to load model {model_name} on both GPU and CPU: {cpu_error}"
@@ -108,12 +146,12 @@ def pick_model(preset: str = "et-large") -> WhisperModel:
         # TalTech Estonian Whisper large-v3-turbo (newest, Sep 2025)
         # Fine-tuned on 1400 hours of Estonian verbatim transcriptions
         model_path = _get_estonian_model_path("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
-        return _load(model_path, default_device="cuda", default_type="int8_float16")
+        return _load(model_path, default_device="cuda", default_type="float16")
 
     # Original English/multilingual models (use cached paths)
     if preset == "turbo":
-        # Best default for 8 GB
-        model_path = _get_cached_model_path("Systran/faster-whisper-large-v3-turbo")
+        # Distilled large-v3 (faster-whisper-large-v3-turbo doesn't exist, use distil instead)
+        model_path = _get_cached_model_path("Systran/faster-distil-whisper-large-v3")
         return _load(model_path, default_device="cuda", default_type="float16")
     if preset == "distil":
         # English-only; very fast; near large-v3 accuracy
@@ -154,6 +192,9 @@ def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
 
 
 def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
+    LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
+    overall_start = time.time()
+
     model = pick_model(preset)
     segments: Iterable["Segment"]
     info: "TranscriptionInfo"
@@ -161,6 +202,8 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     # Force Estonian language for Estonian models
     language = "et" if preset.startswith("et-") else None
 
+    LOGGER.info("🔄 Transcribing audio...")
+    transcribe_start = time.time()
     segments, info = model.transcribe(
         path,
         beam_size=DEFAULT_BEAM_SIZE,
@@ -170,6 +213,8 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     )
 
     segment_payloads = [_segment_to_payload(segment) for segment in segments]
+    transcribe_time = time.time() - transcribe_start
+
     payload: Dict[str, Any] = {
         "audio": os.path.basename(path),
         "language": getattr(info, "language", None),
@@ -180,6 +225,15 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     duration = getattr(info, "duration", None)
     if duration is not None:
         payload["duration"] = duration
+
+    overall_time = time.time() - overall_start
+
+    # Log timing summary
+    LOGGER.info("⏱️  Transcription completed in %.2f seconds", transcribe_time)
+    if duration:
+        speed_ratio = duration / transcribe_time if transcribe_time > 0 else 0
+        LOGGER.info("⚡ Speed: %.2fx realtime (%.1fs audio in %.1fs)", speed_ratio, duration, transcribe_time)
+    LOGGER.info("✅ Total processing time: %.2f seconds", overall_time)
 
     cleaned = {key: value for key, value in payload.items() if value is not None}
     return _round_floats(cleaned)
