@@ -2,7 +2,7 @@
 # Meta
 .PHONY: help
 # Setup
-.PHONY: setup-hooks setup-uv export-reqs install-act setup-act
+.PHONY: setup-hooks setup-uv export-reqs install-act setup-act new-project-bootstrap new-project-cleanup new-project-post new-project-git-setup
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
@@ -29,6 +29,9 @@ help:
 	@echo "  -- Setup --"
 	@echo "  setup-hooks        - Configure Git hooks path"
 	@echo "  setup-uv           - Create venv and sync dev/test via uv"
+	@echo "  new-project-bootstrap - Copy this repo to ~/projects/<SLUG> (requires SLUG=...)"
+	@echo "  new-project-cleanup   - In the copied repo: strip app code and rename to <SLUG> (requires SLUG=...)"
+	@echo "  new-project-post      - In the copied repo: install tooling + quick unit tests"
 	@echo "  export-reqs        - Export requirements.txt from uv.lock"
 	@echo "  install-act        - Install Act CLI for local CI runs"
 	@echo "  setup-act          - Install and verify Act + Docker setup"
@@ -70,6 +73,33 @@ setup-hooks:
 # uv-based setup
 setup-uv:
 	@./run_uv.sh
+
+new-project-bootstrap:
+	@if [ -z "$(SLUG)" ]; then \
+		echo "Usage: make new-project-bootstrap SLUG=<project-slug>"; \
+		exit 1; \
+	fi
+	./scripts/new_project_bootstrap.sh "$(SLUG)"
+
+new-project-cleanup:
+	./scripts/new_project_cleanup.sh $(if $(SLUG),$(SLUG),)
+
+new-project-post:
+	@echo "Setting up tooling (uv) and running a quick unit test sweep..."
+	./run_uv.sh
+	uv sync --group dev --group test --frozen || uv sync --group dev --group test
+	uv run pre-commit install --install-hooks || true
+	@echo "Git init/remote setup is now manual. Run scripts/new_project_git_setup.py yourself if you want automation."
+	@if [ -x .venv/bin/python ]; then \
+		.venv/bin/python -m pytest tests/unit -q; \
+	else \
+		echo "No .venv found; run ./run_uv.sh first"; \
+		exit 1; \
+	fi
+
+new-project-git-setup:
+	@echo "Initializing git + origin/branch via scripts/new_project_git_setup.py..."
+	.venv/bin/python ./scripts/new_project_git_setup.py
 
 # Install Act CLI for local CI runs
 install-act:

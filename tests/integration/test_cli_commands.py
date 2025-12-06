@@ -85,11 +85,13 @@ class TestProcessCommand:
         sys.path.insert(0, scripts_path)
 
         try:
-            import argparse
+            from transcribe_manager import cmd_process, create_parser
 
-            from transcribe_manager import cmd_process
-
-            args = argparse.Namespace(input_folder=str(cli_test_folder), db_path=str(cli_test_db), preset="turbo")
+            # Use the actual parser to create args - ensures all attributes are present
+            parser = create_parser()
+            args = parser.parse_args(
+                ["--db-path", str(cli_test_db), "process", str(cli_test_folder), "--preset", "turbo"]
+            )
 
             # Mock only the MODEL LOADING, not the transcription logic
             with patch("backend.transcribe.pick_model") as mock_pick_model:
@@ -124,7 +126,6 @@ class TestProcessCommand:
 
         Environment control: Set USE_CACHED_MODEL=false to force mock-only testing.
         """
-        import argparse
         import os
         import sys
         from unittest.mock import MagicMock, patch
@@ -141,10 +142,12 @@ class TestProcessCommand:
         sys.path.insert(0, scripts_path)
 
         try:
-            from transcribe_manager import cmd_process
+            from transcribe_manager import cmd_process, create_parser
 
-            args = argparse.Namespace(
-                input_folder=str(real_audio_test_folder), db_path=str(cli_test_db), preset="turbo"
+            # Use the actual parser to create args - ensures all attributes are present
+            parser = create_parser()
+            args = parser.parse_args(
+                ["--db-path", str(cli_test_db), "process", str(real_audio_test_folder), "--preset", "turbo"]
             )
 
             if tiny_whisper_model is not None:
