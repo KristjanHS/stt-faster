@@ -119,11 +119,11 @@ def cmd_status(args: argparse.Namespace) -> int:
         return 1
 
 
-def main() -> int:
-    """Main entry point for the CLI.
+def create_parser() -> argparse.ArgumentParser:
+    """Create and configure the argument parser.
 
     Returns:
-        Exit code
+        Configured ArgumentParser instance
     """
     parser = argparse.ArgumentParser(
         description="Manage audio transcription automation",
@@ -171,6 +171,16 @@ def main() -> int:
         help="Show detailed file list",
     )
 
+    return parser
+
+
+def main() -> int:
+    """Main entry point for the CLI.
+
+    Returns:
+        Exit code
+    """
+    parser = create_parser()
     args = parser.parse_args()
 
     if not args.command:
