@@ -11,7 +11,8 @@ from rich.logging import RichHandler
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # Model paths and caching for Hugging Face models (e.g., Whisper)
-HF_CACHE_DIR = os.getenv("HF_HOME", "/data/hf")
+# Default to new standard HF cache location
+HF_CACHE_DIR = os.getenv("HF_HOME", os.path.expanduser("~/.cache/hf"))
 
 
 # --- Logging Configuration ---

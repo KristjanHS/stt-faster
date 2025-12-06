@@ -91,7 +91,7 @@ RUN groupadd -g ${APP_GID} appgroup && \
     useradd -l -m -u ${APP_UID} -g ${APP_GID} -s /bin/bash appuser
 
 # Hugging Face cache directory (for Whisper models)
-ENV HF_HOME=/home/appuser/.cache/huggingface
+ENV HF_HOME=/home/appuser/.cache/hf
 
 # Force CPU-only for cloud portability (no cuDNN in slim image)
 # Local runs can use GPU by not setting this or setting STT_DEVICE=cuda

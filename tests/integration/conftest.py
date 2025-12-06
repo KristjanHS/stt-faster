@@ -107,7 +107,7 @@ def tiny_whisper_model() -> "WhisperModel | None":
     - "true" (default in integration tests): Download/use cached tiny model
     - "false": Return None (tests should fall back to mocks)
 
-    Cache location: ~/.cache/huggingface/hub/ (standard HuggingFace cache)
+    Cache location: ~/.cache/hf/hub/ (standard HuggingFace cache)
 
     Returns:
         WhisperModel instance if successful, None if disabled or download fails.

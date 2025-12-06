@@ -1,6 +1,7 @@
 @echo off
 REM Audio Transcription - ESTONIAN Language
 REM Uses: TalTech Estonian Whisper model (et-large preset)
+REM Note: Uses HF cache at ~/.cache/hf/ for faster model loading
 
 echo ========================================
 echo Audio Transcription - ESTONIAN
@@ -12,7 +13,8 @@ echo Processing audio files in: %~dp0
 echo.
 
 REM Run the transcription script via WSL (uses default et-large preset)
-wsl -e bash -c "cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe"
+REM Set HF_HOME to use the correct cache location
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe"
 
 echo.
 echo ========================================

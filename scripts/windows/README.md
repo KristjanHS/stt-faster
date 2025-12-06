@@ -50,6 +50,7 @@ After:
 - Windows 10/11 with WSL2
 - Python virtual environment (see main README.md)
 - Optional: CUDA for GPU acceleration
+- Models cached at `~/.cache/hf/` in WSL (auto-downloaded on first run)
 
 ## Troubleshooting
 
@@ -68,11 +69,11 @@ After:
 Edit the batch file to change paths or presets:
 
 ```batch
-REM Original:
-wsl -e bash -c "cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe"
+REM Original (with HF cache environment):
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe"
 
 REM Custom project path:
-wsl -e bash -c "cd ~/YOUR/PROJECT/PATH && .venv/bin/python scripts/transcribe_manager.py process ..."
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd ~/YOUR/PROJECT/PATH && .venv/bin/python scripts/transcribe_manager.py process ..."
 
 REM Custom audio folder:
 ... process /mnt/c/YOUR/PATH/HERE

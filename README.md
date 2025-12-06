@@ -62,13 +62,13 @@ make docker-build-prod
 # Or run directly
 docker run --rm \
   -v $(pwd):/workspace \
-  -v ~/.cache/huggingface:/home/appuser/.cache/huggingface \
+  -v ~/.cache/hf:/home/appuser/.cache/hf \
   stt-faster:latest process /workspace/audio --preset turbo
 ```
 
 **Features:**
 - ✅ No Python installation required
-- ✅ Models cached in `~/.cache/huggingface` (persisted across runs)
+- ✅ Models cached in `~/.cache/hf` (persisted across runs)
 - ✅ Transcription state in `~/.local/share/stt-faster`
 - ✅ Runs as non-root user with your UID/GID
 

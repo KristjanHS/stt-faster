@@ -49,7 +49,7 @@ ${YELLOW}Environment Variables:${NC}
 
 ${YELLOW}Volume Mounts:${NC}
   - Current directory → /workspace (for audio files)
-  - ~/.cache/huggingface → Container HF cache (for models)
+  - ~/.cache/hf → Container HF cache (for models)
   - ~/.local/share/stt-faster → Container state DB
 
 ${YELLOW}Building the Image:${NC}
@@ -57,7 +57,7 @@ ${YELLOW}Building the Image:${NC}
 
 ${YELLOW}Notes:${NC}
   - Audio files must be in current directory or subdirectories
-  - Models are cached in ~/.cache/huggingface (persisted across runs)
+  - Models are cached in ~/.cache/hf (persisted across runs)
   - Transcription state is saved in ~/.local/share/stt-faster/
 
 EOF
@@ -110,7 +110,7 @@ main() {
     
     # Setup volume mounts
     CURRENT_DIR="$(pwd)"
-    HF_CACHE_DIR="${HF_HOME:-${HOME}/.cache/huggingface}"
+    HF_CACHE_DIR="${HF_HOME:-${HOME}/.cache/hf}"
     STT_DATA_DIR="${HOME}/.local/share/stt-faster"
     
     # Create cache directories if they don't exist
@@ -125,7 +125,7 @@ main() {
     # Run container with mounted volumes
     ${DOCKER_CMD} run --rm -i \
         -v "${CURRENT_DIR}:/workspace" \
-        -v "${HF_CACHE_DIR}:/home/appuser/.cache/huggingface" \
+        -v "${HF_CACHE_DIR}:/home/appuser/.cache/hf" \
         -v "${STT_DATA_DIR}:/home/appuser/.local/share/stt-faster" \
         -u "$(id -u):$(id -g)" \
         "${IMAGE_NAME}" \
