@@ -26,6 +26,7 @@ class TranscriptionProcessor:
         db: TranscriptionDatabase,
         input_folder: str | Path,
         preset: str = "et-large",
+        language: str | None = None,
     ) -> None:
         """Initialize the processor.
 
@@ -33,10 +34,12 @@ class TranscriptionProcessor:
             db: Database instance for tracking state
             input_folder: Folder containing audio files to process
             preset: Model preset for transcription (default: 'et-large')
+            language: Force specific language code (e.g., 'en', 'et'), None for auto-detect
         """
         self.db = db
         self.input_folder = Path(input_folder)
         self.preset = preset
+        self.language = language
 
         # Create subdirectories for processed and failed files
         self.processed_folder = self.input_folder / PROCESSED_FOLDER_NAME
@@ -102,7 +105,7 @@ class TranscriptionProcessor:
             json_path = file_path_obj.with_suffix(".json")
 
             # Call the existing transcription function
-            transcribe_to_json(str(file_path_obj), str(json_path), self.preset)
+            transcribe_to_json(str(file_path_obj), str(json_path), self.preset, language=self.language)
 
             # Move both audio and JSON to processed folder
             self._move_to_processed(file_path_obj, json_path)

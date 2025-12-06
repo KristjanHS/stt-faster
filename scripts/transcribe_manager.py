@@ -51,7 +51,7 @@ def cmd_process(args: argparse.Namespace) -> int:
 
     try:
         with TranscriptionDatabase(args.db_path) as db:
-            processor = TranscriptionProcessor(db, input_folder, preset=args.preset)
+            processor = TranscriptionProcessor(db, input_folder, preset=args.preset, language=args.language)
             results = processor.process_folder()
 
             LOGGER.info("=" * 60)
@@ -152,6 +152,11 @@ def main() -> int:
         default="et-large",
         choices=["turbo", "distil", "large8gb", "et-large"],
         help="Model preset to use (default: et-large)",
+    )
+    process_parser.add_argument(
+        "--language",
+        default=None,
+        help="Force language code (e.g., 'en', 'et', 'ru'). Auto-detect if not specified.",
     )
 
     # Status command

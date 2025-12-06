@@ -167,7 +167,7 @@ def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     return _round_floats(cleaned)
 
 
-def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
+def transcribe(path: str, preset: str = "et-large", language: str | None = None) -> Dict[str, Any]:
     LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
     overall_start = time.time()
 
@@ -175,8 +175,15 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     segments: Iterable["Segment"]
     info: "TranscriptionInfo"
 
-    # Force Estonian language for Estonian models
-    language = "et" if preset.startswith("et-") else None
+    # Auto-detect language based on preset if not explicitly provided
+    if language is None:
+        language = "et" if preset.startswith("et-") else None
+
+    # Log language configuration
+    if language:
+        LOGGER.info("🌐 Language: %s (forced)", language)
+    else:
+        LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
 
     LOGGER.info("🔄 Transcribing audio...")
     transcribe_start = time.time()
@@ -191,10 +198,19 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     segment_payloads = [_segment_to_payload(segment) for segment in segments]
     transcribe_time = time.time() - transcribe_start
 
+    # Log detected/used language from result
+    detected_lang = getattr(info, "language", None)
+    lang_prob = getattr(info, "language_probability", None)
+    if detected_lang:
+        if lang_prob is not None:
+            LOGGER.info("🗣️  Detected language: %s (confidence: %.2f%%)", detected_lang, lang_prob * 100)
+        else:
+            LOGGER.info("🗣️  Used language: %s", detected_lang)
+
     payload: Dict[str, Any] = {
         "audio": os.path.basename(path),
-        "language": getattr(info, "language", None),
-        "language_probability": getattr(info, "language_probability", None),
+        "language": detected_lang,
+        "language_probability": lang_prob,
         "segments": segment_payloads,
     }
 
@@ -215,8 +231,8 @@ def transcribe(path: str, preset: str = "et-large") -> Dict[str, Any]:
     return _round_floats(cleaned)
 
 
-def transcribe_to_json(audio_path: str, json_path: str, preset: str = "et-large") -> None:
-    payload = transcribe(audio_path, preset)
+def transcribe_to_json(audio_path: str, json_path: str, preset: str = "et-large", language: str | None = None) -> None:
+    payload = transcribe(audio_path, preset, language=language)
     with open(json_path, "w", encoding="utf-8") as json_file:
         json.dump(payload, json_file, ensure_ascii=False, indent=2)
 
