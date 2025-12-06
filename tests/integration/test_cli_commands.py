@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    pass
+    from faster_whisper import WhisperModel
 
 # Note: Fixtures cli_test_folder, real_audio_test_folder, and cli_test_db
 # are now defined in tests/integration/conftest.py for reuse across integration tests
@@ -110,6 +110,70 @@ class TestProcessCommand:
 
                 # Verify model was loaded once (not per file - model is reused)
                 assert mock_pick_model.call_count == 3  # Called for each file
+        finally:
+            sys.path.remove(scripts_path)
+
+    def test_process_command_with_cached_model(
+        self, real_audio_test_folder: Path, cli_test_db: Path, tiny_whisper_model: "WhisperModel | None"
+    ) -> None:
+        """Integration test with optional real tiny model.
+
+        This test demonstrates the hybrid approach:
+        - If tiny_whisper_model is available: Uses real model for actual transcription
+        - If not available (offline/restricted): Falls back to mock
+
+        Environment control: Set USE_CACHED_MODEL=false to force mock-only testing.
+        """
+        import argparse
+        import os
+        import sys
+        from unittest.mock import MagicMock, patch
+
+        # Skip if no real audio file available
+        test_mp3 = real_audio_test_folder / "test.mp3"
+        if not test_mp3.exists():
+            import pytest
+
+            pytest.skip("test.mp3 not found for cached model test")
+
+        # Add scripts directory to path for import
+        scripts_path = os.path.join(os.getcwd(), "scripts")
+        sys.path.insert(0, scripts_path)
+
+        try:
+            from transcribe_manager import cmd_process
+
+            args = argparse.Namespace(
+                input_folder=str(real_audio_test_folder), db_path=str(cli_test_db), preset="turbo"
+            )
+
+            if tiny_whisper_model is not None:
+                # Use real cached tiny model
+                with patch("backend.transcribe.pick_model") as mock_pick_model:
+                    # Return the real cached tiny model instead of downloading
+                    mock_pick_model.return_value = tiny_whisper_model
+
+                    result = cmd_process(args)
+
+                    # Should succeed with real model transcription
+                    assert result == 0
+
+                    # Verify model was used
+                    assert mock_pick_model.call_count == 1
+            else:
+                # Fall back to mock (offline mode or USE_CACHED_MODEL=false)
+                with patch("backend.transcribe.pick_model") as mock_pick_model:
+                    mock_model = MagicMock()
+                    mock_model.transcribe.return_value = (
+                        [MagicMock(id=1, start=0.0, end=1.0, text="test", speaker=None)],
+                        MagicMock(language="en", language_probability=0.99, duration=1.0),
+                    )
+                    mock_pick_model.return_value = mock_model
+
+                    result = cmd_process(args)
+
+                    # Should succeed with mock
+                    assert result == 0
         finally:
             sys.path.remove(scripts_path)
 

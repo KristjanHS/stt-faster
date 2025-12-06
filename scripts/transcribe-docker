@@ -1,0 +1,136 @@
+#!/usr/bin/env bash
+##########################################################################
+# Docker wrapper script for end users
+#
+# Purpose: Run stt-faster in Docker without installing Python/dependencies
+# Usage: ./scripts/transcribe-docker process /path/to/audio --preset turbo
+##########################################################################
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+IMAGE_NAME="${STT_DOCKER_IMAGE:-stt-faster:latest}"
+DOCKER_CMD="${DOCKER_CMD:-docker}"
+
+print_usage() {
+    cat <<EOF
+${GREEN}stt-faster Docker Wrapper${NC}
+
+Run stt-faster transcription tool in Docker without local installation.
+
+${YELLOW}Usage:${NC}
+  ./scripts/transcribe-docker <command> [args...]
+  
+${YELLOW}Examples:${NC}
+  # Process audio files in current directory
+  ./scripts/transcribe-docker process ./audio --preset turbo
+  
+  # Process specific file
+  ./scripts/transcribe-docker process /path/to/audio.mp3 --preset large
+  
+  # List available models
+  ./scripts/transcribe-docker list-models
+  
+  # Show full help
+  ./scripts/transcribe-docker --help
+
+${YELLOW}Environment Variables:${NC}
+  STT_DOCKER_IMAGE    Docker image name (default: stt-faster:latest)
+  DOCKER_CMD          Docker command to use (default: docker)
+  HF_HOME             Hugging Face cache dir (for model persistence)
+
+${YELLOW}Volume Mounts:${NC}
+  - Current directory → /workspace (for audio files)
+  - ~/.cache/huggingface → Container HF cache (for models)
+  - ~/.local/share/stt-faster → Container state DB
+
+${YELLOW}Building the Image:${NC}
+  ${DOCKER_CMD} build -t stt-faster:latest .
+
+${YELLOW}Notes:${NC}
+  - Audio files must be in current directory or subdirectories
+  - Models are cached in ~/.cache/huggingface (persisted across runs)
+  - Transcription state is saved in ~/.local/share/stt-faster/
+
+EOF
+}
+
+# Check if Docker is available
+check_docker() {
+    if ! command -v "${DOCKER_CMD}" &> /dev/null; then
+        echo -e "${RED}Error: ${DOCKER_CMD} not found${NC}" >&2
+        echo "Please install Docker: https://docs.docker.com/get-docker/" >&2
+        exit 1
+    fi
+    
+    if ! ${DOCKER_CMD} info &> /dev/null; then
+        echo -e "${RED}Error: Docker daemon not running${NC}" >&2
+        echo "Please start Docker Desktop or dockerd" >&2
+        exit 1
+    fi
+}
+
+# Check if image exists, offer to build
+check_image() {
+    if ! ${DOCKER_CMD} image inspect "${IMAGE_NAME}" &> /dev/null; then
+        echo -e "${YELLOW}Warning: Image '${IMAGE_NAME}' not found${NC}" >&2
+        echo "" >&2
+        echo "Build the image with:" >&2
+        echo "  ${DOCKER_CMD} build -t ${IMAGE_NAME} ." >&2
+        echo "" >&2
+        read -p "Build now? (y/N) " -n 1 -r
+        echo
+        if [[ $REPLY =~ ^[Yy]$ ]]; then
+            echo -e "${GREEN}Building ${IMAGE_NAME}...${NC}"
+            ${DOCKER_CMD} build -t "${IMAGE_NAME}" "${PROJECT_ROOT}"
+        else
+            exit 1
+        fi
+    fi
+}
+
+# Main
+main() {
+    # Handle --help or no args
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        print_usage
+        exit 0
+    fi
+    
+    check_docker
+    check_image
+    
+    # Setup volume mounts
+    CURRENT_DIR="$(pwd)"
+    HF_CACHE_DIR="${HF_HOME:-${HOME}/.cache/huggingface}"
+    STT_DATA_DIR="${HOME}/.local/share/stt-faster"
+    
+    # Create cache directories if they don't exist
+    mkdir -p "${HF_CACHE_DIR}" "${STT_DATA_DIR}"
+    
+    echo -e "${GREEN}Running stt-faster in Docker...${NC}"
+    echo "Workspace: ${CURRENT_DIR}"
+    echo "HF Cache: ${HF_CACHE_DIR}"
+    echo "STT Data: ${STT_DATA_DIR}"
+    echo ""
+    
+    # Run container with mounted volumes
+    ${DOCKER_CMD} run --rm -i \
+        -v "${CURRENT_DIR}:/workspace" \
+        -v "${HF_CACHE_DIR}:/home/appuser/.cache/huggingface" \
+        -v "${STT_DATA_DIR}:/home/appuser/.local/share/stt-faster" \
+        -u "$(id -u):$(id -g)" \
+        "${IMAGE_NAME}" \
+        "$@"
+}
+
+main "$@"
+

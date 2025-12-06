@@ -1,8 +1,17 @@
-"""Minimal keepalive entrypoint for the app container.
+"""Minimal keepalive entrypoint for dev/test Docker container.
 
-This module does not start any external services; it simply blocks
-until it receives a termination signal. It is suitable as a placeholder
-so the Docker app service remains running during development.
+Purpose:
+    Keep the Docker app container running during development and testing.
+    This is NOT used in production - end users should use the production
+    Dockerfile at the project root.
+
+Usage:
+    - Development: `docker compose -f docker/docker-compose.yml up`
+    - Testing: `make docker-unit` (runs tests inside container)
+    - Healthcheck: `python -m backend.main --healthcheck`
+
+This module does not start any services; it simply blocks until it
+receives a termination signal (SIGINT/SIGTERM).
 """
 
 from __future__ import annotations

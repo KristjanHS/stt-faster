@@ -93,18 +93,18 @@ Database living at repository root:
 
 ## 📊 Complete Issues List
 
-| Priority | Issue | Impact | Effort |
-|----------|-------|--------|--------|
-| 🔴 P0 | Identity Crisis | 500MB waste, confusion | 15min |
-| 🔴 P0 | Module Boundaries | Untested code, circular deps | 2-3 days |
-| 🔴 P0 | State at Repo Root | Version control pollution | 30min |
-| 🟡 P1 | Duplicate Exceptions | 2 hierarchies for same domain | 1 hour |
-| 🟡 P1 | God Function | `pick_model()` does everything | 1 day |
-| 🟡 P1 | No Service Boundaries | Can't mock, can't swap | 2-3 days |
-| 🟢 P2 | Config Scattered | 4 locations, side effects | 1 day |
-| 🟢 P2 | Empty Frontend | Misleading structure | 15min |
-| 🟢 P2 | Coverage Gaps | Business logic not covered | 1 day |
-| 🟢 P2 | Docker Ghost | Empty folder, keepalive that sleeps | 30min |
+| Priority | Issue | Impact | Effort | Status |
+|----------|-------|--------|--------|--------|
+| 🔴 P0 | Identity Crisis | 500MB waste, confusion | 15min | ✅ Done (deps already clean) |
+| 🔴 P0 | Module Boundaries | Untested code, circular deps | 2-3 days | ✅ Done (Issue #2) |
+| 🔴 P0 | State at Repo Root | Version control pollution | 30min | ✅ Done (Issue #2 - XDG paths) |
+| 🟡 P1 | Duplicate Exceptions | 2 hierarchies for same domain | 1 hour | ✅ Done (Issue #2) |
+| 🟡 P1 | God Function | `pick_model()` does everything | 1 day | ⏭️ Next |
+| 🟡 P1 | No Service Boundaries | Can't mock, can't swap | 2-3 days | ⏭️ Later |
+| 🟢 P2 | Config Scattered | 4 locations, side effects | 1 day | ⏭️ Later |
+| 🟢 P2 | Empty Frontend | Misleading structure | 15min | ✅ Done (Issue #8) |
+| 🟢 P2 | Coverage Gaps | Business logic not covered | 1 day | ✅ Done (80% coverage) |
+| 🟢 P2 | Docker Ghost | Empty folder, keepalive that sleeps | 30min | ✅ Done (Issue #10) |
 
 ---
 
@@ -398,4 +398,50 @@ uv run pre-commit run --all-files
 **Time spent:** ~2 hours  
 **Time remaining:** None - COMPLETE! ✅  
 **Progress:** 100% complete 🎉
+
+---
+
+### Issue #8: Empty Frontend ✅ (5 min)
+- ✅ `frontend/README.md` - status & architecture guidelines
+- ✅ `frontend/src/.gitkeep` - placeholder structure  
+- ✅ `tests/unit/test_architecture.py` - boundary enforcement
+- ✅ Tests pass (2/2), no linter errors
+
+---
+
+### Issue #10: Docker Ghost ✅ (60 min)
+
+**Strategy:** Option 3 + Production Docker for end users
+
+#### ✅ Production Docker (End Users)
+- ✅ `Dockerfile` - production image (no test deps, minimal size)
+- ✅ `scripts/transcribe-docker` - user-friendly wrapper script
+- ✅ Entrypoint: `transcribe_manager.py` (ready to use)
+- ✅ Volume mounts: workspace, HF cache, state DB
+- ✅ `Makefile` targets: `docker-build-prod`, `docker-run-prod`
+
+#### ✅ Dev/Test Docker (Cleaned)
+- ✅ `docker/docker-compose.yml` - removed Ollama service
+- ✅ `docker/app.Dockerfile` - dev/test image (with test deps)
+- ✅ `backend/main.py` - updated docstring (dev/test purpose)
+- ✅ Simplified: single app service, no LLM dependencies
+
+#### ✅ Documentation
+- ✅ `docker/README.md` - comprehensive guide (production vs dev/test)
+- ✅ `README.md` - Docker usage section added
+- ✅ `Makefile` - separated prod and dev/test targets
+
+#### ✅ Validation
+- ✅ All 66 unit tests passing
+- ✅ 80% code coverage
+- ✅ No Ollama references in docker-compose
+- ✅ Docker wrapper script works (`--help` tested)
+- ✅ Architecture tests enforcing boundaries
+- ✅ Ruff & formatter passing
+
+**Impact:**
+- **End users:** Can run tool without Python installation
+- **Developers:** Clear separation of prod vs dev/test Docker
+- **Architecture:** Removed unused LLM infrastructure (Ollama)
+- **Documentation:** Clear guidance on when to use which Docker setup
 

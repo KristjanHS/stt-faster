@@ -48,6 +48,32 @@ Batch audio transcription with Estonian (default) and English models. [Technical
 
 **Troubleshooting**: For WSL paths use `/mnt/c/Users/...`. Delete `transcribe_state.db` to reset tracking.
 
+### Docker Usage (No Local Installation)
+
+Run stt-faster in Docker without installing Python or dependencies:
+
+```bash
+# Build production image (one time)
+make docker-build-prod
+
+# Process audio files using Docker wrapper
+./scripts/transcribe-docker process /path/to/audio --preset turbo
+
+# Or run directly
+docker run --rm \
+  -v $(pwd):/workspace \
+  -v ~/.cache/huggingface:/home/appuser/.cache/huggingface \
+  stt-faster:latest process /workspace/audio --preset turbo
+```
+
+**Features:**
+- ✅ No Python installation required
+- ✅ Models cached in `~/.cache/huggingface` (persisted across runs)
+- ✅ Transcription state in `~/.local/share/stt-faster`
+- ✅ Runs as non-root user with your UID/GID
+
+**See:** [docker/README.md](docker/README.md) for full Docker documentation.
+
 ## Local CI with Act
 - Act is supported for local CI parity. See `docs/AI_instructions.md` for setup and usage.
 
