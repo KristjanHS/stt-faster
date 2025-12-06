@@ -42,7 +42,7 @@ docker build -t stt-faster:latest .
 ### 4. **Stateless & Portable**
 - ✅ All state externalized to volumes:
   - `/workspace` - Audio files to process
-  - `/home/appuser/.cache/huggingface` - Model cache (persistent)
+  - `/home/appuser/.cache/hf` - Model cache (persistent)
   - `/home/appuser/.local/share/stt-faster` - Application state DB
 - ✅ No hardcoded paths or assumptions about host environment
 - ✅ Works with user-provided UID/GID mapping
@@ -77,7 +77,7 @@ docker run --rm stt-faster:latest --help
 # Process audio files
 docker run --rm \
   -v $(pwd):/workspace \
-  -v ~/.cache/huggingface:/home/appuser/.cache/huggingface \
+  -v ~/.cache/hf:/home/appuser/.cache/hf \
   stt-faster:latest process /workspace/audio --preset turbo
 
 # Check status
@@ -105,7 +105,7 @@ spec:
         - name: audio-files
           mountPath: /workspace
         - name: model-cache
-          mountPath: /home/appuser/.cache/huggingface
+          mountPath: /home/appuser/.cache/hf
         resources:
           limits:
             memory: "4Gi"
@@ -133,7 +133,7 @@ services:
     image: stt-faster:latest
     volumes:
       - ./audio:/workspace
-      - model-cache:/home/appuser/.cache/huggingface
+      - model-cache:/home/appuser/.cache/hf
       - app-data:/home/appuser/.local/share/stt-faster
     command: ["process", "/workspace", "--preset", "turbo"]
     user: "1000:1000"
@@ -197,7 +197,7 @@ docker run --rm -u "$(id -u):$(id -g)" \
 ```bash
 # Pre-download models to cache
 docker run --rm \
-  -v ~/.cache/huggingface:/home/appuser/.cache/huggingface \
+  -v ~/.cache/hf:/home/appuser/.cache/hf \
   stt-faster:latest process /workspace --preset turbo --help
 ```
 
