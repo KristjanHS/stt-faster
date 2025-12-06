@@ -75,11 +75,11 @@ jobs:
 
       - name: Download and cache CodeQL CLI
         run: |
-          # Version 2.20.3+ required for compatibility with python-queries pack (compiled with 2.23.7)
+          # Version 2.23.7 required for compatibility with python-queries pack v1.7.2 (compiled with 2.23.7)
           # When running via Act, this path is mounted from host ~/.cache/act-codeql for persistence
           CODEQL_HOME="${HOME}/codeql-cli"
           if [[ ! -x "${CODEQL_HOME}/codeql/codeql" ]]; then
-            CODEQL_VERSION="2.20.3"
+            CODEQL_VERSION="2.23.7"
             echo "Downloading CodeQL CLI v${CODEQL_VERSION}..."
             wget -q "https://github.com/github/codeql-cli-binaries/releases/download/v${CODEQL_VERSION}/codeql-linux64.zip" -O /tmp/codeql.zip
             mkdir -p "${CODEQL_HOME}"

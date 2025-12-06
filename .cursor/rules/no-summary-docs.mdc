@@ -1,0 +1,12 @@
+---
+description: "No automatic summary/overview documents - provide concise summaries in chat only"
+type: agent-behavior
+alwaysApply: true
+---
+- **Never** create or update summary, overview, or completion documents at the end of tasks
+- **Never** proactively create files like `TASK_SUMMARY.md`, `COMPLETION_REPORT.md`, `WORK_SUMMARY.md`, etc.
+- **Never** update existing documents just to add a summary section or update progress
+- **Instead**: Provide a very concise summary (3-5 bullet points max) directly in the chat window
+- Keep chat summaries brief: what was done, what changed, what's the result
+- Only create documentation files if explicitly requested by the user
+- This applies to all task completions, series of tasks, and debugging sessions
