@@ -3,12 +3,17 @@
 # Two-stage build: builder (Python deps via uv) → runtime (OS deps + app)
 ##########
 
-############################
-# Build stage: wheels/venv #
-############################
+# ARGs used in FROM statements must be defined before first FROM
 # Override UV_IMAGE_REF to change base; default is digest‑pinned for reproducibility.
 # Got digest from `docker pull ghcr.io/astral-sh/uv:python3.12-bookworm-slim`
 ARG UV_IMAGE_REF=ghcr.io/astral-sh/uv:python3.12-bookworm-slim@sha256:c6fad5e08092142ea53fc03cbebb6304c5d06a25dd53ab450114f6c5f03376a7
+# Override PYTHON_RUNTIME_IMAGE to change base; default is digest‑pinned for reproducibility.
+# Got digest from `docker pull python:3.12-slim-bookworm`
+ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim-bookworm@sha256:3ad2a947749a3eb74acd9e00636ffa0def5aae0bbbd9fa4fff6253e404e2fe15
+
+############################
+# Build stage: wheels/venv #
+############################
 # hadolint ignore=DL3006
 FROM ${UV_IMAGE_REF} AS builder
 
@@ -36,9 +41,6 @@ RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
 ############################################
 # Runtime stage: Debian + apt + your app  #
 ############################################
-# Override PYTHON_RUNTIME_IMAGE to change base; default is digest‑pinned for reproducibility.
-# Got digest from `docker pull python:3.12-slim-bookworm`
-ARG PYTHON_RUNTIME_IMAGE=python:3.12-slim-bookworm@sha256:3ad2a947749a3eb74acd9e00636ffa0def5aae0bbbd9fa4fff6253e404e2fe15
 # hadolint ignore=DL3006
 FROM ${PYTHON_RUNTIME_IMAGE} AS runtime
 

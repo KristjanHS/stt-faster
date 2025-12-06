@@ -15,6 +15,7 @@ import pytest
 
 
 @pytest.mark.slow
+@pytest.mark.network
 class TestRealTranscription:
     """E2E tests that perform actual transcription using real audio files.
 
