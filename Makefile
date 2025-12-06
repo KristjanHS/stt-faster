@@ -43,7 +43,7 @@ help:
 	@echo "  -- Tests --"
 	@echo "  unit         - Run unit tests (local) and write reports"
 	@echo "  integration  - Run integration tests (uv preferred)"
-	@echo "  e2e          - Run e2e tests (local) and write reports"
+	@echo "  e2e          - Run e2e tests (sequential, Docker-based) and write reports"
 	@echo ""
 	@echo "  -- Docker (Production) --"
 	@echo "  docker-build-prod    - Build production Docker image for end users"
@@ -147,13 +147,13 @@ unit:
 		uv run -m pytest tests/unit -n auto --maxfail=1 -q --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
 	fi
 
-# E2E test target
+# E2E test target (run without parallelization due to shared Docker container)
 e2e:
 	mkdir -p reports
 	@if [ -x .venv/bin/python ]; then \
-		.venv/bin/python -m pytest tests/e2e -n auto --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
+		.venv/bin/python -m pytest tests/e2e --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
 	else \
-		uv run -m pytest tests/e2e -n auto --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
+		uv run -m pytest tests/e2e --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
 	fi
 
 
