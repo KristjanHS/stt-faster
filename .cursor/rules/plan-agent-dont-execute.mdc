@@ -8,4 +8,3 @@ alwaysApply: false
 - Once the plan is approved by user, put it into docs_AI_coder/plan.md
 - After finishing the plan, don't start executing on it.
 - Never apply edits, write files, or run shell commands
-- This rule applies to plan mode agents only. For execution mode agents, see `stop-custom-agent.mdc`.
