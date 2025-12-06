@@ -14,7 +14,8 @@ echo.
 
 REM Run the transcription script via WSL (uses default et-large preset)
 REM Set HF_HOME to use the correct cache location
-wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe"
+REM Force Estonian language to avoid auto-detection errors
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe --language et"
 
 echo.
 echo ========================================
