@@ -59,7 +59,7 @@ class TestPickModel:
     """Tests for pick_model function."""
 
     @patch("backend.transcribe._get_estonian_model_path")
-    @patch("backend.transcribe.WhisperModel")
+    @patch("backend.model_loader.WhisperModel")
     def test_et_large_preset_success(self, mock_whisper: Mock, mock_get_path: Mock) -> None:
         """Test et-large preset with successful GPU initialization."""
         mock_get_path.return_value = "/tmp/model/ct2"
@@ -73,7 +73,7 @@ class TestPickModel:
         mock_whisper.assert_called_once_with("/tmp/model/ct2", device="cuda", compute_type="float16")
 
     @patch("backend.transcribe._get_estonian_model_path")
-    @patch("backend.transcribe.WhisperModel")
+    @patch("backend.model_loader.WhisperModel")
     def test_et_large_fallback_to_cpu(
         self, mock_whisper: Mock, mock_get_path: Mock, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -97,7 +97,7 @@ class TestPickModel:
         assert "GPU initialization failed" in caplog.text
 
     @patch("backend.transcribe._get_estonian_model_path")
-    @patch("backend.transcribe.WhisperModel")
+    @patch("backend.model_loader.WhisperModel")
     def test_et_large_fails_on_both_gpu_and_cpu(self, mock_whisper: Mock, mock_get_path: Mock) -> None:
         """Test that ModelLoadError is raised when both GPU and CPU fail."""
         mock_get_path.return_value = "/tmp/model/ct2"
@@ -110,7 +110,7 @@ class TestPickModel:
             pick_model("et-large")
 
     @patch("backend.transcribe.snapshot_download")
-    @patch("backend.transcribe.WhisperModel")
+    @patch("backend.model_loader.WhisperModel")
     def test_turbo_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
         """Test turbo preset initialization."""
         mock_model = Mock()
@@ -124,7 +124,7 @@ class TestPickModel:
         mock_whisper.assert_called_once_with("/tmp/model/turbo", device="cuda", compute_type="float16")
 
     @patch("backend.transcribe.snapshot_download")
-    @patch("backend.transcribe.WhisperModel")
+    @patch("backend.model_loader.WhisperModel")
     def test_distil_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
         """Test distil preset initialization."""
         mock_model = Mock()
@@ -138,7 +138,7 @@ class TestPickModel:
         mock_whisper.assert_called_once_with("/tmp/model/distil", device="cuda", compute_type="float16")
 
     @patch("backend.transcribe.snapshot_download")
-    @patch("backend.transcribe.WhisperModel")
+    @patch("backend.model_loader.WhisperModel")
     def test_large8gb_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
         """Test large8gb preset initialization."""
         mock_model = Mock()
@@ -151,16 +151,10 @@ class TestPickModel:
         mock_snapshot.assert_called_once_with("Systran/faster-whisper-large-v3")
         mock_whisper.assert_called_once_with("/tmp/model/large-v3", device="cuda", compute_type="int8_float16")
 
-    @patch("backend.transcribe.WhisperModel")
-    def test_fallback_preset(self, mock_whisper: Mock) -> None:
-        """Test fallback to small CPU model for unknown presets."""
-        mock_model = Mock()
-        mock_whisper.return_value = mock_model
-
-        result = pick_model("unknown")
-
-        assert result == mock_model
-        mock_whisper.assert_called_once_with("small", device="cpu", compute_type="int8")
+    def test_fallback_preset(self) -> None:
+        """Test that unknown presets raise KeyError."""
+        with pytest.raises(KeyError, match="Unknown preset 'unknown'"):
+            pick_model("unknown")
 
 
 class TestRoundFloats:

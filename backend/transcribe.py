@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING, Any, Dict, cast
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
 
-from backend.exceptions import ModelLoadError, ModelNotFoundError
+from backend.exceptions import ModelNotFoundError
+from backend.model_config import ModelConfig, get_preset
+from backend.model_loader import ModelLoader
 
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
@@ -74,95 +76,69 @@ def _get_estonian_model_path(model_id: str) -> str:
     return str(ct2_path)
 
 
+def _get_cached_model_path(model_id: str) -> str:
+    """Download/retrieve cached Whisper model from HuggingFace.
+
+    Args:
+        model_id: HuggingFace model ID (e.g., 'Systran/faster-whisper-large-v3')
+
+    Returns:
+        Path to the cached model directory
+    """
+    return snapshot_download(model_id)  # nosec B615
+
+
+def _resolve_model_path(config: ModelConfig) -> str:
+    """Resolve the model path based on configuration.
+
+    Args:
+        config: Model configuration
+
+    Returns:
+        Path to the model (local or cached from HuggingFace)
+    """
+    if config.is_estonian:
+        return _get_estonian_model_path(config.model_id)
+    # For non-Estonian models, check if it's a simple preset name or HF model ID
+    if "/" in config.model_id:
+        # HuggingFace model ID (e.g., "Systran/faster-whisper-large-v3")
+        return _get_cached_model_path(config.model_id)
+    # Simple model name (e.g., "small") - faster-whisper will download it
+    return config.model_id
+
+
 def pick_model(preset: str = "et-large") -> WhisperModel:
-    def _load(model_name: str, *, default_device: str, default_type: str) -> WhisperModel:
-        """Load a Whisper model with automatic GPU->CPU fallback.
+    """Load a Whisper model by preset name.
 
-        Device selection priority:
-        1. STT_DEVICE environment variable (cpu/cuda)
-        2. default_device parameter
-        3. Auto-fallback to CPU if GPU fails
+    This is the main entry point for loading models. It uses configuration-driven
+    model selection with automatic device selection and GPU->CPU fallback.
 
-        In production containers, set STT_DEVICE=cpu for portability.
-        Local runs will auto-detect GPU.
-        """
-        # Check environment variable first
-        env_device = os.getenv("STT_DEVICE", "").lower()
-        if env_device in ("cpu", "cuda"):
-            device = env_device
-            compute_type = "int8" if device == "cpu" else default_type
-            LOGGER.info("Using device from STT_DEVICE env: %s", device)
-        else:
-            device = default_device
-            compute_type = default_type
+    Available presets: et-large, turbo, distil, large8gb, small
 
-        # If device is CPU, use it directly
-        if device == "cpu":
-            LOGGER.info("Using CPU device for model: %s", model_name)
-            start_time = time.time()
-            model = WhisperModel(model_name, device="cpu", compute_type=compute_type)
-            load_time = time.time() - start_time
-            LOGGER.info("⏱️  Model loaded in %.2f seconds", load_time)
-            return model
+    Args:
+        preset: Model preset name (see PRESETS in model_config.py)
 
-        # Try GPU first, fall back to CPU if it fails
-        try:
-            LOGGER.info("Attempting to load model on GPU: %s", model_name)
-            start_time = time.time()
-            model = WhisperModel(model_name, device=device, compute_type=compute_type)
-            load_time = time.time() - start_time
-            LOGGER.info("⏱️  Model loaded on GPU in %.2f seconds", load_time)
-            return model
-        except Exception as error:  # fall back to CPU when GPU libs are missing
-            LOGGER.warning(
-                "GPU initialization failed for %s: %s. Falling back to CPU int8; expect slower transcription.",
-                model_name,
-                error,
-            )
-            try:
-                start_time = time.time()
-                model = WhisperModel(model_name, device="cpu", compute_type="int8")
-                load_time = time.time() - start_time
-                LOGGER.info("⏱️  Model loaded on CPU in %.2f seconds", load_time)
-                return model
-            except Exception as cpu_error:
-                raise ModelLoadError(
-                    f"Failed to load model {model_name} on both GPU and CPU: {cpu_error}"
-                ) from cpu_error
+    Returns:
+        Loaded WhisperModel instance
 
-    def _get_cached_model_path(model_id: str) -> str:
-        """Download/retrieve cached Whisper model from HuggingFace.
+    Raises:
+        KeyError: If preset is not recognized
+        ModelLoadError: If model fails to load
+        ModelNotFoundError: If Estonian model CT2 folder not found
 
-        Args:
-            model_id: HuggingFace model ID (e.g., 'Systran/faster-whisper-large-v3')
+    Example:
+        >>> model = pick_model("et-large")  # Estonian model on GPU (or CPU fallback)
+        >>> model = pick_model("small")     # Small model on CPU
+    """
+    # Get configuration for the preset
+    config = get_preset(preset)
 
-        Returns:
-            Path to the cached model directory
-        """
-        return snapshot_download(model_id)  # nosec B615
+    # Resolve the model path (download if needed)
+    model_path = _resolve_model_path(config)
 
-    # Estonian models (default)
-    if preset == "et-large":
-        # TalTech Estonian Whisper large-v3-turbo (newest, Sep 2025)
-        # Fine-tuned on 1400 hours of Estonian verbatim transcriptions
-        model_path = _get_estonian_model_path("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
-        return _load(model_path, default_device="cuda", default_type="float16")
-
-    # Original English/multilingual models (use cached paths)
-    if preset == "turbo":
-        # Distilled large-v3 (faster-whisper-large-v3-turbo doesn't exist, use distil instead)
-        model_path = _get_cached_model_path("Systran/faster-distil-whisper-large-v3")
-        return _load(model_path, default_device="cuda", default_type="float16")
-    if preset == "distil":
-        # English-only; very fast; near large-v3 accuracy
-        model_path = _get_cached_model_path("Systran/faster-distil-whisper-large-v3")
-        return _load(model_path, default_device="cuda", default_type="float16")
-    if preset == "large8gb":
-        # Try original large-v3 with mixed INT8/FP16 to fit in 8 GB
-        model_path = _get_cached_model_path("Systran/faster-whisper-large-v3")
-        return _load(model_path, default_device="cuda", default_type="int8_float16")
-    # Fallback (portable): CPU int8
-    return WhisperModel("small", device="cpu", compute_type="int8")
+    # Load the model with automatic fallback
+    loader = ModelLoader()
+    return loader.load(model_path, config)
 
 
 def _round_floats(value: Any, places: int = FLOAT_PRECISION) -> Any:

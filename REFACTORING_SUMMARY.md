@@ -99,8 +99,8 @@ Database living at repository root:
 | 🔴 P0 | Module Boundaries | Untested code, circular deps | 2-3 days | ✅ Done (Issue #2) |
 | 🔴 P0 | State at Repo Root | Version control pollution | 30min | ✅ Done (Issue #2 - XDG paths) |
 | 🟡 P1 | Duplicate Exceptions | 2 hierarchies for same domain | 1 hour | ✅ Done (Issue #2) |
-| 🟡 P1 | God Function | `pick_model()` does everything | 1 day | ⏭️ Next |
-| 🟡 P1 | No Service Boundaries | Can't mock, can't swap | 2-3 days | ⏭️ Later |
+| 🟡 P1 | God Function | `pick_model()` does everything | 1 day | ✅ Done (Issue #5) |
+| 🟡 P1 | No Service Boundaries | Can't mock, can't swap | 2-3 days | ⏭️ Next |
 | 🟢 P2 | Config Scattered | 4 locations, side effects | 1 day | ⏭️ Later |
 | 🟢 P2 | Empty Frontend | Misleading structure | 15min | ✅ Done (Issue #8) |
 | 🟢 P2 | Coverage Gaps | Business logic not covered | 1 day | ✅ Done (80% coverage) |
@@ -444,4 +444,81 @@ uv run pre-commit run --all-files
 - **Developers:** Clear separation of prod vs dev/test Docker
 - **Architecture:** Removed unused LLM infrastructure (Ollama)
 - **Documentation:** Clear guidance on when to use which Docker setup
+
+---
+
+### Issue #5: God Function (`pick_model()`) ✅ (2.5 hours)
+
+**Strategy:** Option 2 - Configuration + Service pattern
+
+#### ✅ Completed Tasks:
+
+1. **Model Configuration Module** ✅
+   - File: `backend/model_config.py`
+   - Created `ModelConfig` dataclass with device, compute_type, is_estonian fields
+   - Defined `PRESETS` dictionary with all model configurations (et-large, turbo, distil, large8gb, small)
+   - Added `get_preset()` function with helpful error messages
+   - Type hints: `DeviceType`, `ComputeType` literals
+
+2. **Model Loader Service** ✅
+   - File: `backend/model_loader.py`
+   - Created `DeviceSelector` class for device selection logic
+   - Respects `STT_DEVICE` environment variable (cpu/cuda)
+   - Respects model-specific compute types (e.g., int8_float16 for large8gb)
+   - Created `ModelLoader` class with dependency injection
+   - GPU→CPU fallback logic isolated and testable
+   - Performance timing and logging
+
+3. **Refactored `pick_model()`** ✅
+   - File: `backend/transcribe.py` (88 lines → 26 lines)
+   - Now uses `get_preset()` + `_resolve_model_path()` + `ModelLoader`
+   - Clear separation: configuration, path resolution, loading
+   - Backward compatible API (same signature)
+   - Better error messages (e.g., "Unknown preset 'X'. Available: Y, Z")
+
+4. **Helper Functions Extracted** ✅
+   - `_get_estonian_model_path()` - Estonian model CT2 handling
+   - `_get_cached_model_path()` - HuggingFace snapshot download
+   - `_resolve_model_path()` - Determines model path based on config
+
+5. **Tests Updated** ✅
+   - Updated 7 test mocks from `backend.transcribe.WhisperModel` → `backend.model_loader.WhisperModel`
+   - Fixed `test_fallback_preset` to expect `KeyError` instead of fallback model
+   - All 84 tests passing (25 in test_transcribe.py, 59 others)
+
+6. **Validation** ✅
+   - ✅ All 84 unit + integration tests passing
+   - ✅ Code coverage: 82% (up from 80%)
+   - ✅ `backend/transcribe.py` coverage: 92%
+   - ✅ `backend/model_loader.py` coverage: 85%
+   - ✅ `backend/model_config.py` coverage: 100%
+   - ✅ All pre-commit hooks passing (Ruff, Pyright, Bandit, etc.)
+   - ✅ No linter errors
+
+#### 🎯 Success Criteria: ALL MET ✅
+- ✅ Configuration separated from behavior
+- ✅ Model loading logic isolated and testable
+- ✅ Device selection strategy can be mocked
+- ✅ Presets easily extensible (just add to `PRESETS` dict)
+- ✅ Backward compatible API
+- ✅ All tests passing
+- ✅ No linter errors
+
+#### 📊 Impact:
+- **Testability:** Can now mock device selection without GPU
+- **Extensibility:** Adding new presets is trivial (1 line of config)
+- **Clarity:** Clear separation between "what model" and "how to load it"
+- **Maintainability:** Reduced `pick_model()` from 88 lines to 26 lines
+- **Type Safety:** Full type hints with Literal types for device/compute
+
+#### 📁 Files Created:
+- `backend/model_config.py` (79 lines) - Configuration layer
+- `backend/model_loader.py` (124 lines) - Service layer
+
+#### 📁 Files Modified:
+- `backend/transcribe.py` - Refactored `pick_model()` to use new components
+- `tests/unit/test_transcribe.py` - Updated mocks for new structure
+
+**Time spent:** ~2.5 hours  
+**Status:** COMPLETE! ✅
 
