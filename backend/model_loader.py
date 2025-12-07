@@ -21,7 +21,7 @@ def _default_model_factory(model_path: str, device: DeviceType, compute_type: Co
     return WhisperModel(model_path, device=device, compute_type=compute_type)
 
 
-_ALLOWED_COMPUTE_TYPES = {"int8", "float16", "int8_float16"}
+_ALLOWED_COMPUTE_TYPES = {"int8", "float16", "int8_float16", "float32"}
 
 
 class DeviceSelector:
