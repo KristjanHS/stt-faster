@@ -90,17 +90,17 @@ def project_root() -> Path:
 
 
 @pytest.fixture(scope="session")
-def tiny_whisper_model() -> "WhisperModel | None":
+def tiny_whisper_model() -> "WhisperModel":
     """Cached tiny Whisper model for integration/E2E tests when enabled.
 
-    Controlled by USE_CACHED_MODEL (defaults to true). Returns None when
-    disabled or when download fails.
+    Controlled by USE_CACHED_MODEL (defaults to true). Explicitly fails when the
+    cache is disabled or if loading the model errors so dependent tests cannot
+    silently skip.
     """
     use_cached = os.getenv("USE_CACHED_MODEL", "true").lower() in ("true", "1", "yes")
 
     if not use_cached:
-        logger.info("USE_CACHED_MODEL=false, skipping tiny model cache")
-        return None
+        pytest.fail("USE_CACHED_MODEL=false disables the tiny Whisper cache required for integration/E2E tests.")
 
     try:
         from faster_whisper import WhisperModel
@@ -110,10 +110,4 @@ def tiny_whisper_model() -> "WhisperModel | None":
         logger.info("Tiny Whisper model loaded successfully (cached for future test runs)")
         return model
     except Exception as exc:  # pragma: no cover - defensive guard
-        logger.warning(
-            "Failed to load tiny Whisper model for tests: %s. "
-            "Tests will fall back to mocks when the model is unavailable.",
-            exc,
-            exc_info=True,
-        )
-        return None
+        pytest.fail(f"Failed to load tiny Whisper model for tests: {exc}", pytrace=True)
