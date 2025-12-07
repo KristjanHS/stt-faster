@@ -23,7 +23,7 @@ make new-project-cleanup  # slug auto-detected from bootstrap; module defaults t
 3) Manual edits to align with the new project  
 - Create your package/tests scaffold (e.g., module with `__init__.py`/`cli.py`; tests/unit|integration|e2e placeholders).
 - Update `pyproject.toml`: project name/description/homepage/repository, runtime deps baseline (typer, pydantic, python-dotenv, rich), coverage/tool sources, and package discovery to point at your module.
-- Search/replace old slug/module strings manually (e.g., `rg "stt-faster" .`, `rg "stt_faster" .`). If you prefer assistance, have an AI coding agent perform reviewed replacements instead of scripts.
+- Search/replace old slug/module strings manually (e.g., `rg "xls-analyser" .`, `rg "xls_analyser" .`). If you prefer assistance, have an AI coding agent perform reviewed replacements instead of scripts.
 - Set up git manually (`git init`, `git remote add origin <url>`, `git branch -M main`), or run `make new-project-git-setup` to call the helper script with prompts (init/remote/branch).
 - Update README, `AGENTS.md`, docs references, badges, Docker names/env templates, and any remaining config that mentions the old project.
 
