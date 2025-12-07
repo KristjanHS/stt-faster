@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import ctypes
 import logging
-import os
 import subprocess
 from typing import TYPE_CHECKING
 
@@ -25,9 +24,6 @@ LOGGER = logging.getLogger(__name__)
 @pytest.fixture(scope="session")
 def require_gpu_environment() -> dict[str, str]:
     """Validate GPU prerequisites once; fail fast on missing pieces."""
-    if os.getenv("RUN_GPU_DIAGNOSTICS", "false").lower() not in ("true", "1", "yes"):
-        pytest.skip("GPU diagnostics are opt-in; set RUN_GPU_DIAGNOSTICS=true to enable.")
-
     info: dict[str, str] = {}
 
     try:

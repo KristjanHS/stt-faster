@@ -19,6 +19,12 @@ class AudioInfo:
 
 def inspect_audio(path: Path, *, run_command: Callable[..., str] | None = None) -> AudioInfo:
     """Inspect the input audio using ffprobe."""
+    try:
+        if path.stat().st_size == 0:
+            raise PreprocessError("audio file is empty")
+    except FileNotFoundError as exc:
+        raise PreprocessError(f"audio file not found: {path}") from exc
+
     runner = run_command or subprocess.check_output
     command = [
         "ffprobe",
@@ -86,9 +92,17 @@ def _format_ffprobe_error(raw_output: str | bytes | None) -> str:
     if not lines:
         return "no diagnostic output"
 
+    def _keep(line: str) -> bool:
+        # Drop brace-only artifacts from ffprobe output
+        return any(ch.isalnum() for ch in line)
+
+    filtered = [line for line in lines if _keep(line)]
+    if not filtered:
+        return "no diagnostic output"
+
     # Preserve order while dropping duplicates and collapsing whitespace/newlines
     seen: dict[str, None] = {}
-    for line in lines:
+    for line in filtered:
         seen.setdefault(line, None)
 
     return "; ".join(seen.keys())
