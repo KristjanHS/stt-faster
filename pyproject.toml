@@ -6,10 +6,29 @@ authors = [{ name=""}]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "ctranslate2>=4.6.0,<5",
-    "faster-whisper>=1.0.0,<2.0.0",
-    "hf-transfer>=0.1.0,<1.0.0",
-    "huggingface-hub>=0.26.0,<1.0.0",
+    # GPU-verified stack (pinned to versions validated with CUDA)
+    "ctranslate2==4.6.2",
+    "faster-whisper==1.2.1",
+    "onnxruntime==1.23.2",
+    "numpy==2.3.5",
+    "huggingface-hub==1.2.1",
+    "hf-xet==1.2.0",
+    "tokenizers==0.22.1",
+    "protobuf==6.33.2",
+    "fsspec==2025.12.0",
+    "pyyaml==6.0.3",
+    "filelock==3.20.0",
+    "certifi==2025.11.12",
+    "av==16.0.1",
+    "idna==3.11",
+    "httpx==0.28.1",
+    "httpcore==1.0.9",
+    "anyio==4.12.0",
+    "click==8.3.1",
+    "shellingham==1.5.4",
+    "typer-slim==0.20.0",
+    "sympy==1.14.0",
+    # Core app
     "python-dotenv>=1.1.1,<2.0.0",
     "rich>=14.1.0,<15.0.0",
 ]
@@ -128,4 +147,3 @@ python-dotenv = ["dotenv"]
 source = ["backend"]
 disable_warnings = ["no-data-collected"]
 data_file = "reports/coverage/.coverage"
-
