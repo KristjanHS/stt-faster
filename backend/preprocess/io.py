@@ -37,7 +37,8 @@ def inspect_audio(path: Path, *, run_command: Callable[..., str] | None = None) 
     except FileNotFoundError as exc:
         raise PreprocessError("ffprobe is required but not installed or not on PATH") from exc
     except subprocess.CalledProcessError as exc:
-        raise PreprocessError(f"ffprobe failed: {exc.output.strip()}") from exc
+        message = _format_ffprobe_error(exc.output)
+        raise PreprocessError(f"ffprobe failed: {message}") from exc
 
     try:
         payload: Dict[str, Any] = json.loads(output)
@@ -71,3 +72,23 @@ def _safe_float(value: Any) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _format_ffprobe_error(raw_output: str | bytes | None) -> str:
+    """Flatten ffprobe stderr/stdout into a concise single-line message."""
+    if raw_output is None:
+        return "no diagnostic output"
+
+    if isinstance(raw_output, bytes):
+        raw_output = raw_output.decode(errors="replace")
+
+    lines = [line.strip() for line in raw_output.splitlines() if line.strip()]
+    if not lines:
+        return "no diagnostic output"
+
+    # Preserve order while dropping duplicates and collapsing whitespace/newlines
+    seen: dict[str, None] = {}
+    for line in lines:
+        seen.setdefault(line, None)
+
+    return "; ".join(seen.keys())
