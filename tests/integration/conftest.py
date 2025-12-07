@@ -32,18 +32,17 @@ def _migrate_hf_transfer_env() -> None:
 
 @pytest.fixture
 def cli_test_folder(tmp_path: Path) -> Path:
-    """Create a temporary folder with test audio files.
-
-    Creates empty placeholder audio files for CLI testing without
-    requiring actual model processing.
-    """
+    """Create a temporary folder with small real audio files for CLI testing."""
     test_folder = tmp_path / "test_audio"
     test_folder.mkdir()
 
-    # Create test audio files (empty for now, as real models would be too heavy)
-    (test_folder / "audio1.wav").touch()
-    (test_folder / "audio2.mp3").touch()
-    (test_folder / "audio3.m4a").touch()
+    source = _load_short_sample()
+    ffmpeg = _get_ffmpeg()
+
+    # Generate a tiny set in multiple formats to exercise preprocessing
+    _transcode(ffmpeg, source, test_folder / "audio1.wav", codec_args=["-ac", "1", "-ar", "16000"])
+    shutil.copy2(source, test_folder / "audio2.mp3")
+    _transcode(ffmpeg, source, test_folder / "audio3.m4a", codec_args=["-c:a", "aac", "-b:a", "64k"])
 
     return test_folder
 
@@ -126,3 +125,27 @@ def ctranslate2_device_count() -> int:
             return 0
     except ImportError:
         return 0
+
+
+def _load_short_sample() -> Path:
+    sample = Path("tests/test_short.mp3")
+    if not sample.exists():
+        pytest.fail("tests/test_short.mp3 is required; regenerate with ffmpeg (0.5s tone).")
+    return sample
+
+
+def _get_ffmpeg() -> str:
+    ffmpeg = shutil.which("ffmpeg")
+    if ffmpeg is None:
+        pytest.fail("ffmpeg is required for integration audio fixtures.")
+    return ffmpeg
+
+
+def _transcode(ffmpeg: str, source: Path, dest: Path, codec_args: list[str]) -> None:
+    result = subprocess.run(
+        [ffmpeg, "-y", "-loglevel", "error", "-i", str(source), *codec_args, str(dest)],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        pytest.fail(f"ffmpeg failed creating {dest.name}: {result.stderr.strip()}")

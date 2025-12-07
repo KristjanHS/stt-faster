@@ -17,11 +17,11 @@ from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
 def test_config_from_env_defaults() -> None:
     cfg = PreprocessConfig.from_env(env={})
 
-    assert cfg.enabled is False
-    assert cfg.target_sample_rate == 16_000
-    assert cfg.target_channels == 1
+    assert cfg.enabled is True
+    assert cfg.target_sample_rate == 22_050
+    assert cfg.target_channels is None
     assert cfg.temp_dir is None
-    assert cfg.profile == "auto"
+    assert cfg.profile == "gpu"
 
 
 def test_config_from_env_overrides() -> None:

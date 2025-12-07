@@ -358,7 +358,7 @@ class TestTranscribe:
         # Verify transcribe was called with correct parameters
         assert model.calls[0]["args"][0] == str(processed_path)
         call_kwargs = model.calls[0]["kwargs"]
-        assert call_kwargs["beam_size"] == 5
+        assert call_kwargs["beam_size"] == 9
         assert call_kwargs["word_timestamps"] is False
         assert call_kwargs["language"] == "et"
         assert call_kwargs["task"] == "transcribe"

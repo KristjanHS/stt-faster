@@ -7,7 +7,7 @@ GPU->CPU fallback and environment-based device configuration.
 import logging
 import os
 import time
-from typing import Optional, Callable
+from typing import Callable, Optional, cast
 
 from faster_whisper import WhisperModel
 
@@ -21,11 +21,14 @@ def _default_model_factory(model_path: str, device: DeviceType, compute_type: Co
     return WhisperModel(model_path, device=device, compute_type=compute_type)
 
 
+_ALLOWED_COMPUTE_TYPES = {"int8", "float16", "int8_float16"}
+
+
 class DeviceSelector:
     """Selects the appropriate device (CPU/GPU) for model loading.
 
     Device selection priority:
-    1. STT_DEVICE environment variable (cpu/cuda)
+    1. STT_DEVICE environment variable (accepts device[/compute_type], e.g., cuda/float16)
     2. Preferred device from configuration
     3. Auto-fallback to CPU if GPU fails (handled by ModelLoader)
     """
@@ -39,13 +42,30 @@ class DeviceSelector:
         Returns:
             Tuple of (device, compute_type) to use
         """
-        env_device = os.getenv("STT_DEVICE", "").lower()
-
-        if env_device in ("cpu", "cuda"):
-            device = env_device  # type: ignore[assignment]
-            compute_type: ComputeType = "int8" if device == "cpu" else config.compute_type
-            LOGGER.info("Using device from STT_DEVICE env: %s", device)
-            return device, compute_type
+        raw_env = os.getenv("STT_DEVICE", "").strip()
+        if raw_env:
+            normalized = raw_env.lower()
+            parts = normalized.split("/", 1)
+            device = parts[0]
+            compute_override_input = None if len(parts) == 1 else parts[1]
+            compute_override: ComputeType | None = None
+            if device in ("cpu", "cuda"):
+                if compute_override_input and compute_override_input not in _ALLOWED_COMPUTE_TYPES:
+                    LOGGER.warning(
+                        "Ignoring unsupported compute type from STT_DEVICE (%s); falling back to defaults",
+                        compute_override_input,
+                    )
+                elif compute_override_input:
+                    compute_override = cast(ComputeType, compute_override_input)
+                compute_type: ComputeType = "int8" if device == "cpu" else (compute_override or config.compute_type)
+                if device == "cpu" and compute_override and compute_override != "int8":
+                    LOGGER.warning(
+                        "STT_DEVICE requested CPU compute (%s) which is forced to int8 for compatibility.",
+                        compute_override,
+                    )
+                LOGGER.info("Using device from STT_DEVICE env: %s (compute=%s)", device, compute_type)
+                return device, compute_type
+            LOGGER.warning("Ignoring STT_DEVICE=%s because '%s' is not a supported device", raw_env, device)
 
         # Use preferred device and compute type from config
         return config.device, config.compute_type
@@ -99,8 +119,13 @@ class ModelLoader:
             return self._load_on_device(model_path, device, compute_type)
         except Exception as error:
             LOGGER.warning(
-                "GPU initialization failed for %s: %s. Falling back to CPU int8; expect slower transcription.",
+                (
+                    "⚠️  GPU initialization failed for %s (requested %s/%s): %s. "
+                    "Falling back to CPU int8; expect slower transcription."
+                ),
                 model_path,
+                device,
+                compute_type,
                 error,
             )
             try:

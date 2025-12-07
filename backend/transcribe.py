@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 # Default transcription parameters
-DEFAULT_BEAM_SIZE = 5
+DEFAULT_BEAM_SIZE = 9
 DEFAULT_WORD_TIMESTAMPS = False
 DEFAULT_TASK = "transcribe"
 PROGRESS_LOG_INTERVAL_SECONDS = 60.0

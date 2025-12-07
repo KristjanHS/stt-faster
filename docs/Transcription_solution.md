@@ -65,6 +65,12 @@ language = "et" if preset.startswith("et-") else None
 segments, info = model.transcribe(path, language=language, task="transcribe")
 ```
 
+### Device Overrides
+`STT_DEVICE` now accepts `device[/compute_type]` (for example `STT_DEVICE=cuda/float16`). When set, the loader honors the request, logs the requested device/precision, and only falls back to CPU-int8 with a clear `⚠️` warning if GPU initialization fails or is unavailable.
+
+### Preprocessing Defaults
+The audio preprocessing pipeline is now enabled by default (`STT_PREPROCESS_ENABLED=1`) with the GPU profile (`STT_PREPROCESS_PROFILE=gpu`) so preprocessing runs quickly on supported hardware. The default sample rate is increased to 22 050 Hz (`STT_PREPROCESS_TARGET_SR=22050`) to preserve Estonian phonetics, and `STT_PREPROCESS_TARGET_CH=0` allows downmixing to inherit the original channel count instead of forcing mono. The ffmpeg downmix/resample step also adds `volume=-6dB` to give the downstream denoiser more headroom, while loudness normalization and the light denoise step run at the higher sample rate for clearer output.
+
 ### Error Handling
 - **GPU fail** → CPU fallback (automatic)
 - **File fail** → Move to `failed/`, log error
