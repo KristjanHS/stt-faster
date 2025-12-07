@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 DeviceType = Literal["cpu", "cuda"]
-ComputeType = Literal["int8", "float16", "int8_float16"]
+ComputeType = Literal["int8", "float16", "int8_float16", "float32"]
 
 
 @dataclass
@@ -34,7 +34,7 @@ PRESETS: dict[str, ModelConfig] = {
     "et-large": ModelConfig(
         model_id="TalTechNLP/whisper-large-v3-turbo-et-verbatim",
         device="cuda",
-        compute_type="int8_float16",
+        compute_type="float16",
         is_estonian=True,
     ),
     # English/multilingual models (Systran faster-whisper)
@@ -51,7 +51,7 @@ PRESETS: dict[str, ModelConfig] = {
     "large8gb": ModelConfig(
         model_id="Systran/faster-whisper-large-v3",
         device="cuda",
-        compute_type="int8_float16",
+        compute_type="int8_float16",  # Try original large-v3 with mixed INT8/FP16 to fit in 8 GB
     ),
     # Fallback preset (portable, CPU-friendly)
     "small": ModelConfig(
