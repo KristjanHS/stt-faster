@@ -17,7 +17,7 @@ sudo apt-get -y install cudnn9-cuda-12
 # keep in your ~/.bashrc
 export HF_HOME="$HOME/.cache/hf"
 export HF_HUB_CACHE="$HF_HOME/hub"
-export HF_HUB_ENABLE_HF_TRANSFER=1
+export HF_XET_HIGH_PERFORMANCE=1
 
 # To run:
 python transcribe.py
@@ -37,6 +37,7 @@ from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
 from backend.exceptions import ModelNotFoundError
 from backend.model_config import ModelConfig, get_preset
 from backend.model_loader import ModelLoader
+from backend.preprocess import PreprocessConfig, preprocess_audio
 
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
@@ -171,64 +172,70 @@ def transcribe(path: str, preset: str = "et-large", language: str | None = None)
     LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
     overall_start = time.time()
 
-    model = pick_model(preset)
-    segments: Iterable["Segment"]
-    info: "TranscriptionInfo"
+    preprocess_config = PreprocessConfig.from_env()
+    preprocess_result = preprocess_audio(path, preprocess_config)
 
-    # Auto-detect language based on preset if not explicitly provided
-    if language is None:
-        language = "et" if preset.startswith("et-") else None
+    try:
+        model = pick_model(preset)
+        segments: Iterable["Segment"]
+        info: "TranscriptionInfo"
 
-    # Log language configuration
-    if language:
-        LOGGER.info("🌐 Language: %s (forced)", language)
-    else:
-        LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
+        # Auto-detect language based on preset if not explicitly provided
+        if language is None:
+            language = "et" if preset.startswith("et-") else None
 
-    LOGGER.info("🔄 Transcribing audio...")
-    transcribe_start = time.time()
-    segments, info = model.transcribe(
-        path,
-        beam_size=DEFAULT_BEAM_SIZE,
-        word_timestamps=DEFAULT_WORD_TIMESTAMPS,
-        language=language,
-        task=DEFAULT_TASK,
-    )
-
-    segment_payloads = [_segment_to_payload(segment) for segment in segments]
-    transcribe_time = time.time() - transcribe_start
-
-    # Log detected/used language from result
-    detected_lang = getattr(info, "language", None)
-    lang_prob = getattr(info, "language_probability", None)
-    if detected_lang:
-        if lang_prob is not None:
-            LOGGER.info("🗣️  Detected language: %s (confidence: %.2f%%)", detected_lang, lang_prob * 100)
+        # Log language configuration
+        if language:
+            LOGGER.info("🌐 Language: %s (forced)", language)
         else:
-            LOGGER.info("🗣️  Used language: %s", detected_lang)
+            LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
 
-    payload: Dict[str, Any] = {
-        "audio": os.path.basename(path),
-        "language": detected_lang,
-        "language_probability": lang_prob,
-        "segments": segment_payloads,
-    }
+        LOGGER.info("🔄 Transcribing audio...")
+        transcribe_start = time.time()
+        segments, info = model.transcribe(
+            str(preprocess_result.output_path),
+            beam_size=DEFAULT_BEAM_SIZE,
+            word_timestamps=DEFAULT_WORD_TIMESTAMPS,
+            language=language,
+            task=DEFAULT_TASK,
+        )
 
-    duration = getattr(info, "duration", None)
-    if duration is not None:
-        payload["duration"] = duration
+        segment_payloads = [_segment_to_payload(segment) for segment in segments]
+        transcribe_time = time.time() - transcribe_start
 
-    overall_time = time.time() - overall_start
+        # Log detected/used language from result
+        detected_lang = getattr(info, "language", None)
+        lang_prob = getattr(info, "language_probability", None)
+        if detected_lang:
+            if lang_prob is not None:
+                LOGGER.info("🗣️  Detected language: %s (confidence: %.2f%%)", detected_lang, lang_prob * 100)
+            else:
+                LOGGER.info("🗣️  Used language: %s", detected_lang)
 
-    # Log timing summary
-    LOGGER.info("⏱️  Transcription completed in %.2f seconds", transcribe_time)
-    if duration:
-        speed_ratio = duration / transcribe_time if transcribe_time > 0 else 0
-        LOGGER.info("⚡ Speed: %.2fx realtime (%.1fs audio in %.1fs)", speed_ratio, duration, transcribe_time)
-    LOGGER.info("✅ Total processing time: %.2f seconds", overall_time)
+        payload: Dict[str, Any] = {
+            "audio": os.path.basename(path),
+            "language": detected_lang,
+            "language_probability": lang_prob,
+            "segments": segment_payloads,
+        }
 
-    cleaned = {key: value for key, value in payload.items() if value is not None}
-    return _round_floats(cleaned)
+        duration = getattr(info, "duration", None)
+        if duration is not None:
+            payload["duration"] = duration
+
+        overall_time = time.time() - overall_start
+
+        # Log timing summary
+        LOGGER.info("⏱️  Transcription completed in %.2f seconds", transcribe_time)
+        if duration:
+            speed_ratio = duration / transcribe_time if transcribe_time > 0 else 0
+            LOGGER.info("⚡ Speed: %.2fx realtime (%.1fs audio in %.1fs)", speed_ratio, duration, transcribe_time)
+        LOGGER.info("✅ Total processing time: %.2f seconds", overall_time)
+
+        cleaned = {key: value for key, value in payload.items() if value is not None}
+        return _round_floats(cleaned)
+    finally:
+        preprocess_result.cleanup()
 
 
 def transcribe_to_json(audio_path: str, json_path: str, preset: str = "et-large", language: str | None = None) -> None:

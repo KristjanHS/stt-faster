@@ -17,7 +17,7 @@ sudo apt-get -y install cudnn9-cuda-12
 # keep in your ~/.bashrc
 export HF_HOME="$HOME/.cache/hf"
 export HF_HUB_CACHE="$HF_HOME/hub"
-export HF_HUB_ENABLE_HF_TRANSFER=1
+export HF_XET_HIGH_PERFORMANCE=1
 
 # To run:
 python transcribe.py
