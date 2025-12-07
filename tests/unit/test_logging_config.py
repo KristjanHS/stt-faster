@@ -59,30 +59,22 @@ class TestParseLevel:
 class TestBuildConsoleHandler:
     """Tests for _build_console_handler function."""
 
-    def test_build_console_handler_tty(self, monkeypatch) -> None:
+    def test_build_console_handler_tty(self) -> None:
         """Test console handler creation for TTY (RichHandler)."""
-        import backend.config as cfg
-
-        monkeypatch.setattr(cfg.sys.stderr, "isatty", lambda: True, raising=False)
-
         from backend.config import _build_console_handler
 
-        handler = _build_console_handler(logging.INFO)
+        handler = _build_console_handler(logging.INFO, isatty=lambda: True)
 
         from rich.logging import RichHandler
 
         assert isinstance(handler, RichHandler)
         assert handler.level == logging.INFO
 
-    def test_build_console_handler_non_tty(self, monkeypatch) -> None:
+    def test_build_console_handler_non_tty(self) -> None:
         """Test console handler creation for non-TTY (StreamHandler)."""
-        import backend.config as cfg
-
-        monkeypatch.setattr(cfg.sys.stderr, "isatty", lambda: False, raising=False)
-
         from backend.config import _build_console_handler
 
-        handler = _build_console_handler(logging.DEBUG)
+        handler = _build_console_handler(logging.DEBUG, isatty=lambda: False)
 
         assert isinstance(handler, logging.StreamHandler)
         assert not isinstance(handler, logging.handlers.RotatingFileHandler)

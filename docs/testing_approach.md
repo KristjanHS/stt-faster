@@ -2,23 +2,6 @@
 
 A high-level guide to testing with clear separation between unit, integration, and E2E tests.
 
-## Quick Start
-
-```bash
-# Run by test level (folder-based organization)
-.venv/bin/python -m pytest tests/unit/         # Fast, isolated
-.venv/bin/python -m pytest tests/integration/  # Real models, mocked services
-.venv/bin/python -m pytest tests/e2e/          # End-to-end with real everything
-
-# Default run (unit + integration, skips E2E)
-.venv/bin/python -m pytest -v
-
-# Filter by characteristics (markers work across all folders)
-.venv/bin/python -m pytest -m "not slow"       # Skip slow tests
-.venv/bin/python -m pytest -m "not network"    # Offline mode
-.venv/bin/python -m pytest -m "not gpu"        # CPU-only
-```
-
 ## Test Hierarchy
 
 | Test Level | Speed | Mocking Strategy | When to Use | Folder |
@@ -32,7 +15,7 @@ A high-level guide to testing with clear separation between unit, integration, a
 1. **Test Isolation**: Each test runs independently without state leakage
 2. **Clear Boundaries**: Folder-based organization by test type with appropriate mocking
 3. **pytest-Native**: Prefer pytest features and fixtures over unittest patterns
-4. **DRY Fixtures**: Shared setup in hierarchical `conftest.py` files
+4. **DRY Fixtures**: Shared setup in hierarchical `conftest.py` files. Never use monkeypatching in permanent tests.
 
 ## Test Fixtures
 

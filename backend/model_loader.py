@@ -7,7 +7,7 @@ GPU->CPU fallback and environment-based device configuration.
 import logging
 import os
 import time
-from typing import Optional
+from typing import Optional, Callable
 
 from faster_whisper import WhisperModel
 
@@ -15,6 +15,10 @@ from backend.exceptions import ModelLoadError
 from backend.model_config import ComputeType, DeviceType, ModelConfig
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _default_model_factory(model_path: str, device: DeviceType, compute_type: ComputeType) -> WhisperModel:
+    return WhisperModel(model_path, device=device, compute_type=compute_type)
 
 
 class DeviceSelector:
@@ -53,13 +57,21 @@ class ModelLoader:
     Handles GPU->CPU fallback, performance timing, and error recovery.
     """
 
-    def __init__(self, device_selector: Optional[DeviceSelector] = None):
+    def __init__(
+        self,
+        device_selector: Optional[DeviceSelector] = None,
+        model_factory: Callable[[str, DeviceType, ComputeType], WhisperModel] | None = None,
+    ):
         """Initialize ModelLoader.
 
         Args:
             device_selector: Device selection strategy (defaults to DeviceSelector)
+            model_factory: Factory used to construct WhisperModel (defaults to WhisperModel)
         """
         self._device_selector = device_selector or DeviceSelector()
+        self._model_factory: Callable[[str, DeviceType, ComputeType], WhisperModel] = (
+            model_factory or _default_model_factory
+        )
 
     def load(self, model_path: str, config: ModelConfig) -> WhisperModel:
         """Load a Whisper model with automatic GPU->CPU fallback.
@@ -115,7 +127,7 @@ class ModelLoader:
             Loaded WhisperModel instance
         """
         start_time = time.time()
-        model = WhisperModel(model_path, device=device, compute_type=compute_type)
+        model = self._model_factory(model_path, device, compute_type)
         load_time = time.time() - start_time
 
         device_name = "GPU" if device == "cuda" else "CPU"

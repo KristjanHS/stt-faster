@@ -4,54 +4,42 @@ import json
 from pathlib import Path
 from typing import Any, Dict
 
-import pytest
 
+import backend.preprocess.orchestrator as orchestrator
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.io import AudioInfo, inspect_audio
-from backend.preprocess.metrics import StepMetrics
 from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
 
 
-class _SentinelTempDir:
-    """TemporaryDirectory shim that tracks cleanup."""
-
-    def __init__(self, base: Path):
-        self.name = str(base)
-        self.cleaned = False
-
-    def cleanup(self) -> None:
-        self.cleaned = True
-
-
-def test_config_from_env_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("STT_PREPROCESS_ENABLED", raising=False)
-    monkeypatch.delenv("STT_PREPROCESS_TARGET_SR", raising=False)
-    monkeypatch.delenv("STT_PREPROCESS_TARGET_CH", raising=False)
-    monkeypatch.delenv("STT_PREPROCESS_TMP_DIR", raising=False)
-
-    cfg = PreprocessConfig.from_env()
+def test_config_from_env_defaults() -> None:
+    cfg = PreprocessConfig.from_env(env={})
 
     assert cfg.enabled is False
     assert cfg.target_sample_rate == 16_000
     assert cfg.target_channels == 1
     assert cfg.temp_dir is None
+    assert cfg.profile == "auto"
 
 
-def test_config_from_env_overrides(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("STT_PREPROCESS_ENABLED", "1")
-    monkeypatch.setenv("STT_PREPROCESS_TARGET_SR", "8000")
-    monkeypatch.setenv("STT_PREPROCESS_TARGET_CH", "2")
-    monkeypatch.setenv("STT_PREPROCESS_TMP_DIR", "/tmp/foo")
-
-    cfg = PreprocessConfig.from_env()
+def test_config_from_env_overrides() -> None:
+    cfg = PreprocessConfig.from_env(
+        env={
+            "STT_PREPROCESS_ENABLED": "1",
+            "STT_PREPROCESS_TARGET_SR": "8000",
+            "STT_PREPROCESS_TARGET_CH": "2",
+            "STT_PREPROCESS_TMP_DIR": "/tmp/foo",
+            "STT_PREPROCESS_PROFILE": "cpu",
+        }
+    )
 
     assert cfg.enabled is True
     assert cfg.target_sample_rate == 8000
     assert cfg.target_channels == 2
     assert cfg.temp_dir == "/tmp/foo"
+    assert cfg.profile == "cpu"
 
 
-def test_inspect_audio_parses_ffprobe(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_inspect_audio_parses_ffprobe(tmp_path: Path) -> None:
     fake_audio = tmp_path / "sample.wav"
     fake_audio.write_bytes(b"data")
 
@@ -69,63 +57,82 @@ def test_inspect_audio_parses_ffprobe(monkeypatch: pytest.MonkeyPatch, tmp_path:
     def fake_check_output(cmd: list[str], stderr: Any, text: bool) -> str:  # noqa: ARG001
         return json.dumps(payload)
 
-    monkeypatch.setattr("subprocess.check_output", fake_check_output)
-
-    info = inspect_audio(fake_audio)
+    info = inspect_audio(fake_audio, run_command=fake_check_output)
 
     assert info == AudioInfo(channels=2, sample_rate=44100, duration=1.23, sample_format="s16")
 
 
-def test_preprocess_audio_disabled_passthrough(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_preprocess_audio_disabled_passthrough(
+    dummy_audio_info_mono,
+    tmp_path: Path,  # noqa: ANN001
+) -> None:
     fake_audio = tmp_path / "input.wav"
     fake_audio.write_bytes(b"data")
-
-    dummy_info = AudioInfo(channels=1, sample_rate=16000, duration=0.5, sample_format="s16")
-    monkeypatch.setattr("backend.preprocess.orchestrator.inspect_audio", lambda _: dummy_info)
 
     cfg = PreprocessConfig(enabled=False)
-    result = preprocess_audio(fake_audio, cfg)
+    result = preprocess_audio(fake_audio, cfg, inspector=lambda _: dummy_audio_info_mono)
 
     assert result.output_path == fake_audio
-    assert result.input_info == dummy_info
+    assert result.input_info == dummy_audio_info_mono
     assert result.metrics.total_duration == 0.0
     assert result.metrics.steps == []
+    assert result.metrics.snr_delta is None
+    assert result.profile == "disabled"
 
 
-def test_preprocess_audio_runs_downmix(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_preprocess_audio_runs_downmix(preprocess_pipeline_stubs, tmp_path: Path) -> None:  # noqa: ANN001
     fake_audio = tmp_path / "input.wav"
     fake_audio.write_bytes(b"data")
 
-    dummy_info = AudioInfo(channels=2, sample_rate=44100, duration=0.5, sample_format="s16")
-    monkeypatch.setattr("backend.preprocess.orchestrator.inspect_audio", lambda _: dummy_info)
-
-    calls: dict[str, Any] = {}
-
-    def fake_step(input_path: Path, output_path: Path, target_sample_rate: int, target_channels: int) -> StepMetrics:
-        calls["input"] = input_path
-        calls["output"] = output_path
-        calls["sr"] = target_sample_rate
-        calls["ch"] = target_channels
-        output_path.write_bytes(b"processed")  # ensure path exists
-        return StepMetrics(name="downmix_resample", backend="fake", duration=0.01)
-
-    monkeypatch.setattr("backend.preprocess.orchestrator.downmix_and_resample", fake_step)
-
-    temp_root = tmp_path / "custom_temp"
-    temp_root.mkdir()
-    temp_dir = _SentinelTempDir(base=temp_root)
-    monkeypatch.setattr("tempfile.TemporaryDirectory", lambda prefix, dir=None: temp_dir)  # type: ignore[call-arg]
+    calls: dict[str, Any] = preprocess_pipeline_stubs["calls"]
+    temp_dir = preprocess_pipeline_stubs["temp_dir"]
+    temp_root = preprocess_pipeline_stubs["temp_root"]
 
     cfg = PreprocessConfig(enabled=True, target_sample_rate=8000, target_channels=1, temp_dir=str(temp_root))
-    result: PreprocessResult = preprocess_audio(fake_audio, cfg)
+    result: PreprocessResult = preprocess_audio(
+        fake_audio,
+        cfg,
+        inspector=preprocess_pipeline_stubs["inspector"],
+        downmix_fn=preprocess_pipeline_stubs["downmix_fn"],
+        loudnorm_fn=preprocess_pipeline_stubs["loudnorm_fn"],
+        denoise_fn=preprocess_pipeline_stubs["denoise_fn"],
+        snr_estimator=preprocess_pipeline_stubs["snr_estimator"],
+        temp_dir_factory=preprocess_pipeline_stubs["temp_dir_factory"],
+        gpu_check=preprocess_pipeline_stubs["gpu_check"],
+    )
 
     assert result.output_path.parent == temp_root
     assert result.output_path.exists()
-    assert result.input_info == dummy_info
+    assert result.input_info is not None
     assert result.metrics.steps and result.metrics.steps[0].name == "downmix_resample"
+    assert result.metrics.steps[1].name == "loudnorm"
+    assert result.metrics.steps[2].name == "denoise_light"
     assert calls["input"] == fake_audio
+    assert calls["loudnorm_input"] == temp_root / "downmixed.wav"
+    assert calls["loudnorm_sr"] == 8000
+    assert calls["denoise_input"] == temp_root / "loudnorm.wav"
     assert calls["sr"] == 8000
     assert calls["ch"] == 1
+    assert calls["denoise_sr"] == 8000
+    assert result.metrics.snr_before == 1.0
+    assert result.metrics.snr_after == 3.0
+    assert result.metrics.snr_delta == 2.0
+    assert result.profile == "gpu"
 
     result.cleanup()
     assert temp_dir.cleaned is True
+
+
+def test_resolve_profile_prefers_gpu() -> None:
+    profile, note = orchestrator._resolve_profile("auto", gpu_check=lambda: True)
+
+    assert profile == "gpu"
+    assert note is None
+
+
+def test_resolve_profile_falls_back_to_cpu() -> None:
+    profile, note = orchestrator._resolve_profile("gpu", gpu_check=lambda: False)
+
+    assert profile == "cpu"
+    assert note is not None
+    assert "falling back to cpu" in note.lower()

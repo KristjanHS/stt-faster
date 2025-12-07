@@ -1,7 +1,7 @@
 """Unit tests for transcription processor."""
 
+import shutil
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
@@ -96,9 +96,31 @@ def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, 
     assert str(audio_file) in files
 
 
-@patch("backend.processor.transcribe_to_json")
+class RecordingTranscribe:
+    def __init__(self, *, should_fail: bool = False) -> None:
+        self.calls: list[tuple[str, str, str, str | None]] = []
+        self.should_fail = should_fail
+
+    def __call__(self, file_path: str, json_path: str, preset: str, language: str | None = None) -> None:
+        self.calls.append((file_path, json_path, preset, language))
+        if self.should_fail:
+            raise RuntimeError("Test error")
+        Path(json_path).write_text("{}")
+
+
+class RecordingMover:
+    def __init__(self, *, should_fail: bool = False) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.should_fail = should_fail
+
+    def __call__(self, src: str, dst: str):
+        self.calls.append((src, dst))
+        if self.should_fail:
+            raise OSError("Permission denied")
+        return shutil.move(src, dst)
+
+
 def test_process_file_success(
-    mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
@@ -110,11 +132,12 @@ def test_process_file_success(
     # Register file in database
     temp_db.add_file(str(audio_file), "pending")
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    transcribe = RecordingTranscribe()
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
     result = processor.process_file(str(audio_file))
 
     assert result is True
-    mock_transcribe.assert_called_once()
+    assert len(transcribe.calls) == 1
 
     # Verify status updated
     status = temp_db.get_status(str(audio_file))
@@ -126,9 +149,7 @@ def test_process_file_success(
     assert (processor.processed_folder / "audio1.wav").exists()
 
 
-@patch("backend.processor.transcribe_to_json")
 def test_process_file_failure(
-    mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
@@ -141,9 +162,9 @@ def test_process_file_failure(
     temp_db.add_file(str(audio_file), "pending")
 
     # Make transcription fail
-    mock_transcribe.side_effect = RuntimeError("Test error")
+    transcribe = RecordingTranscribe(should_fail=True)
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
     result = processor.process_file(str(audio_file))
 
     assert result is False
@@ -178,9 +199,7 @@ def test_process_file_not_found(temp_db: TranscriptionDatabase, temp_folder: Pat
     assert "not found" in status["error_message"].lower()
 
 
-@patch("backend.processor.transcribe_to_json")
 def test_process_all_files(
-    mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
@@ -191,16 +210,14 @@ def test_process_all_files(
     audio1.touch()
     audio2.touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=RecordingTranscribe())
     results = processor.process_all_files([str(audio1), str(audio2)])
 
     assert results["succeeded"] == 2
     assert results["failed"] == 0
 
 
-@patch("backend.processor.transcribe_to_json")
 def test_process_folder(
-    mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
@@ -211,7 +228,7 @@ def test_process_folder(
     audio1.touch()
     audio2.touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=RecordingTranscribe())
     results = processor.process_folder()
 
     assert results["files_found"] == 2
@@ -219,11 +236,7 @@ def test_process_folder(
     assert results["failed"] == 0
 
 
-@patch("backend.processor.transcribe_to_json")
-@patch("backend.processor.shutil.move")
 def test_process_file_move_failure_keeps_pending_status(
-    mock_move: MagicMock,
-    mock_transcribe: MagicMock,
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
@@ -240,10 +253,10 @@ def test_process_file_move_failure_keeps_pending_status(
     temp_db.add_file(str(audio_file), "pending")
 
     # Mock transcribe to succeed but move to fail
-    mock_transcribe.return_value = None
-    mock_move.side_effect = OSError("Permission denied")
+    transcribe = RecordingTranscribe()
+    failing_move = RecordingMover(should_fail=True)
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, move_fn=failing_move)
     result = processor.process_file(str(audio_file))
 
     # Processing should fail

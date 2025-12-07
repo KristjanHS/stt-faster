@@ -102,6 +102,11 @@ docker run --rm \
 
  - Use Makefile targets for common checks; see `Makefile` and `docs/AI_instructions.md` for details.
 
+### Pre-commit in restricted environments
+
+Run `make pre-commit`, which pins caches locally via `UV_CACHE_DIR=./.uv-cache` and `PRE_COMMIT_HOME=./.pre-commit-cache`.
+If outbound network is unavailable and required wheels are not already cached, uv may fail (e.g., fetching `filelock`). Populate caches once in a networked environment or manually place the needed wheels under `./.uv-cache` to reuse offline.
+
 ---
 
 **CI/Act Environment Alignment**

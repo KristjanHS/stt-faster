@@ -2,12 +2,18 @@
 """Root-level pytest configuration and fixtures."""
 
 from __future__ import annotations
+
 import logging
 import os
 import sys
 from pathlib import Path
-from rich.console import Console
+from typing import TYPE_CHECKING
+
 import pytest
+from rich.console import Console
+
+if TYPE_CHECKING:
+    from faster_whisper import WhisperModel
 
 REPORTS_DIR = Path("reports")
 LOGS_DIR = REPORTS_DIR / "logs"
@@ -59,3 +65,33 @@ def project_root() -> Path:
     Moved from e2e/conftest.py to be available across all test types.
     """
     return Path(__file__).parent.parent
+
+
+@pytest.fixture(scope="session")
+def tiny_whisper_model() -> "WhisperModel | None":
+    """Cached tiny Whisper model for integration/E2E tests when enabled.
+
+    Controlled by USE_CACHED_MODEL (defaults to true). Returns None when
+    disabled or when download fails.
+    """
+    use_cached = os.getenv("USE_CACHED_MODEL", "true").lower() in ("true", "1", "yes")
+
+    if not use_cached:
+        logger.info("USE_CACHED_MODEL=false, skipping tiny model cache")
+        return None
+
+    try:
+        from faster_whisper import WhisperModel
+
+        logger.info("Loading tiny Whisper model for tests (one-time download if not cached)...")
+        model = WhisperModel("tiny", device="cpu", compute_type="int8")
+        logger.info("Tiny Whisper model loaded successfully (cached for future test runs)")
+        return model
+    except Exception as exc:  # pragma: no cover - defensive guard
+        logger.warning(
+            "Failed to load tiny Whisper model for tests: %s. "
+            "Tests will fall back to mocks when the model is unavailable.",
+            exc,
+            exc_info=True,
+        )
+        return None

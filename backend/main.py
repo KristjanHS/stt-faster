@@ -21,6 +21,7 @@ import logging
 import signal
 import sys
 import threading
+from collections.abc import Callable
 from typing import NoReturn
 from types import FrameType
 
@@ -34,12 +35,39 @@ def _setup_logging() -> None:
     )
 
 
-def main() -> NoReturn:
-    """Block indefinitely until SIGINT/SIGTERM is received."""
-    _setup_logging()
-    log = logging.getLogger("backend.main")
+def _build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="backend keepalive and utilities")
+    parser.add_argument(
+        "--healthcheck",
+        action="store_true",
+        help="Run a quick healthcheck and exit",
+    )
+    return parser
 
-    stop_event = threading.Event()
+
+def _run_healthcheck(log: logging.Logger | None = None) -> NoReturn:
+    """Emit a healthcheck log message and exit cleanly."""
+    if log is None:
+        _setup_logging()
+        log = logging.getLogger("backend.main")
+
+    log.info("Healthcheck OK")
+    raise SystemExit(0)
+
+
+def main(
+    *,
+    event_factory: Callable[[], threading.Event] | None = None,
+    signal_registrar: Callable[[int, Callable[[int, FrameType | None], None]], object] | None = None,
+    log: logging.Logger | None = None,
+) -> NoReturn:
+    """Block indefinitely until SIGINT/SIGTERM is received."""
+    if log is None:
+        _setup_logging()
+        log = logging.getLogger("backend.main")
+
+    stop_event = (event_factory or threading.Event)()
+    register_signal = signal_registrar or signal.signal
 
     def _handle_signal(signum: int, _frame: FrameType | None) -> None:
         names = {getattr(signal, n): n for n in dir(signal) if n.startswith("SIG")}
@@ -48,7 +76,7 @@ def main() -> NoReturn:
 
     # Register graceful shutdown handlers
     for sig in (signal.SIGINT, signal.SIGTERM):
-        signal.signal(sig, _handle_signal)
+        register_signal(sig, _handle_signal)
 
     log.info("backend.main started — waiting for signals (PID %s).", str(getattr(sys, "pid", "?")))
 
@@ -63,17 +91,9 @@ def main() -> NoReturn:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="backend keepalive and utilities")
-    parser.add_argument(
-        "--healthcheck",
-        action="store_true",
-        help="Run a quick healthcheck and exit",
-    )
-    args = parser.parse_args()
+    args = _build_arg_parser().parse_args()
 
     if args.healthcheck:
-        _setup_logging()
-        logging.getLogger("backend.main").info("Healthcheck OK")
-        raise SystemExit(0)
+        _run_healthcheck()
 
     main()
