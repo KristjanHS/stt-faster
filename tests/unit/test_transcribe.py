@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import logging
-from typing import TYPE_CHECKING
-from unittest.mock import MagicMock, Mock, mock_open, patch
+from pathlib import Path
+from typing import Any
 
 import pytest
 
 from backend.exceptions import ModelLoadError, ModelNotFoundError
+from backend.model_loader import DeviceSelector, ModelLoader
+from backend.preprocess.config import PreprocessConfig
 from backend.transcribe import (
     _get_estonian_model_path,
     _round_floats,
@@ -18,138 +21,190 @@ from backend.transcribe import (
     transcribe_to_json,
 )
 
-if TYPE_CHECKING:
-    pass
+
+class RecordingDownloader:
+    def __init__(self, return_path: str):
+        self.return_path = return_path
+        self.calls: list[tuple[str, Any]] = []
+
+    def __call__(self, model_id: str, allow_patterns: Any = None) -> str:  # noqa: ANN401
+        self.calls.append((model_id, allow_patterns))
+        return self.return_path
+
+
+class RecordingResolver:
+    def __init__(self, resolved_path: str):
+        self.resolved_path = resolved_path
+        self.calls: list[Any] = []
+
+    def __call__(self, config) -> str:  # noqa: ANN001
+        self.calls.append(config)
+        return self.resolved_path
+
+
+class FixedDeviceSelector(DeviceSelector):
+    def __init__(self, device: str, compute_type: str):
+        super().__init__()
+        self.device = device
+        self.compute_type = compute_type
+
+    def select(self, config):  # noqa: ANN001
+        return self.device, self.compute_type
+
+
+class RecordingModelFactory:
+    def __init__(self, side_effects: list[Any] | None = None, return_value: object | None = None):
+        self.side_effects = side_effects or []
+        self.return_value = return_value or object()
+        self.calls: list[tuple[str, str, str]] = []
+
+    def __call__(self, model_path: str, device: str, compute_type: str):
+        self.calls.append((model_path, device, compute_type))
+        if self.side_effects:
+            effect = self.side_effects.pop(0)
+            if isinstance(effect, Exception):
+                raise effect
+            return effect
+        return self.return_value
+
+
+class FakeSegment:
+    def __init__(
+        self, seg_id: int | None, start: float | None, end: float | None, text: str, speaker: str | None = None
+    ):
+        self.id = seg_id
+        self.start = start
+        self.end = end
+        self.text = text
+        self.speaker = speaker
+
+
+class FakeTranscriptionInfo:
+    def __init__(self, language: str | None, language_probability: float | None, duration: float | None):
+        self.language = language
+        self.language_probability = language_probability
+        self.duration = duration
+
+
+class RecordingModel:
+    def __init__(self, segments, info):  # noqa: ANN001
+        self._segments = segments
+        self._info = info
+        self.calls: list[dict[str, Any]] = []
+
+    def transcribe(self, *args, **kwargs):
+        self.calls.append({"args": args, "kwargs": kwargs})
+        return self._segments, self._info
+
+
+class FakePreprocessResult:
+    def __init__(self, output_path: Path, duration: float | None = None):
+        self.output_path = output_path
+        self.input_info = type("Info", (), {"duration": duration})() if duration is not None else None
+        self.metrics = None
+        self.profile = "test"
+        self.cleaned = False
+
+    def cleanup(self) -> None:
+        self.cleaned = True
 
 
 class TestGetEstonianModelPath:
     """Tests for _get_estonian_model_path function."""
 
-    @patch("backend.transcribe.snapshot_download")
-    def test_success_with_ct2_folder(self, mock_download: Mock) -> None:
+    def test_success_with_ct2_folder(self, tmp_path: Path) -> None:
         """Test successful download when CT2 folder exists."""
-        mock_download.return_value = "/tmp/model_cache"
+        (tmp_path / "ct2").mkdir()
+        downloader = RecordingDownloader(str(tmp_path))
 
-        with patch("backend.transcribe.Path") as mock_path:
-            mock_ct2_path = MagicMock()
-            mock_ct2_path.exists.return_value = True
-            mock_path.return_value.__truediv__.return_value = mock_ct2_path
+        result = _get_estonian_model_path("TalTechNLP/whisper-test", downloader=downloader, path_cls=Path)
 
-            _get_estonian_model_path("TalTechNLP/whisper-test")
+        assert result == str(tmp_path / "ct2")
+        assert downloader.calls == [("TalTechNLP/whisper-test", ["ct2/*"])]
 
-            assert mock_download.called
-            assert mock_download.call_args[0][0] == "TalTechNLP/whisper-test"
-            assert mock_download.call_args[1]["allow_patterns"] == ["ct2/*"]
-
-    @patch("backend.transcribe.snapshot_download")
-    @patch("backend.transcribe.Path")
-    def test_raises_error_when_ct2_folder_missing(self, mock_path: Mock, mock_download: Mock) -> None:
+    def test_raises_error_when_ct2_folder_missing(self, tmp_path: Path) -> None:
         """Test that ModelNotFoundError is raised when CT2 folder doesn't exist."""
-        mock_download.return_value = "/tmp/model_cache"
-
-        mock_ct2_path = MagicMock()
-        mock_ct2_path.exists.return_value = False
-        mock_path.return_value.__truediv__.return_value = mock_ct2_path
+        downloader = RecordingDownloader(str(tmp_path))
 
         with pytest.raises(ModelNotFoundError, match="CT2 folder not found"):
-            _get_estonian_model_path("TalTechNLP/whisper-test")
+            _get_estonian_model_path("TalTechNLP/whisper-test", downloader=downloader, path_cls=Path)
 
 
 class TestPickModel:
     """Tests for pick_model function."""
 
-    @patch("backend.transcribe._get_estonian_model_path")
-    @patch("backend.model_loader.WhisperModel")
-    def test_et_large_preset_success(self, mock_whisper: Mock, mock_get_path: Mock) -> None:
+    def test_et_large_preset_success(self) -> None:
         """Test et-large preset with successful GPU initialization."""
-        mock_get_path.return_value = "/tmp/model/ct2"
-        mock_model = Mock()
-        mock_whisper.return_value = mock_model
+        resolver = RecordingResolver("/tmp/model/ct2")
+        factory = RecordingModelFactory(return_value="model")
+        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
-        result = pick_model("et-large")
+        result = pick_model("et-large", resolver=resolver, loader=loader)
 
-        assert result == mock_model
-        mock_get_path.assert_called_once_with("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
-        mock_whisper.assert_called_once_with("/tmp/model/ct2", device="cuda", compute_type="float16")
+        assert result == "model"
+        assert resolver.calls and resolver.calls[0].model_id == "TalTechNLP/whisper-large-v3-turbo-et-verbatim"
+        assert factory.calls == [("/tmp/model/ct2", "cuda", "float16")]
 
-    @patch("backend.transcribe._get_estonian_model_path")
-    @patch("backend.model_loader.WhisperModel")
-    def test_et_large_fallback_to_cpu(
-        self, mock_whisper: Mock, mock_get_path: Mock, caplog: pytest.LogCaptureFixture
-    ) -> None:
+    def test_et_large_fallback_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test et-large preset falls back to CPU when GPU fails."""
-        mock_get_path.return_value = "/tmp/model/ct2"
-
-        # First call (GPU) raises exception, second call (CPU) succeeds
-        mock_cpu_model = Mock()
-        mock_whisper.side_effect = [RuntimeError("CUDA not available"), mock_cpu_model]
+        resolver = RecordingResolver("/tmp/model/ct2")
+        factory = RecordingModelFactory(side_effects=[RuntimeError("CUDA not available"), "cpu_model"])
+        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
         with caplog.at_level(logging.WARNING):
-            result = pick_model("et-large")
+            result = pick_model("et-large", resolver=resolver, loader=loader)
 
-        assert result == mock_cpu_model
-        assert mock_whisper.call_count == 2
-        assert mock_whisper.call_args_list[0][1] == {
-            "device": "cuda",
-            "compute_type": "float16",
-        }
-        assert mock_whisper.call_args_list[1][1] == {"device": "cpu", "compute_type": "int8"}
+        assert result == "cpu_model"
+        assert factory.calls[0] == ("/tmp/model/ct2", "cuda", "float16")
+        assert factory.calls[1] == ("/tmp/model/ct2", "cpu", "int8")
         assert "GPU initialization failed" in caplog.text
 
-    @patch("backend.transcribe._get_estonian_model_path")
-    @patch("backend.model_loader.WhisperModel")
-    def test_et_large_fails_on_both_gpu_and_cpu(self, mock_whisper: Mock, mock_get_path: Mock) -> None:
+    def test_et_large_fails_on_both_gpu_and_cpu(self) -> None:
         """Test that ModelLoadError is raised when both GPU and CPU fail."""
-        mock_get_path.return_value = "/tmp/model/ct2"
-        mock_whisper.side_effect = [
-            RuntimeError("CUDA not available"),
-            RuntimeError("CPU also failed"),
-        ]
+        resolver = RecordingResolver("/tmp/model/ct2")
+        factory = RecordingModelFactory(
+            side_effects=[RuntimeError("CUDA not available"), RuntimeError("CPU also failed")]
+        )
+        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
         with pytest.raises(ModelLoadError, match="Failed to load model .* on both GPU and CPU"):
-            pick_model("et-large")
+            pick_model("et-large", resolver=resolver, loader=loader)
 
-    @patch("backend.transcribe.snapshot_download")
-    @patch("backend.model_loader.WhisperModel")
-    def test_turbo_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
+    def test_turbo_preset(self) -> None:
         """Test turbo preset initialization."""
-        mock_model = Mock()
-        mock_whisper.return_value = mock_model
-        mock_snapshot.return_value = "/tmp/model/turbo"
+        resolver = RecordingResolver("/tmp/model/turbo")
+        factory = RecordingModelFactory(return_value="model")
+        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
-        result = pick_model("turbo")
+        result = pick_model("turbo", resolver=resolver, loader=loader)
 
-        assert result == mock_model
-        mock_snapshot.assert_called_once_with("Systran/faster-distil-whisper-large-v3")
-        mock_whisper.assert_called_once_with("/tmp/model/turbo", device="cuda", compute_type="float16")
+        assert result == "model"
+        assert resolver.calls and resolver.calls[0].model_id == "Systran/faster-distil-whisper-large-v3"
+        assert factory.calls == [("/tmp/model/turbo", "cuda", "float16")]
 
-    @patch("backend.transcribe.snapshot_download")
-    @patch("backend.model_loader.WhisperModel")
-    def test_distil_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
+    def test_distil_preset(self) -> None:
         """Test distil preset initialization."""
-        mock_model = Mock()
-        mock_whisper.return_value = mock_model
-        mock_snapshot.return_value = "/tmp/model/distil"
+        resolver = RecordingResolver("/tmp/model/distil")
+        factory = RecordingModelFactory(return_value="model")
+        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
-        result = pick_model("distil")
+        result = pick_model("distil", resolver=resolver, loader=loader)
 
-        assert result == mock_model
-        mock_snapshot.assert_called_once_with("Systran/faster-distil-whisper-large-v3")
-        mock_whisper.assert_called_once_with("/tmp/model/distil", device="cuda", compute_type="float16")
+        assert result == "model"
+        assert resolver.calls and resolver.calls[0].model_id == "Systran/faster-distil-whisper-large-v3"
+        assert factory.calls == [("/tmp/model/distil", "cuda", "float16")]
 
-    @patch("backend.transcribe.snapshot_download")
-    @patch("backend.model_loader.WhisperModel")
-    def test_large8gb_preset(self, mock_whisper: Mock, mock_snapshot: Mock) -> None:
+    def test_large8gb_preset(self) -> None:
         """Test large8gb preset initialization."""
-        mock_model = Mock()
-        mock_whisper.return_value = mock_model
-        mock_snapshot.return_value = "/tmp/model/large-v3"
+        resolver = RecordingResolver("/tmp/model/large-v3")
+        factory = RecordingModelFactory(return_value="model")
+        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
-        result = pick_model("large8gb")
+        result = pick_model("large8gb", resolver=resolver, loader=loader)
 
-        assert result == mock_model
-        mock_snapshot.assert_called_once_with("Systran/faster-whisper-large-v3")
-        mock_whisper.assert_called_once_with("/tmp/model/large-v3", device="cuda", compute_type="int8_float16")
+        assert result == "model"
+        assert resolver.calls and resolver.calls[0].model_id == "Systran/faster-whisper-large-v3"
+        assert factory.calls == [("/tmp/model/large-v3", "cuda", "float16")]
 
     def test_fallback_preset(self) -> None:
         """Test that unknown presets raise KeyError."""
@@ -225,12 +280,7 @@ class TestSegmentToPayload:
 
     def test_basic_segment(self) -> None:
         """Test conversion of a basic segment."""
-        segment = Mock()
-        segment.id = 1
-        segment.start = 0.0
-        segment.end = 5.123456
-        segment.text = "  Hello world  "
-        segment.speaker = None
+        segment = FakeSegment(1, 0.0, 5.123456, "  Hello world  ")
 
         result = _segment_to_payload(segment)
 
@@ -243,12 +293,7 @@ class TestSegmentToPayload:
 
     def test_segment_with_speaker(self) -> None:
         """Test segment with speaker information."""
-        segment = Mock()
-        segment.id = 2
-        segment.start = 5.0
-        segment.end = 10.5
-        segment.text = "Speaker text"
-        segment.speaker = "SPEAKER_01"
+        segment = FakeSegment(2, 5.0, 10.5, "Speaker text", speaker="SPEAKER_01")
 
         result = _segment_to_payload(segment)
 
@@ -262,12 +307,7 @@ class TestSegmentToPayload:
 
     def test_segment_with_none_values(self) -> None:
         """Test that None values are excluded from payload."""
-        segment = Mock()
-        segment.id = None
-        segment.start = 1.0
-        segment.end = None
-        segment.text = "text"
-        segment.speaker = None
+        segment = FakeSegment(None, 1.0, None, "text")
 
         result = _segment_to_payload(segment)
 
@@ -278,12 +318,7 @@ class TestSegmentToPayload:
 
     def test_segment_text_stripping(self) -> None:
         """Test that segment text is properly stripped."""
-        segment = Mock()
-        segment.id = 1
-        segment.start = 0.0
-        segment.end = 1.0
-        segment.text = "\n\t  Whitespace everywhere  \t\n"
-        segment.speaker = None
+        segment = FakeSegment(1, 0.0, 1.0, "\n\t  Whitespace everywhere  \t\n")
 
         result = _segment_to_payload(segment)
 
@@ -293,35 +328,24 @@ class TestSegmentToPayload:
 class TestTranscribe:
     """Tests for transcribe function."""
 
-    @patch("backend.transcribe.pick_model")
-    def test_transcribe_basic(self, mock_pick_model: Mock) -> None:
+    def test_transcribe_basic(self, tmp_path: Path) -> None:
         """Test basic transcription."""
-        mock_model = Mock()
-        mock_pick_model.return_value = mock_model
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        segments = [
+            FakeSegment(0, 0.0, 5.0, "First segment"),
+            FakeSegment(1, 5.0, 10.0, "Second segment"),
+        ]
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=10.0)
+        model = RecordingModel(segments, info)
 
-        # Create mock segments
-        mock_segment1 = Mock()
-        mock_segment1.id = 0
-        mock_segment1.start = 0.0
-        mock_segment1.end = 5.0
-        mock_segment1.text = "First segment"
-        mock_segment1.speaker = None
-
-        mock_segment2 = Mock()
-        mock_segment2.id = 1
-        mock_segment2.start = 5.0
-        mock_segment2.end = 10.0
-        mock_segment2.text = "Second segment"
-        mock_segment2.speaker = None
-
-        mock_info = Mock()
-        mock_info.language = "et"
-        mock_info.language_probability = 0.95
-        mock_info.duration = 10.0
-
-        mock_model.transcribe.return_value = ([mock_segment1, mock_segment2], mock_info)
-
-        result = transcribe("/path/to/audio.wav", preset="et-large")
+        result = transcribe(
+            "/path/to/audio.wav",
+            preset="et-large",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path, duration=10.0),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
 
         assert result["audio"] == "audio.wav"
         assert result["language"] == "et"
@@ -332,65 +356,64 @@ class TestTranscribe:
         assert result["segments"][1]["text"] == "Second segment"
 
         # Verify transcribe was called with correct parameters
-        mock_model.transcribe.assert_called_once_with(
+        assert model.calls[0]["args"][0] == str(processed_path)
+        call_kwargs = model.calls[0]["kwargs"]
+        assert call_kwargs["beam_size"] == 5
+        assert call_kwargs["word_timestamps"] is False
+        assert call_kwargs["language"] == "et"
+        assert call_kwargs["task"] == "transcribe"
+
+    def test_transcribe_non_estonian_model(self, tmp_path: Path) -> None:
+        """Test transcription with non-Estonian model (language=None)."""
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="en", language_probability=0.99, duration=5.0)
+        model = RecordingModel([], info)
+
+        transcribe(
             "/path/to/audio.wav",
-            beam_size=5,
-            word_timestamps=False,
-            language="et",
-            task="transcribe",
+            preset="turbo",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
         )
 
-    @patch("backend.transcribe.pick_model")
-    def test_transcribe_non_estonian_model(self, mock_pick_model: Mock) -> None:
-        """Test transcription with non-Estonian model (language=None)."""
-        mock_model = Mock()
-        mock_pick_model.return_value = mock_model
-
-        mock_info = Mock()
-        mock_info.language = "en"
-        mock_info.language_probability = 0.99
-        mock_info.duration = 5.0
-
-        mock_model.transcribe.return_value = ([], mock_info)
-
-        transcribe("/path/to/audio.wav", preset="turbo")
-
         # Verify language parameter is None for non-Estonian models
-        call_kwargs = mock_model.transcribe.call_args[1]
+        call_kwargs = model.calls[0]["kwargs"]
         assert call_kwargs["language"] is None
 
-    @patch("backend.transcribe.pick_model")
-    def test_transcribe_without_duration(self, mock_pick_model: Mock) -> None:
+    def test_transcribe_without_duration(self, tmp_path: Path) -> None:
         """Test transcription when duration is None."""
-        mock_model = Mock()
-        mock_pick_model.return_value = mock_model
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=None)
+        model = RecordingModel([], info)
 
-        mock_info = Mock()
-        mock_info.language = "et"
-        mock_info.language_probability = 0.95
-        mock_info.duration = None
-
-        mock_model.transcribe.return_value = ([], mock_info)
-
-        result = transcribe("/path/to/audio.wav", preset="et-large")
+        result = transcribe(
+            "/path/to/audio.wav",
+            preset="et-large",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
 
         assert "duration" not in result
         assert "language" in result
 
-    @patch("backend.transcribe.pick_model")
-    def test_transcribe_filename_extraction(self, mock_pick_model: Mock) -> None:
+    def test_transcribe_filename_extraction(self, tmp_path: Path) -> None:
         """Test that only filename is extracted from full path."""
-        mock_model = Mock()
-        mock_pick_model.return_value = mock_model
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=10.0)
+        model = RecordingModel([], info)
 
-        mock_info = Mock()
-        mock_info.language = "et"
-        mock_info.language_probability = 0.95
-        mock_info.duration = 10.0
-
-        mock_model.transcribe.return_value = ([], mock_info)
-
-        result = transcribe("/very/long/path/to/audio.wav", preset="et-large")
+        result = transcribe(
+            "/very/long/path/to/audio.wav",
+            preset="et-large",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
 
         assert result["audio"] == "audio.wav"
 
@@ -398,37 +421,34 @@ class TestTranscribe:
 class TestTranscribeToJson:
     """Tests for transcribe_to_json function."""
 
-    @patch("backend.transcribe.transcribe")
-    @patch("builtins.open", new_callable=mock_open)
-    @patch("backend.transcribe.json.dump")
-    def test_transcribe_to_json_basic(self, mock_json_dump: Mock, mock_file: Mock, mock_transcribe: Mock) -> None:
+    def test_transcribe_to_json_basic(self, tmp_path: Path) -> None:
         """Test basic JSON file writing."""
-        mock_payload = {
-            "audio": "test.wav",
-            "language": "et",
-            "segments": [],
-        }
-        mock_transcribe.return_value = mock_payload
+        payload = {"audio": "test.wav", "language": "et", "segments": []}
+        calls: list[tuple[str, str, Any]] = []
 
-        transcribe_to_json("test.wav", "test.json", preset="et-large")
+        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:
+            calls.append((audio_path, preset, language))
+            return payload
 
-        mock_transcribe.assert_called_once_with("test.wav", "et-large", language=None)
-        mock_file.assert_called_once_with("test.json", "w", encoding="utf-8")
-        mock_json_dump.assert_called_once()
+        json_path = tmp_path / "test.json"
 
-        # Verify json.dump was called with correct parameters
-        call_args = mock_json_dump.call_args
-        assert call_args[0][0] == mock_payload
-        assert call_args[1]["ensure_ascii"] is False
-        assert call_args[1]["indent"] == 2
+        transcribe_to_json("test.wav", json_path, preset="et-large", transcribe_fn=fake_transcribe)
 
-    @patch("backend.transcribe.transcribe")
-    @patch("builtins.open", new_callable=mock_open)
-    def test_transcribe_to_json_with_different_preset(self, mock_file: Mock, mock_transcribe: Mock) -> None:
+        assert calls == [("test.wav", "et-large", None)]
+        assert json.loads(json_path.read_text()) == payload
+
+    def test_transcribe_to_json_with_different_preset(self, tmp_path: Path) -> None:
         """Test JSON writing with different model preset."""
-        mock_payload = {"audio": "test.wav", "language": "en"}
-        mock_transcribe.return_value = mock_payload
+        payload = {"audio": "test.wav", "language": "en"}
+        calls: list[tuple[str, str, Any]] = []
 
-        transcribe_to_json("test.wav", "test.json", preset="turbo")
+        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:
+            calls.append((audio_path, preset, language))
+            return payload
 
-        mock_transcribe.assert_called_once_with("test.wav", "turbo", language=None)
+        json_path = tmp_path / "test.json"
+
+        transcribe_to_json("test.wav", json_path, preset="turbo", transcribe_fn=fake_transcribe)
+
+        assert calls == [("test.wav", "turbo", None)]
+        assert json.loads(json_path.read_text()) == payload

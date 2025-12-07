@@ -29,7 +29,7 @@ import os
 import time
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, cast
+from typing import TYPE_CHECKING, Any, Dict, Callable, cast
 
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
@@ -38,6 +38,7 @@ from backend.exceptions import ModelNotFoundError
 from backend.model_config import ModelConfig, get_preset
 from backend.model_loader import ModelLoader
 from backend.preprocess import PreprocessConfig, preprocess_audio
+from backend.preprocess.orchestrator import PreprocessResult
 
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
@@ -49,12 +50,18 @@ LOGGER = logging.getLogger(__name__)
 DEFAULT_BEAM_SIZE = 5
 DEFAULT_WORD_TIMESTAMPS = False
 DEFAULT_TASK = "transcribe"
+PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
 # Float rounding precision for JSON output
 FLOAT_PRECISION = 3
 
 
-def _get_estonian_model_path(model_id: str) -> str:
+def _get_estonian_model_path(
+    model_id: str,
+    *,
+    downloader: Callable[..., str] = snapshot_download,
+    path_cls: Callable[[str], Path] = Path,
+) -> str:
     """Download Estonian model and return path to CT2 subfolder.
 
     Estonian models from TalTechNLP store CT2 files in a 'ct2' subdirectory.
@@ -70,14 +77,14 @@ def _get_estonian_model_path(model_id: str) -> str:
         ModelNotFoundError: If CT2 folder doesn't exist in model
     """
     # Only download ct2 folder, skip transformers/native formats
-    model_path = snapshot_download(model_id, allow_patterns=["ct2/*"])  # nosec B615
-    ct2_path = Path(model_path) / "ct2"
+    model_path = downloader(model_id, allow_patterns=["ct2/*"])  # nosec B615
+    ct2_path = path_cls(model_path) / "ct2"
     if not ct2_path.exists():
         raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
     return str(ct2_path)
 
 
-def _get_cached_model_path(model_id: str) -> str:
+def _get_cached_model_path(model_id: str, *, downloader: Callable[..., str] = snapshot_download) -> str:
     """Download/retrieve cached Whisper model from HuggingFace.
 
     Args:
@@ -86,10 +93,14 @@ def _get_cached_model_path(model_id: str) -> str:
     Returns:
         Path to the cached model directory
     """
-    return snapshot_download(model_id)  # nosec B615
+    return downloader(model_id)  # nosec B615
 
 
-def _resolve_model_path(config: ModelConfig) -> str:
+def _resolve_model_path(
+    config: ModelConfig,
+    estonian_resolver: Callable[[str], str] = _get_estonian_model_path,
+    cached_resolver: Callable[[str], str] = _get_cached_model_path,
+) -> str:
     """Resolve the model path based on configuration.
 
     Args:
@@ -99,16 +110,21 @@ def _resolve_model_path(config: ModelConfig) -> str:
         Path to the model (local or cached from HuggingFace)
     """
     if config.is_estonian:
-        return _get_estonian_model_path(config.model_id)
+        return estonian_resolver(config.model_id)
     # For non-Estonian models, check if it's a simple preset name or HF model ID
     if "/" in config.model_id:
         # HuggingFace model ID (e.g., "Systran/faster-whisper-large-v3")
-        return _get_cached_model_path(config.model_id)
+        return cached_resolver(config.model_id)
     # Simple model name (e.g., "small") - faster-whisper will download it
     return config.model_id
 
 
-def pick_model(preset: str = "et-large") -> WhisperModel:
+def pick_model(
+    preset: str = "et-large",
+    *,
+    resolver: Callable[[ModelConfig], str] = _resolve_model_path,
+    loader: ModelLoader | None = None,
+) -> WhisperModel:
     """Load a Whisper model by preset name.
 
     This is the main entry point for loading models. It uses configuration-driven
@@ -135,11 +151,11 @@ def pick_model(preset: str = "et-large") -> WhisperModel:
     config = get_preset(preset)
 
     # Resolve the model path (download if needed)
-    model_path = _resolve_model_path(config)
+    model_path = resolver(config)
 
     # Load the model with automatic fallback
-    loader = ModelLoader()
-    return loader.load(model_path, config)
+    model_loader = loader or ModelLoader()
+    return model_loader.load(model_path, config)
 
 
 def _round_floats(value: Any, places: int = FLOAT_PRECISION) -> Any:
@@ -168,15 +184,58 @@ def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     return _round_floats(cleaned)
 
 
-def transcribe(path: str, preset: str = "et-large", language: str | None = None) -> Dict[str, Any]:
+def _maybe_log_progress(
+    processed_seconds: float,
+    total_seconds: float | None,
+    start_time: float,
+    last_log_time: float,
+) -> float:
+    """Log incremental transcription progress without spamming."""
+    now = time.time()
+    if now - last_log_time < PROGRESS_LOG_INTERVAL_SECONDS:
+        return last_log_time
+
+    elapsed_minutes = (now - start_time) / 60
+    processed_minutes = processed_seconds / 60
+    if total_seconds and total_seconds > 0:
+        percent = min(processed_seconds / total_seconds * 100, 100)
+        LOGGER.info(
+            "⌛ Transcription progress: %.1f/%.1f min (%.1f%%), elapsed %.1f min",
+            processed_minutes,
+            total_seconds / 60,
+            percent,
+            elapsed_minutes,
+        )
+    else:
+        LOGGER.info(
+            "⌛ Transcription progress: %.1f min processed, elapsed %.1f min",
+            processed_minutes,
+            elapsed_minutes,
+        )
+
+    return now
+
+
+def transcribe(
+    path: str,
+    preset: str = "et-large",
+    language: str | None = None,
+    *,
+    preprocess_config_provider: Callable[[], PreprocessConfig] = PreprocessConfig.from_env,
+    preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult] = preprocess_audio,
+    model_picker: Callable[[str], Any] = pick_model,
+) -> Dict[str, Any]:
     LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
     overall_start = time.time()
 
-    preprocess_config = PreprocessConfig.from_env()
-    preprocess_result = preprocess_audio(path, preprocess_config)
+    preprocess_config = preprocess_config_provider()
+    preprocess_result = preprocess_runner(path, preprocess_config)
+    duration_hint = preprocess_result.input_info.duration if preprocess_result.input_info else None
+    if duration_hint:
+        LOGGER.info("🎧 Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     try:
-        model = pick_model(preset)
+        model = model_picker(preset)
         segments: Iterable["Segment"]
         info: "TranscriptionInfo"
 
@@ -200,7 +259,28 @@ def transcribe(path: str, preset: str = "et-large", language: str | None = None)
             task=DEFAULT_TASK,
         )
 
-        segment_payloads = [_segment_to_payload(segment) for segment in segments]
+        total_audio_duration = getattr(info, "duration", None) or duration_hint
+        if total_audio_duration and not duration_hint:
+            LOGGER.info("🎧 Input duration: %.1f minutes", total_audio_duration / 60)
+
+        segment_payloads: list[Dict[str, Any]] = []
+        audio_processed = 0.0
+        last_progress_log = transcribe_start
+
+        for segment in segments:
+            segment_payloads.append(_segment_to_payload(segment))
+
+            end_time = getattr(segment, "end", None)
+            if end_time is not None:
+                audio_processed = max(audio_processed, float(end_time))
+
+            last_progress_log = _maybe_log_progress(
+                processed_seconds=audio_processed,
+                total_seconds=total_audio_duration,
+                start_time=transcribe_start,
+                last_log_time=last_progress_log,
+            )
+
         transcribe_time = time.time() - transcribe_start
 
         # Log detected/used language from result
@@ -238,10 +318,19 @@ def transcribe(path: str, preset: str = "et-large", language: str | None = None)
         preprocess_result.cleanup()
 
 
-def transcribe_to_json(audio_path: str, json_path: str, preset: str = "et-large", language: str | None = None) -> None:
-    payload = transcribe(audio_path, preset, language=language)
-    with open(json_path, "w", encoding="utf-8") as json_file:
-        json.dump(payload, json_file, ensure_ascii=False, indent=2)
+def transcribe_to_json(
+    audio_path: str,
+    json_path: str,
+    preset: str = "et-large",
+    language: str | None = None,
+    *,
+    transcribe_fn: Callable[..., Dict[str, Any]] = transcribe,
+    json_dumper: Callable[..., None] = json.dump,
+    opener: Callable[..., Any] = open,
+) -> None:
+    payload = transcribe_fn(audio_path, preset, language=language)
+    with opener(json_path, "w", encoding="utf-8") as json_file:
+        json_dumper(payload, json_file, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

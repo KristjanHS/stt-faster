@@ -3,7 +3,7 @@
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from backend.database import TranscriptionDatabase
 from backend.transcribe import transcribe_to_json
@@ -27,6 +27,8 @@ class TranscriptionProcessor:
         input_folder: str | Path,
         preset: str = "et-large",
         language: str | None = None,
+        transcribe_fn: Callable[[str, str, str, str | None], None] | None = None,
+        move_fn: Callable[[str, str], str | None] = shutil.move,
     ) -> None:
         """Initialize the processor.
 
@@ -40,6 +42,12 @@ class TranscriptionProcessor:
         self.input_folder = Path(input_folder)
         self.preset = preset
         self.language = language
+
+        def _default_transcribe(audio: str, json_path: str, preset: str, language: str | None = None) -> None:
+            transcribe_to_json(audio, json_path, preset, language=language)
+
+        self._transcribe: Callable[[str, str, str, str | None], None] = transcribe_fn or _default_transcribe
+        self._move = move_fn
 
         # Create subdirectories for processed and failed files
         self.processed_folder = self.input_folder / PROCESSED_FOLDER_NAME
@@ -105,7 +113,7 @@ class TranscriptionProcessor:
             json_path = file_path_obj.with_suffix(".json")
 
             # Call the existing transcription function
-            transcribe_to_json(str(file_path_obj), str(json_path), self.preset, language=self.language)
+            self._transcribe(str(file_path_obj), str(json_path), self.preset, self.language)
 
             # Move both audio and JSON to processed folder
             self._move_to_processed(file_path_obj, json_path)
@@ -138,12 +146,12 @@ class TranscriptionProcessor:
         """
         if audio_file.exists():
             dest_audio = self.processed_folder / audio_file.name
-            shutil.move(str(audio_file), str(dest_audio))
+            self._move(str(audio_file), str(dest_audio))
             LOGGER.debug("Moved audio to: %s", dest_audio)
 
         if json_file.exists():
             dest_json = self.processed_folder / json_file.name
-            shutil.move(str(json_file), str(dest_json))
+            self._move(str(json_file), str(dest_json))
             LOGGER.debug("Moved JSON to: %s", dest_json)
 
     def _move_to_failed(self, audio_file: Path) -> None:
@@ -155,7 +163,7 @@ class TranscriptionProcessor:
         try:
             if audio_file.exists():
                 dest_audio = self.failed_folder / audio_file.name
-                shutil.move(str(audio_file), str(dest_audio))
+                self._move(str(audio_file), str(dest_audio))
                 LOGGER.debug("Moved failed file to: %s", dest_audio)
 
         except Exception as error:

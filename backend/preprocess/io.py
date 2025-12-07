@@ -4,7 +4,7 @@ import json
 import subprocess  # nosec B404 - using fixed ffprobe command
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 from backend.preprocess.errors import PreprocessError
 
@@ -17,8 +17,9 @@ class AudioInfo:
     sample_format: str | None
 
 
-def inspect_audio(path: Path) -> AudioInfo:
+def inspect_audio(path: Path, *, run_command: Callable[..., str] | None = None) -> AudioInfo:
     """Inspect the input audio using ffprobe."""
+    runner = run_command or subprocess.check_output
     command = [
         "ffprobe",
         "-v",
@@ -32,11 +33,7 @@ def inspect_audio(path: Path) -> AudioInfo:
         str(path),
     ]
     try:
-        output = subprocess.check_output(  # nosec B603 - fixed args, no untrusted input
-            command,
-            stderr=subprocess.STDOUT,
-            text=True,
-        )
+        output = runner(command, stderr=subprocess.STDOUT, text=True)
     except FileNotFoundError as exc:
         raise PreprocessError("ffprobe is required but not installed or not on PATH") from exc
     except subprocess.CalledProcessError as exc:

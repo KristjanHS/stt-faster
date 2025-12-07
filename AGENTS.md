@@ -1,55 +1,51 @@
 ## Purpose  
-This file tells coding agents how to work on this repository **safely and correctly**: where to run from, which
-commands to execute, quality gates to pass, and project conventions. Agents should follow these rules unless a human
-explicitly overrides them.
+How to work safely and correctly in this repo. Follow unless a human overrides.
 
-## Repo profile (read me first)  
-- **Project root:** `stt-faster`  
-- **Primary stack:** Python 3.12 (via `.venv`), faster-whisper, Docker Compose.  
-- **Top modules:**  
-  - `backend/` — transcription logic, config.  
-  - `scripts/` — CLI tools and helpers
-  - `tests/` — `unit/`, `integration/`, `e2e/` with `conftest.py`.  
-  - `docker/` — compose + Dockerfile.  
-  - `reports/` — artifacts, coverage.
+- Important refs: `docs/AI_instructions.md`, `docs/testing_approach.md` (use `@<relative path>` with tools).  
 
-## Golden rules (non-negotiable)  
-1) **Run commands from repo root.** If you need a shell.  
-2) **Use the project venv:** run Python via `.venv/bin/python` (never the system interpreter).  
-3) **Never commit secrets**; `.secrets.baseline` is enforced. If you touch secrets, stop and ask a human.  
+## Repo profile  
+- Root: `stt-faster`; Python 3.12 via `.venv`; faster-whisper; Docker Compose.  
+- Key dirs: `backend/`, `scripts/`, `tests/` (unit/integration/e2e/ui), `docker/`, `reports/`.
 
-## Setup & environment  
-- Create/activate venv if missing and install deps as needed (ask before changing pinned versions).  
-- Docker is available; prefer the provided scripts to start services.  
-- Network calls to external services must be isolated behind Docker where possible.
- - For local CI with Act, see `docs/AI_instructions.md` for configuration and usage.
+## Core rules  
+- Run from repo root; set `workdir` explicitly; use workspace-relative paths.  
+- Use `.venv/bin/python`; never set `PYTHONPATH`.  
+- No secrets in git (`.secrets.baseline` enforced).  
+- Prefer local tools; check `which` before Docker/CI wrappers.  
+- Avoid `docker compose down -v` except for test-only stacks.  
+- Pipe pager-prone commands with `| cat` (use `bash -o pipefail -c 'cmd | cat'`).  
+- Git: Conventional Commits, default to `dev`, use `git --no-pager log`.  
+- When plan-only, gather context, output a numbered plan, stop; once approved, store in `docs_AI_coder/plan.md`.
 
-## Common tasks (agents may run these automatically)  
-> Agents: prefer these exact commands and **stop on first failure**.
+## Commands & tasks (stop on first failure)  
+- Unit tests: `.venv/bin/python -m pytest tests/unit -q`  
+- Integration: `.venv/bin/python -m pytest tests/integration -q`  
+- Pre-commit: `uv run pre-commit run --all-files`  
+- If UI/log outputs change, update snapshots/expectations instead of disabling checks.  
+- After edits, run builds/tests; on failure, share logs before retrying (max three attempts).  
+- Integration markers: default full `make integration`; AI agents may set `INTEGRATION_MARKERS="not gpu"` if no GPU.  
+- Suites: unit (fast, sockets blocked, `-n auto`), integration (one real component, network allowed), e2e
+  (Docker Compose), UI (Playwright `--no-cov`); unit tests must avoid real network I/O.  
+- Run pytest as module (e.g., `.venv/bin.python -m pytest tests/`).  
+- Use Make targets when available: `make pyright|ruff-fix|ruff-format|unit|integration-local|pre-commit|pre-push`.
 
-- - - - ## Testing & quality gates (must pass before you conclude work)  
-- **Local fast path (as module):**  
-  `.venv/bin/python -m pytest tests/unit -q`  
-  `.venv/bin/python -m pytest tests/integration -q`  
-  _Coverage outputs to `reports/coverage`._
+## Code & deps  
+- Lines ≤120; small functions; explicit error handling; add/update tests with behavior changes.  
+- Ruff for lint/format (`ruff check . --fix`, `ruff format .`); Pyright for types; avoid `print`—use logging.  
+- Logs live under `logs/` with descriptive names; structured logging and proper levels.  
+- LangChain: secrets via env vars, robust error handling, logging around API calls.  
+- Imports/deps: for `ModuleNotFoundError`, ensure editable install (`pip install -e .`); prefer extras in
+  `pyproject.toml` with thin requirements wrappers.  
 
-- - **Pre-commit (mandatory) bash command:**  
-  `uv run pre-commit run --all-files`
+## Safe edits & docs  
+- For risky refactors/schemas, propose a Tasklist plan first; do not alter Dockerfiles/Compose/security configs without
+  risks/mitigations.  
+- Fixing tests: state expected vs actual, then decide whether to change test or code.  
+- JSON schemas: run `jsonlint` before editing; validate after changes.  
+- Editing `.cursor/rules`: study existing files; keep header fields (`description`, `type`, `globs`, `alwaysApply`),
+  valid YAML, and bullet content.  
+- No summary/overview files (e.g., `TASK_SUMMARY.md`); keep end summaries in chat unless explicitly asked.  
 
-- **If UI or logs change intentionally:** update any snapshots or expectations the tests rely on.  
-  _If failing, fix the code or tests; do **not** disable checks._
-
-## Code style & conventions  
-- Keep lines ≤120 chars. Prefer small, composable functions and explicit error handling.  
-- Add or update tests when changing behavior.
-
-## Makefile-first checks  
-- Prefer `make` targets over ad-hoc commands for parity with CI:  
-  `make pyright`, `make ruff-fix`, `make ruff-format`, `make unit`, `make integration-local`, `make pre-commit`, `make pre-push`.
-
-## Safe edit policy  
-- For risky edits (schema changes, cross-module refactors), propose a plan in the Tasklist first.  
-- Never change Dockerfiles, Compose, or security-sensitive configs without clearly stating risks and mitigations.  
-
-## Agent etiquette  
-- When in doubt about security or data handling, stop and request human guidance.
+## Etiquette  
+- Use relative paths and explicit working dirs for tools.  
+- When unsure about security or data handling, stop and ask.

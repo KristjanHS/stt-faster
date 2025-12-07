@@ -2,12 +2,12 @@
 
 Goal: add a decoupled audio pre-processing pipeline (Python orchestrator) callable from transcription while staying independently testable and replaceable.
 
-## Rollout (5 iterations)
-- [x] Iteration 1 — Minimal skeleton: add `backend/preprocess/` with orchestrator + IO, default CPU profile, temp dir handling, enabled flag, downmix/resample only, fail-fast errors, per-step/total timing logs; wire a single call in `transcribe` behind a feature flag.
-- [ ] Iteration 2 — Add loudnorm: keep loudness to ffmpeg `loudnorm` (two-pass if feasible, else single-pass); note `ffmpeg-normalize` only as a future fallback; keep metrics minimal (total wall time + overall SNR delta).
-- [ ] Iteration 3 — Add light denoise: use `noisereduce.spectral_gate`; keep failure policy fail-fast; maintain minimal deps (`soundfile`, `noisereduce`, ffmpeg runtime); keep heavy enhancer deferred.
-- [ ] Iteration 4 — Quality bar + tests: record tiny golden set (3–5 clips) and run manual spot-checks (+3–5 dB SNR gain on noisy, no WER regression on clean); add unit tests for light steps and one E2E smoke with a synthetic noisy clip into a Whisper mock.
-- [ ] Iteration 5 — Future-ready hooks: keep commented hints for `enable_gpu_heavy` and heavy extra `.[heavy]`; keep optional `.[anal]` commented; add simple SNR/speech-presence logging for analysis; postpone automated LUFS/SNR per-clip and WER harness until the light path proves value.
+## Rollout (5 iterations — each shippable end-to-end)
+- [x] Iteration 1 — Minimal E2E path: downmix/resample only, feature-flagged call in `transcribe`, per-step/total timing logs, temp dir cleanup. Provide a CLI entry (`make preprocess-audio` → `scripts/run_preprocess.py`) to run standalone.
+- [x] Iteration 2 — Add loudnorm while staying E2E: ffmpeg `loudnorm` (two-pass if feasible, else single-pass), still behind the flag, keep metrics minimal (total time + overall SNR delta), surface in the helper script output.
+- [x] Iteration 3 — Add light denoise E2E: introduce `noisereduce.spectral_gate`, preserve fail-fast policy, keep dependencies minimal (`soundfile`, `noisereduce`, ffmpeg runtime), helper and transcribe stay wired.
+- [ ] Iteration 4 — Raise quality bar E2E: record tiny golden set (3–5 clips) and add a smoke test; ensure +3–5 dB SNR on noisy clips and no WER regression on clean; unit tests for loudnorm/denoise; one E2E into a Whisper mock; helper supports selecting the golden inputs.
+- [ ] Iteration 5 — Future-ready E2E: keep hooks for heavy enhancer (`enable_gpu_heavy`, `.[heavy]`) and optional analysis extras (`.[anal]` commented); add simple SNR/speech-presence logging; leave automated LUFS/SNR per-clip and WER harness for later.
 
 ## Decisions and defaults
 - Pipeline: light only (downmix/resample → loudnorm → light denoise); heavy enhancer deferred for a future flag.
