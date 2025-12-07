@@ -6,10 +6,9 @@ from typing import Iterator
 
 import pytest
 
+from backend.database import TranscriptionDatabase
 from backend.preprocess.io import AudioInfo
 from backend.preprocess.metrics import StepMetrics
-
-from backend.database import TranscriptionDatabase
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -87,9 +86,10 @@ def preprocess_pipeline_stubs(
         output_path.write_bytes(b"processed")  # ensure path exists
         return StepMetrics(name="downmix_resample", backend="fake", duration=0.01)
 
-    def fake_loudnorm(input_path: Path, output_path: Path, sample_rate: int) -> StepMetrics:
+    def fake_loudnorm(input_path: Path, output_path: Path, sample_rate: int, *, preset: str = "default") -> StepMetrics:
         calls["loudnorm_input"] = input_path
         calls["loudnorm_sr"] = sample_rate
+        calls["loudnorm_preset"] = preset
         output_path.write_bytes(b"normalized")
         return StepMetrics(name="loudnorm", backend=str(input_path), duration=0.02)
 

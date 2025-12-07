@@ -12,6 +12,7 @@ import pytest
 from backend.exceptions import ModelLoadError, ModelNotFoundError
 from backend.model_loader import DeviceSelector, ModelLoader
 from backend.preprocess.config import PreprocessConfig
+from backend.preprocess.metrics import PreprocessMetrics
 from backend.transcribe import (
     _get_estonian_model_path,
     _round_floats,
@@ -19,6 +20,7 @@ from backend.transcribe import (
     pick_model,
     transcribe,
     transcribe_to_json,
+    TranscriptionMetrics,
 )
 
 
@@ -98,10 +100,15 @@ class RecordingModel:
 
 
 class FakePreprocessResult:
-    def __init__(self, output_path: Path, duration: float | None = None):
+    def __init__(
+        self,
+        output_path: Path,
+        duration: float | None = None,
+        metrics: PreprocessMetrics | None = None,
+    ):
         self.output_path = output_path
         self.input_info = type("Info", (), {"duration": duration})() if duration is not None else None
-        self.metrics = None
+        self.metrics = metrics or PreprocessMetrics(total_duration=0.0, steps=[])
         self.profile = "test"
         self.cleaned = False
 
@@ -416,6 +423,41 @@ class TestTranscribe:
         )
 
         assert result["audio"] == "audio.wav"
+
+    def test_transcribe_emits_metrics(self, tmp_path: Path) -> None:
+        """Ensure metrics_collector receives structured data."""
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="en", language_probability=0.9, duration=12.0)
+        model = RecordingModel([], info)
+        collected: list[TranscriptionMetrics] = []
+
+        transcribe(
+            "/path/to/audio.wav",
+            preset="et-large",
+            language="en",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path, duration=12.0),  # noqa: ARG005, ARG001
+            model_picker=lambda preset: model,  # noqa: ARG005
+            metrics_collector=collected.append,
+        )
+
+        assert collected, "metrics_collector should be invoked"
+        metrics = collected[0]
+
+        assert metrics.audio_path == "/path/to/audio.wav"
+        assert metrics.preset == "et-large"
+        assert metrics.requested_language == "en"
+        assert metrics.applied_language == "en"
+        assert metrics.detected_language == "en"
+        assert metrics.language_probability == 0.9
+        assert metrics.audio_duration == 12.0
+        assert metrics.preprocess_enabled is False
+        assert metrics.preprocess_profile == "test"
+        assert metrics.target_sample_rate == 16000
+        assert metrics.preprocess_steps == []
+        assert metrics.speed_ratio is not None
+        assert metrics.total_processing_time >= metrics.transcribe_duration
 
 
 class TestTranscribeToJson:
