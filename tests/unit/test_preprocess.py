@@ -65,6 +65,16 @@ def test_inspect_audio_parses_ffprobe(tmp_path: Path) -> None:
     assert info == AudioInfo(channels=2, sample_rate=44100, duration=1.23, sample_format="s16")
 
 
+def test_inspect_audio_rejects_empty_file(tmp_path: Path) -> None:
+    fake_audio = tmp_path / "empty.wav"
+    fake_audio.write_bytes(b"")
+
+    with pytest.raises(PreprocessError) as excinfo:
+        inspect_audio(fake_audio, run_command=lambda *args, **kwargs: "")  # noqa: ARG005
+
+    assert "empty" in str(excinfo.value)
+
+
 def test_inspect_audio_formats_ffprobe_errors(tmp_path: Path) -> None:
     fake_audio = tmp_path / "broken.wav"
     fake_audio.write_bytes(b"data")
@@ -84,6 +94,8 @@ def test_inspect_audio_formats_ffprobe_errors(tmp_path: Path) -> None:
     assert "moov atom not found" in message
     assert "Invalid data" in message
     assert "\n" not in message
+    assert "{" not in message
+    assert "}" not in message
 
 
 def test_preprocess_audio_disabled_passthrough(

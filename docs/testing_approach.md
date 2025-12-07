@@ -35,7 +35,7 @@ Fixtures are organized hierarchically through `conftest.py` files:
 ## Docker E2E Execution
 
 - Docker-backed end-to-end suites live under `tests/e2e/` and are executed by default when running `make e2e` (or `.venv/bin/python -m pytest tests/e2e`). There is no longer a `RUN_DOCKER_E2E` gate—Docker tests are the default path.
-- GPU diagnostics in this suite are opt-in (the rest of the e2e coverage still runs automatically). Set `RUN_GPU_DIAGNOSTICS=true` when you intentionally want to exercise the GPU diagnostic checks.
+- GPU diagnostics are now part of the default E2E execution; if you need to skip them (e.g., on CPU-only runners) use pytest markers such as `-m 'not gpu'`.
 
 ## Mocking Strategy
 
