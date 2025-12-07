@@ -4,6 +4,7 @@ import shutil
 from pathlib import Path
 
 from backend.database import TranscriptionDatabase
+from backend.transcribe import TranscriptionMetrics
 from backend.processor import TranscriptionProcessor
 
 
@@ -97,15 +98,43 @@ def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, 
 
 
 class RecordingTranscribe:
-    def __init__(self, *, should_fail: bool = False) -> None:
+    def __init__(self, *, should_fail: bool = False, metrics: TranscriptionMetrics | None = None) -> None:
         self.calls: list[tuple[str, str, str, str | None]] = []
         self.should_fail = should_fail
+        self.metrics = metrics
 
-    def __call__(self, file_path: str, json_path: str, preset: str, language: str | None = None) -> None:
+    def __call__(
+        self, file_path: str, json_path: str, preset: str, language: str | None = None
+    ) -> TranscriptionMetrics | None:
         self.calls.append((file_path, json_path, preset, language))
         if self.should_fail:
             raise RuntimeError("Test error")
         Path(json_path).write_text("{}")
+        return self.metrics or self._default_metrics(file_path, preset, language)
+
+    @staticmethod
+    def _default_metrics(file_path: str, preset: str, language: str | None) -> TranscriptionMetrics:
+        applied_language = language or "et"
+        return TranscriptionMetrics(
+            audio_path=file_path,
+            preset=preset,
+            requested_language=language,
+            applied_language=applied_language,
+            detected_language=applied_language,
+            language_probability=0.5,
+            audio_duration=60.0,
+            total_processing_time=1.0,
+            transcribe_duration=0.5,
+            preprocess_duration=0.1,
+            preprocess_enabled=False,
+            preprocess_profile="test",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=None,
+            preprocess_snr_after=None,
+            preprocess_steps=[],
+            speed_ratio=120.0,
+        )
 
 
 class RecordingMover:
@@ -136,7 +165,8 @@ def test_process_file_success(
     processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
     result = processor.process_file(str(audio_file))
 
-    assert result is True
+    assert result.status == "completed"
+    assert result.metrics is not None
     assert len(transcribe.calls) == 1
 
     # Verify status updated
@@ -167,7 +197,8 @@ def test_process_file_failure(
     processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
     result = processor.process_file(str(audio_file))
 
-    assert result is False
+    assert result.status == "failed"
+    assert result.metrics is None
 
     # Verify status updated to failed
     status = temp_db.get_status(str(audio_file))
@@ -190,7 +221,8 @@ def test_process_file_not_found(temp_db: TranscriptionDatabase, temp_folder: Pat
     processor = TranscriptionProcessor(temp_db, temp_folder)
     result = processor.process_file(str(audio_file))
 
-    assert result is False
+    assert result.status == "failed"
+    assert result.error_message is not None
 
     # Verify status updated to failed
     status = temp_db.get_status(str(audio_file))
@@ -215,6 +247,8 @@ def test_process_all_files(
 
     assert results["succeeded"] == 2
     assert results["failed"] == 0
+    assert len(results["file_stats"]) == 2
+    assert all(stat.status == "completed" for stat in results["file_stats"])
 
 
 def test_process_folder(
@@ -234,6 +268,9 @@ def test_process_folder(
     assert results["files_found"] == 2
     assert results["succeeded"] == 2
     assert results["failed"] == 0
+    stats = results["run_statistics"]
+    assert stats["files_found"] == 2
+    assert len(stats["files"]) == 2
 
 
 def test_process_file_move_failure_keeps_pending_status(
@@ -260,7 +297,8 @@ def test_process_file_move_failure_keeps_pending_status(
     result = processor.process_file(str(audio_file))
 
     # Processing should fail
-    assert result is False
+    assert result.status == "failed"
+    assert result.error_message
 
     # Verify status is 'failed', NOT 'completed'
     status = temp_db.get_status(str(audio_file))

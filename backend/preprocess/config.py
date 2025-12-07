@@ -11,6 +11,15 @@ _PREPROCESS_TMP_ENV: Final = "STT_PREPROCESS_TMP_DIR"
 _PREPROCESS_TARGET_SR_ENV: Final = "STT_PREPROCESS_TARGET_SR"
 _PREPROCESS_TARGET_CH_ENV: Final = "STT_PREPROCESS_TARGET_CH"
 _PREPROCESS_PROFILE_ENV: Final = "STT_PREPROCESS_PROFILE"
+_PREPROCESS_LOUDNORM_PRESET_ENV: Final = "STT_PREPROCESS_LOUDNORM_PRESET"
+_LOUDNORM_PRESET_DEFAULT: Final = "default"
+_LOUDNORM_PRESET_ALIASES: Final = {
+    _LOUDNORM_PRESET_DEFAULT: _LOUDNORM_PRESET_DEFAULT,
+    "boost-quiet-voices": "boost-quiet-voices",
+    "boost quiet voices": "boost-quiet-voices",
+    "boost_quiet_voices": "boost-quiet-voices",
+    "boostquietvoices": "boost-quiet-voices",
+}
 
 
 def _env_enabled(value: str | None) -> bool:
@@ -42,14 +51,20 @@ def _parse_positive_int(raw: str | None) -> int | None:
 
 
 def _env_profile(value: str | None) -> str:
-    """Normalize profile preference with GPU-first default."""
+    """Normalize profile preference."""
     if value is None:
-        return "gpu"
+        return "cpu"
 
     normalized = value.strip().lower()
     if normalized in {"auto", "gpu", "cpu"}:
         return normalized
-    return "auto"
+    return "cpu"
+
+
+def _normalize_loudnorm_preset(value: str | None) -> str:
+    if value is None:
+        return _LOUDNORM_PRESET_DEFAULT
+    return _LOUDNORM_PRESET_ALIASES.get(value.strip().lower(), _LOUDNORM_PRESET_DEFAULT)
 
 
 @dataclass(slots=True)
@@ -57,10 +72,11 @@ class PreprocessConfig:
     """Configuration for the audio pre-processing pipeline."""
 
     enabled: bool = True
-    target_sample_rate: int = 22_050
+    target_sample_rate: int = 16_000
     target_channels: int | None = None
     temp_dir: str | None = None
-    profile: str = "gpu"
+    profile: str = "cpu"
+    loudnorm_preset: str = _LOUDNORM_PRESET_DEFAULT
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "PreprocessConfig":
@@ -69,8 +85,9 @@ class PreprocessConfig:
 
         return cls(
             enabled=_env_enabled(source_env.get(_PREPROCESS_ENABLED_ENV)),
-            target_sample_rate=_parse_int(source_env.get(_PREPROCESS_TARGET_SR_ENV), 22_050),
+            target_sample_rate=_parse_int(source_env.get(_PREPROCESS_TARGET_SR_ENV), 16_000),
             target_channels=_parse_positive_int(source_env.get(_PREPROCESS_TARGET_CH_ENV)),
             temp_dir=source_env.get(_PREPROCESS_TMP_ENV),
             profile=_env_profile(source_env.get(_PREPROCESS_PROFILE_ENV)),
+            loudnorm_preset=_normalize_loudnorm_preset(source_env.get(_PREPROCESS_LOUDNORM_PRESET_ENV)),
         )

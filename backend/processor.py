@@ -1,12 +1,18 @@
 """File processing logic for transcription automation."""
 
+import json
 import logging
 import shutil
+import time
+from dataclasses import asdict, dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.database import TranscriptionDatabase
-from backend.transcribe import transcribe_to_json
+from backend.database import RunRecord, TranscriptionDatabase
+from backend.exceptions import DatabaseError
+from backend.preprocess.config import PreprocessConfig
+from backend.transcribe import TranscriptionMetrics, transcribe
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,6 +24,16 @@ PROCESSED_FOLDER_NAME = "processed"
 FAILED_FOLDER_NAME = "failed"
 
 
+@dataclass(slots=True)
+class FileProcessingStats:
+    """Results captured for each processed file."""
+
+    file_path: str
+    status: str
+    error_message: str | None = None
+    metrics: TranscriptionMetrics | None = None
+
+
 class TranscriptionProcessor:
     """Processes audio files and manages their lifecycle."""
 
@@ -27,7 +43,8 @@ class TranscriptionProcessor:
         input_folder: str | Path,
         preset: str = "et-large",
         language: str | None = None,
-        transcribe_fn: Callable[[str, str, str, str | None], None] | None = None,
+        transcribe_fn: Callable[[str, str, str, str | None], TranscriptionMetrics | None] | None = None,
+        preprocess_config_provider: Callable[[], PreprocessConfig] | None = None,
         move_fn: Callable[[str, str], str | None] = shutil.move,
     ) -> None:
         """Initialize the processor.
@@ -37,16 +54,36 @@ class TranscriptionProcessor:
             input_folder: Folder containing audio files to process
             preset: Model preset for transcription (default: 'et-large')
             language: Force specific language code (e.g., 'en', 'et'), None for auto-detect
+            preprocess_config_provider: Callable that returns preprocessing configuration
         """
         self.db = db
         self.input_folder = Path(input_folder)
         self.preset = preset
         self.language = language
+        self._preprocess_config_provider = preprocess_config_provider or PreprocessConfig.from_env
 
-        def _default_transcribe(audio: str, json_path: str, preset: str, language: str | None = None) -> None:
-            transcribe_to_json(audio, json_path, preset, language=language)
+        def _default_transcribe(
+            audio: str, json_path: str, preset: str, language: str | None = None
+        ) -> TranscriptionMetrics | None:
+            metrics_container: dict[str, TranscriptionMetrics] = {}
 
-        self._transcribe: Callable[[str, str, str, str | None], None] = transcribe_fn or _default_transcribe
+            def _collect(metrics: TranscriptionMetrics) -> None:
+                metrics_container["value"] = metrics
+
+            payload = transcribe(
+                audio,
+                preset,
+                language=language,
+                preprocess_config_provider=self._preprocess_config_provider,
+                metrics_collector=_collect,
+            )
+            with open(json_path, "w", encoding="utf-8") as json_file:
+                json.dump(payload, json_file, ensure_ascii=False, indent=2)
+            return metrics_container.get("value")
+
+        self._transcribe: Callable[[str, str, str, str | None], TranscriptionMetrics | None] = (
+            transcribe_fn or _default_transcribe
+        )
         self._move = move_fn
 
         # Create subdirectories for processed and failed files
@@ -89,14 +126,14 @@ class TranscriptionProcessor:
         LOGGER.info("Found %d files to process", len(audio_files))
         return audio_files
 
-    def process_file(self, file_path: str) -> bool:
+    def process_file(self, file_path: str) -> FileProcessingStats:
         """Process a single audio file.
 
         Args:
             file_path: Path to the audio file
 
         Returns:
-            True if processing succeeded, False otherwise
+            FileProcessingStats describing the outcome
         """
         file_path_obj = Path(file_path)
 
@@ -104,7 +141,7 @@ class TranscriptionProcessor:
             error_msg = f"File not found: {file_path}"
             LOGGER.error(error_msg)
             self.db.update_status(file_path, "failed", error_msg)
-            return False
+            return FileProcessingStats(file_path=file_path, status="failed", error_message=error_msg)
 
         LOGGER.debug("Processing file: %s", file_path)
 
@@ -112,8 +149,8 @@ class TranscriptionProcessor:
             # Generate output JSON path (same name, .json extension)
             json_path = file_path_obj.with_suffix(".json")
 
-            # Call the existing transcription function
-            self._transcribe(str(file_path_obj), str(json_path), self.preset, self.language)
+            # Perform transcription and capture metrics
+            metrics = self._transcribe(str(file_path_obj), str(json_path), self.preset, self.language)
 
             # Move both audio and JSON to processed folder
             self._move_to_processed(file_path_obj, json_path)
@@ -123,7 +160,7 @@ class TranscriptionProcessor:
             self.db.update_status(file_path, "completed")
 
             LOGGER.info("Successfully processed: %s", file_path)
-            return True
+            return FileProcessingStats(file_path=file_path, status="completed", metrics=metrics)
 
         except Exception as error:
             error_msg = f"{type(error).__name__}: {error}"
@@ -132,7 +169,7 @@ class TranscriptionProcessor:
 
             # Move failed file to failed folder
             self._move_to_failed(file_path_obj)
-            return False
+            return FileProcessingStats(file_path=file_path, status="failed", error_message=error_msg)
 
     def _move_to_processed(self, audio_file: Path, json_file: Path) -> None:
         """Move successfully processed files to the processed subfolder.
@@ -169,26 +206,29 @@ class TranscriptionProcessor:
         except Exception as error:
             LOGGER.warning("Failed to move file to failed folder: %s", error)
 
-    def process_all_files(self, file_paths: list[str]) -> dict[str, int]:
+    def process_all_files(self, file_paths: list[str]) -> dict[str, Any]:
         """Process all files in the provided list.
 
         Args:
             file_paths: List of file paths to process
 
         Returns:
-            Dictionary with counts of succeeded and failed files
+            Dictionary with file counts and per-file statistics
         """
         if not file_paths:
             LOGGER.info("No files to process")
-            return {"succeeded": 0, "failed": 0}
+            return {"succeeded": 0, "failed": 0, "file_stats": []}
 
         LOGGER.info("Processing %d files", len(file_paths))
 
         succeeded = 0
         failed = 0
+        stats: list[FileProcessingStats] = []
 
         for file_path in file_paths:
-            if self.process_file(file_path):
+            result = self.process_file(file_path)
+            stats.append(result)
+            if result.status == "completed":
                 succeeded += 1
             else:
                 failed += 1
@@ -199,7 +239,7 @@ class TranscriptionProcessor:
             failed,
         )
 
-        return {"succeeded": succeeded, "failed": failed}
+        return {"succeeded": succeeded, "failed": failed, "file_stats": stats}
 
     def process_folder(self) -> dict[str, Any]:
         """Main entry point: scan folder and process all files found.
@@ -211,6 +251,8 @@ class TranscriptionProcessor:
             Dictionary with processing results
         """
         LOGGER.info("Starting folder processing")
+        run_start = time.time()
+        config_snapshot = self._preprocess_config_provider()
 
         # Get all files in the input folder
         files_to_process = self.get_files_to_process()
@@ -218,5 +260,106 @@ class TranscriptionProcessor:
         # Process them all
         results = self.process_all_files(files_to_process)
         results["files_found"] = len(files_to_process)
+        total_processing_time = time.time() - run_start
+        results["run_statistics"] = self._record_run_metadata(results, config_snapshot, total_processing_time)
 
         return results
+
+    def _record_run_metadata(
+        self,
+        results: dict[str, Any],
+        config_snapshot: PreprocessConfig,
+        total_processing_time: float,
+    ) -> dict[str, Any]:
+        """Build and persist run metadata from the latest folder processing."""
+        file_stats: list[FileProcessingStats] = results.get("file_stats", [])
+        metrics_list = [entry.metrics for entry in file_stats if entry.metrics]
+
+        preprocess_time_total = sum(metric.preprocess_duration for metric in metrics_list)
+        transcribe_time_total = sum(metric.transcribe_duration for metric in metrics_list)
+        audio_durations = [metric.audio_duration for metric in metrics_list if metric.audio_duration is not None]
+        total_audio_duration = sum(audio_durations) if audio_durations else None
+
+        speed_values = [metric.speed_ratio for metric in metrics_list if metric.speed_ratio is not None]
+        average_speed_ratio = sum(speed_values) / len(speed_values) if speed_values else None
+
+        detected_languages: dict[str, int] = {}
+        for metric in metrics_list:
+            lang = metric.detected_language
+            if lang:
+                detected_languages[lang] = detected_languages.get(lang, 0) + 1
+
+        if metrics_list:
+            sample_metric = metrics_list[0]
+            preprocess_profile = sample_metric.preprocess_profile
+            target_sample_rate = sample_metric.target_sample_rate
+            target_channels = sample_metric.target_channels
+        else:
+            preprocess_profile = config_snapshot.profile
+            target_sample_rate = config_snapshot.target_sample_rate
+            target_channels = config_snapshot.target_channels
+
+        per_file_stats: list[dict[str, Any]] = []
+        for entry in file_stats:
+            record: dict[str, Any] = {
+                "file_path": entry.file_path,
+                "status": entry.status,
+                "error_message": entry.error_message,
+            }
+            if entry.metrics:
+                record["metrics"] = asdict(entry.metrics)
+            per_file_stats.append(record)
+
+        parameters = {
+            "input_folder": str(self.input_folder),
+            "preset": self.preset,
+            "language": self.language,
+            "preprocess": {
+                "enabled": config_snapshot.enabled,
+                "profile": config_snapshot.profile,
+                "target_sample_rate": config_snapshot.target_sample_rate,
+                "target_channels": config_snapshot.target_channels,
+            },
+        }
+
+        statistics = {
+            "files_found": results.get("files_found", 0),
+            "succeeded": results.get("succeeded", 0),
+            "failed": results.get("failed", 0),
+            "total_processing_time": total_processing_time,
+            "total_preprocess_time": preprocess_time_total,
+            "total_transcribe_time": transcribe_time_total,
+            "total_audio_duration": total_audio_duration,
+            "average_speed_ratio": average_speed_ratio,
+            "detected_languages": detected_languages,
+            "files": per_file_stats,
+        }
+
+        run_record = RunRecord(
+            recorded_at=datetime.now(timezone.utc),
+            input_folder=str(self.input_folder),
+            preset=self.preset,
+            language=self.language,
+            preprocess_enabled=config_snapshot.enabled,
+            preprocess_profile=preprocess_profile,
+            target_sample_rate=target_sample_rate,
+            target_channels=target_channels,
+            files_found=results.get("files_found", 0),
+            succeeded=results.get("succeeded", 0),
+            failed=results.get("failed", 0),
+            total_processing_time=total_processing_time,
+            total_preprocess_time=preprocess_time_total,
+            total_transcribe_time=transcribe_time_total,
+            total_audio_duration=total_audio_duration,
+            speed_ratio=average_speed_ratio,
+            detected_languages=detected_languages,
+            parameters=parameters,
+            statistics=statistics,
+        )
+
+        try:
+            self.db.record_run(run_record)
+        except DatabaseError as exc:
+            LOGGER.warning("Failed to record run metadata: %s", exc)
+
+        return statistics

@@ -27,6 +27,7 @@ import json
 import logging
 import os
 import time
+from dataclasses import dataclass
 from collections.abc import Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Callable, cast
@@ -54,6 +55,30 @@ PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
 # Float rounding precision for JSON output
 FLOAT_PRECISION = 3
+
+
+@dataclass(slots=True)
+class TranscriptionMetrics:
+    """Canonical statistics emitted for a transcription run."""
+
+    audio_path: str
+    preset: str
+    requested_language: str | None
+    applied_language: str | None
+    detected_language: str | None
+    language_probability: float | None
+    audio_duration: float | None
+    total_processing_time: float
+    transcribe_duration: float
+    preprocess_duration: float
+    preprocess_enabled: bool
+    preprocess_profile: str
+    target_sample_rate: int
+    target_channels: int | None
+    preprocess_snr_before: float | None
+    preprocess_snr_after: float | None
+    preprocess_steps: list[dict[str, Any]]
+    speed_ratio: float | None
 
 
 def _get_estonian_model_path(
@@ -224,8 +249,17 @@ def transcribe(
     preprocess_config_provider: Callable[[], PreprocessConfig] = PreprocessConfig.from_env,
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult] = preprocess_audio,
     model_picker: Callable[[str], Any] | None = None,
+    metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
 ) -> Dict[str, Any]:
     LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
+    preset_config = get_preset(preset)
+    LOGGER.info(
+        "🧠 Using preset %s (%s compute, device %s)",
+        preset,
+        preset_config.compute_type,
+        preset_config.device,
+    )
+    LOGGER.info("⚙️ Beam size: %d", DEFAULT_BEAM_SIZE)
     overall_start = time.time()
 
     preprocess_config = preprocess_config_provider()
@@ -240,12 +274,14 @@ def transcribe(
         info: "TranscriptionInfo"
 
         # Auto-detect language based on preset if not explicitly provided
-        if language is None:
-            language = "et" if preset.startswith("et-") else None
+        requested_language = language
+        applied_language = requested_language
+        if applied_language is None:
+            applied_language = "et" if preset.startswith("et-") else None
 
         # Log language configuration
-        if language:
-            LOGGER.info("🌐 Language: %s (forced)", language)
+        if applied_language:
+            LOGGER.info("🌐 Language: %s (forced)", applied_language)
         else:
             LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
 
@@ -255,7 +291,7 @@ def transcribe(
             str(preprocess_result.output_path),
             beam_size=DEFAULT_BEAM_SIZE,
             word_timestamps=DEFAULT_WORD_TIMESTAMPS,
-            language=language,
+            language=applied_language,
             task=DEFAULT_TASK,
         )
 
@@ -307,10 +343,38 @@ def transcribe(
 
         # Log timing summary
         LOGGER.info("⏱️  Transcription completed in %.2f seconds", transcribe_time)
+        speed_ratio: float | None = None
         if duration:
             speed_ratio = duration / transcribe_time if transcribe_time > 0 else 0
             LOGGER.info("⚡ Speed: %.2fx realtime (%.1fs audio in %.1fs)", speed_ratio, duration, transcribe_time)
         LOGGER.info("✅ Total processing time: %.2f seconds", overall_time)
+
+        preprocess_steps = [
+            {"name": step.name, "backend": step.backend, "duration": step.duration}
+            for step in preprocess_result.metrics.steps
+        ]
+        metrics_payload = TranscriptionMetrics(
+            audio_path=path,
+            preset=preset,
+            requested_language=requested_language,
+            applied_language=applied_language,
+            detected_language=detected_lang,
+            language_probability=lang_prob,
+            audio_duration=duration,
+            total_processing_time=overall_time,
+            transcribe_duration=transcribe_time,
+            preprocess_duration=preprocess_result.metrics.total_duration,
+            preprocess_enabled=preprocess_config.enabled,
+            preprocess_profile=preprocess_result.profile,
+            target_sample_rate=preprocess_config.target_sample_rate,
+            target_channels=preprocess_config.target_channels,
+            preprocess_snr_before=preprocess_result.metrics.snr_before,
+            preprocess_snr_after=preprocess_result.metrics.snr_after,
+            preprocess_steps=preprocess_steps,
+            speed_ratio=speed_ratio,
+        )
+        if metrics_collector:
+            metrics_collector(metrics_payload)
 
         cleaned = {key: value for key, value in payload.items() if value is not None}
         return _round_floats(cleaned)

@@ -1,14 +1,51 @@
 """Database operations for transcription state tracking."""
 
+import json
 import logging
 import os
 import sqlite3
+from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from backend.exceptions import DatabaseError
 
 LOGGER = logging.getLogger(__name__)
+
+
+@dataclass(slots=True)
+class RunRecord:
+    """Structured information about a single transcription run."""
+
+    recorded_at: str | datetime
+    input_folder: str | None
+    preset: str
+    language: str | None
+    preprocess_enabled: bool
+    preprocess_profile: str | None
+    target_sample_rate: int | None
+    target_channels: int | None
+    files_found: int
+    succeeded: int
+    failed: int
+    total_processing_time: float | None
+    total_preprocess_time: float | None
+    total_transcribe_time: float | None
+    total_audio_duration: float | None
+    speed_ratio: float | None
+    detected_languages: dict[str, int] | None = None
+    parameters: dict[str, Any] | None = None
+    statistics: dict[str, Any] | None = None
+
+
+def _format_timestamp(value: str | datetime | None) -> str:
+    """Return a consistent ISO timestamp string."""
+    if value is None:
+        return datetime.now(timezone.utc).isoformat()
+    if isinstance(value, datetime):
+        return value.isoformat()
+    return value
 
 
 def get_default_db_path() -> Path:
@@ -67,6 +104,30 @@ class TranscriptionDatabase:
                     file_path TEXT UNIQUE NOT NULL,
                     status TEXT NOT NULL,
                     error_message TEXT
+                )
+            """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS run_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    recorded_at TEXT NOT NULL,
+                    input_folder TEXT,
+                    preset TEXT NOT NULL,
+                    language TEXT,
+                    preprocess_enabled INTEGER NOT NULL,
+                    preprocess_profile TEXT,
+                    target_sample_rate INTEGER,
+                    target_channels INTEGER,
+                    files_found INTEGER NOT NULL,
+                    succeeded INTEGER NOT NULL,
+                    failed INTEGER NOT NULL,
+                    total_processing_time REAL,
+                    total_preprocess_time REAL,
+                    total_transcribe_time REAL,
+                    total_audio_duration REAL,
+                    speed_ratio REAL,
+                    detected_languages TEXT,
+                    parameters_json TEXT NOT NULL,
+                    statistics_json TEXT NOT NULL
                 )
             """)
             self.conn.commit()
@@ -196,6 +257,98 @@ class TranscriptionDatabase:
             return [dict(row) for row in rows]
         except sqlite3.Error as e:
             msg = f"Failed to get all files: {e}"
+            raise DatabaseError(msg) from e
+
+    def record_run(self, record: RunRecord) -> None:
+        """Persist metadata and statistics for a transcription run."""
+        if not self.conn:
+            msg = "Database not initialized"
+            raise DatabaseError(msg)
+
+        parameters_json = json.dumps(record.parameters or {}, sort_keys=True)
+        statistics_json = json.dumps(record.statistics or {}, sort_keys=True)
+        detected_languages_json = json.dumps(record.detected_languages or {}, sort_keys=True)
+        recorded_at = _format_timestamp(record.recorded_at)
+
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                """
+                INSERT INTO run_history (
+                    recorded_at,
+                    input_folder,
+                    preset,
+                    language,
+                    preprocess_enabled,
+                    preprocess_profile,
+                    target_sample_rate,
+                    target_channels,
+                    files_found,
+                    succeeded,
+                    failed,
+                    total_processing_time,
+                    total_preprocess_time,
+                    total_transcribe_time,
+                    total_audio_duration,
+                    speed_ratio,
+                    detected_languages,
+                    parameters_json,
+                    statistics_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    recorded_at,
+                    record.input_folder,
+                    record.preset,
+                    record.language,
+                    int(record.preprocess_enabled),
+                    record.preprocess_profile,
+                    record.target_sample_rate,
+                    record.target_channels,
+                    record.files_found,
+                    record.succeeded,
+                    record.failed,
+                    record.total_processing_time,
+                    record.total_preprocess_time,
+                    record.total_transcribe_time,
+                    record.total_audio_duration,
+                    record.speed_ratio,
+                    detected_languages_json,
+                    parameters_json,
+                    statistics_json,
+                ),
+            )
+            self.conn.commit()
+            LOGGER.debug("Recorded run metadata for preset=%s folder=%s", record.preset, record.input_folder)
+        except sqlite3.Error as e:
+            msg = f"Failed to record run metadata: {e}"
+            raise DatabaseError(msg) from e
+
+    def get_run_history(self, limit: int | None = None) -> list[dict[str, Any]]:
+        """Return stored run metadata entries ordered by timestamp descending."""
+        if not self.conn:
+            msg = "Database not initialized"
+            raise DatabaseError(msg)
+
+        try:
+            cursor = self.conn.cursor()
+            query = "SELECT * FROM run_history ORDER BY recorded_at DESC"
+            params: tuple[int, ...] = ()
+            if limit is not None:
+                query += " LIMIT ?"
+                params = (limit,)
+            cursor.execute(query, params)
+            rows = cursor.fetchall()
+            history: list[dict[str, Any]] = []
+            for row in rows:
+                entry = dict(row)
+                entry["parameters"] = json.loads(entry.pop("parameters_json"))
+                entry["statistics"] = json.loads(entry.pop("statistics_json"))
+                entry["detected_languages"] = json.loads(entry.get("detected_languages") or "{}")
+                history.append(entry)
+            return history
+        except sqlite3.Error as e:
+            msg = f"Failed to fetch run history: {e}"
             raise DatabaseError(msg) from e
 
     def get_summary(self) -> dict[str, int]:
