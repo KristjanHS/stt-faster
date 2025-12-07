@@ -16,14 +16,14 @@ if TYPE_CHECKING:
 
 @pytest.mark.slow
 @pytest.mark.network
-def test_process_command_with_cached_model_e2e(tmp_path: Path, tiny_whisper_model: "WhisperModel | None") -> None:
+def test_process_command_with_cached_model_e2e(tmp_path: Path, tiny_whisper_model: "WhisperModel") -> None:
     """Run the process command end-to-end with the real tiny model."""
-    if tiny_whisper_model is None:
-        pytest.skip("tiny model unavailable (USE_CACHED_MODEL=false or offline)")
+
+    assert tiny_whisper_model is not None
 
     source_mp3 = Path("tests/test.mp3")
     if not source_mp3.exists():
-        pytest.skip("tests/test.mp3 not available for E2E CLI real-model test")
+        pytest.fail("tests/test.mp3 not available; E2E CLI real-model test requires the sample audio.")
 
     workdir = tmp_path / "real_audio"
     workdir.mkdir()

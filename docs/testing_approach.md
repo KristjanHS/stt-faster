@@ -32,6 +32,11 @@ Fixtures are organized hierarchically through `conftest.py` files:
 
 **Model Caching:** Set `USE_CACHED_MODEL=true` (default) to use cached tiny Whisper model (~75MB) or `false` for mock-only mode (offline/faster).
 
+## Docker E2E Execution
+
+- Docker-backed end-to-end suites live under `tests/e2e/` and are executed by default when running `make e2e` (or `.venv/bin/python -m pytest tests/e2e`). There is no longer a `RUN_DOCKER_E2E` gate—Docker tests are the default path.
+- GPU diagnostics in this suite are opt-in (the rest of the e2e coverage still runs automatically). Set `RUN_GPU_DIAGNOSTICS=true` when you intentionally want to exercise the GPU diagnostic checks.
+
 ## Mocking Strategy
 
 | Component | Unit Tests | Integration Tests | E2E Tests |
