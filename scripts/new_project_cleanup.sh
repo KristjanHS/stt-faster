@@ -99,11 +99,9 @@ remove_path() {
 }
 
 declare -a TO_REMOVE=(
-    "${ROOT_DIR}/backend"
-    "${ROOT_DIR}/frontend"
-    "${ROOT_DIR}/tests"
     "${ROOT_DIR}/reports"
     "${ROOT_DIR}/logs"
+    "${ROOT_DIR}/typings"
     "${ROOT_DIR}/${ORIGINAL_MODULE}.egg-info"
     "${ROOT_DIR}/transcribe_state.db"
     "${ROOT_DIR}/semgrep_local.sarif"
@@ -141,7 +139,7 @@ Manual steps required (automation removed for safety):
 - Create your package scaffold (e.g., mkdir -p <module>/ and add __init__.py/cli stubs).
 - Create your tests scaffold under tests/unit, tests/integration, tests/e2e.
 - Update pyproject.toml manually: name/description/homepage/repository, runtime deps baseline, coverage/tool sources.
-- Search/replace old slug/module strings manually (e.g., rg "stt-faster" ., rg "stt_faster" .).
+- Search/replace old slug/module strings manually (e.g., rg "xls-analyser" ., rg "xls_analyser" .).
 - Set up git manually (git init, git remote add origin <url>, git branch -M main), or run make new-project-git-setup for a guided helper.
 EOF
 

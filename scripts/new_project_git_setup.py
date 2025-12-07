@@ -67,15 +67,17 @@ def main() -> int:
     old_url = origin_file.read_text().strip() if origin_file.exists() else ""
     new_url = ""
     if old_url:
-        new_url = re.sub(r"(?<=/)[^/]+(?=\.git$|$)", slug, old_url)
+        # Replace the repo name (last path component before .git) with the new slug
+        match = re.match(r"^(.*/)([^/]+?)(\.git)?$", old_url)
+        if match:
+            base_url, _old_repo, git_ext = match.groups()
+            new_url = f"{base_url}{slug}{git_ext or '.git'}"
     if not new_url:
         new_url = f"https://github.com/UNKNOWN/{slug}.git"
 
     logger.info("Planned git setup values:")
     logger.info(f"- repo root: {root}")
     logger.info(f"- project slug (from pyproject): {slug}")
-    if old_url:
-        logger.info(f"- source origin URL: {old_url}")
     logger.info(f"- default origin URL: {new_url}")
     logger.info("- default branch: main")
 
@@ -95,26 +97,25 @@ def main() -> int:
         return 0
 
     if not (root / ".git").exists():
-        init_reply = prompt(f"Initialize git repository in {root}", "y").lower()
-        if init_reply.startswith("y"):
-            subprocess.run([GIT_EXECUTABLE, "init"], cwd=root, check=True)  # nosec B603
-        else:
-            logger.info("Git init skipped.")
-            return 0
+        logger.info(f"Initializing git repository in {root}...")
+        subprocess.run([GIT_EXECUTABLE, "init"], cwd=root, check=True)  # nosec B603
 
     existing_origin = ""
     try:
         existing_origin = subprocess.check_output(  # nosec B603
-            [GIT_EXECUTABLE, "remote", "get-url", "origin"], cwd=root, text=True
+            [GIT_EXECUTABLE, "remote", "get-url", "origin"],
+            cwd=root,
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
     except subprocess.CalledProcessError:
         existing_origin = ""
     if existing_origin:
         remote_default = "skip"
-        remote_prompt = f"Replace existing origin ({existing_origin})"
+        remote_prompt = f"Replace existing origin ({existing_origin}) with new URL (or press Enter to skip)"
     else:
         remote_default = new_url
-        remote_prompt = "Set remote origin URL"
+        remote_prompt = "Set remote origin URL (press Enter to use default, or type new URL)"
     remote_reply = prompt(remote_prompt, remote_default or "skip")
     if remote_reply and remote_reply != "skip":
         if not validate_git_url(remote_reply):
@@ -136,7 +137,7 @@ def main() -> int:
     else:
         logger.info("Origin update skipped.")
 
-    branch_reply = prompt("Default branch name (blank to skip)", "")
+    branch_reply = prompt("Default branch name (press Enter to use 'main', or type different name)", "main")
     if branch_reply:
         if not validate_branch_name(branch_reply):
             logger.error(f"Invalid branch name: {branch_reply}")
