@@ -7,6 +7,8 @@
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
 .PHONY: unit integration e2e
+# Audio
+.PHONY: preprocess-audio
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
@@ -20,6 +22,7 @@ SHELL := bash
 
 # Stable project/session handling
 LOG_DIR := logs
+INTEGRATION_MARKERS ?=
 
 # Configurable pyright config path (default to repo config)
 PYRIGHT_CONFIG ?= ./pyrightconfig.json
@@ -47,6 +50,9 @@ help:
 	@echo "  unit         - Run unit tests (local) and write reports"
 	@echo "  integration  - Run integration tests (uv preferred)"
 	@echo "  e2e          - Run e2e tests (sequential, Docker-based) and write reports"
+	@echo ""
+	@echo "  -- Audio --"
+	@echo "  preprocess-audio  - Run preprocessing on tests/test.mp3 (AUDIO=..., OUT=... to override)"
 	@echo ""
 	@echo "  -- Docker (Production) --"
 	@echo "  docker-build-prod    - Build production Docker image for end users"
@@ -143,9 +149,9 @@ setup-act: install-act
 # Run local integration tests; prefer uv if available
 integration:
 	@if command -v uv >/dev/null 2>&1; then \
-		uv run -m pytest tests/integration -q ${PYTEST_ARGS}; \
+		uv run -m pytest tests/integration -vv $(if $(INTEGRATION_MARKERS),-m "$(INTEGRATION_MARKERS)",) ${PYTEST_ARGS}; \
 	else \
-		echo "uv not found. Either install uv (https://astral.sh/uv) and run './run_uv.sh', or ensure your venv is set up then run '.venv/bin/python -m pytest tests/integration -q ${PYTEST_ARGS}'"; \
+		echo "uv not found. Either install uv (https://astral.sh/uv) and run './run_uv.sh', or ensure your venv is set up then run '.venv/bin/python -m pytest tests/integration -vv ${PYTEST_ARGS}'"; \
 		exit 1; \
 	fi
 
@@ -172,19 +178,30 @@ uv-sync-test:
 unit:
 	mkdir -p reports
 	@if [ -x .venv/bin/python ]; then \
-		.venv/bin/python -m pytest tests/unit -n auto --maxfail=1 -q --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
+		.venv/bin/python -m pytest tests/unit -n auto --maxfail=1 -vv --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
 	else \
-		uv run -m pytest tests/unit -n auto --maxfail=1 -q --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
+		uv run -m pytest tests/unit -n auto --maxfail=1 -vv --html reports/unit.html --self-contained-html ${PYTEST_ARGS}; \
 	fi
 
 # E2E test target (run without parallelization due to shared Docker container)
 e2e:
 	mkdir -p reports
 	@if [ -x .venv/bin/python ]; then \
-		.venv/bin/python -m pytest tests/e2e --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
+		.venv/bin/python -m pytest tests/e2e --maxfail=1 -vv --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
 	else \
-		uv run -m pytest tests/e2e --maxfail=1 -q --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
+		uv run -m pytest tests/e2e --maxfail=1 -vv --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
 	fi
+
+preprocess-audio:
+	@set -euo pipefail; \
+	if [ ! -x .venv/bin/python ]; then \
+	  echo "Missing .venv/bin/python. Run ./run_uv.sh first."; \
+	  exit 1; \
+	fi; \
+	SRC=$(if $(AUDIO),$(AUDIO),tests/test.mp3); \
+	OUT=$(if $(OUT),$(OUT),reports/preprocessed.wav); \
+	echo "Preprocessing $$SRC -> $$OUT"; \
+	STT_PREPROCESS_ENABLED=1 .venv/bin/python scripts/run_preprocess.py --input "$$SRC" --output "$$OUT"
 
 
 pyright:
@@ -226,8 +243,8 @@ ruff-fix:
 # Run full pre-commit suite (dev deps required)
 pre-commit:
 	# Keep test deps installed to avoid breaking local test runs after this target
-	uv sync --group dev --group test --frozen
-	uv run pre-commit run --all-files
+	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv sync --group dev --group test --frozen
+	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv run pre-commit run --all-files
 
 # Run the same checks as the Git pre-push hook, forcing all SKIP flags to 0
 pre-push:

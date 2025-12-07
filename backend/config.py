@@ -1,6 +1,7 @@
 import logging
 import os
 import sys
+from collections.abc import Callable
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
@@ -28,9 +29,10 @@ def _parse_level(value: str | None, default: int = logging.INFO) -> int:
     return getattr(logging, name, default)
 
 
-def _build_console_handler(level: int) -> logging.Handler:
+def _build_console_handler(level: int, *, isatty: Callable[[], bool] | None = None) -> logging.Handler:
     """Return a console handler. Use Rich in TTY, plain stream otherwise."""
-    if sys.stderr.isatty():
+    is_tty = isatty or sys.stderr.isatty
+    if is_tty():
         handler = RichHandler(
             show_time=False,
             show_path=False,

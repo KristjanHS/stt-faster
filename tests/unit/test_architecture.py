@@ -6,8 +6,29 @@ These tests validate that the codebase follows architectural rules:
 - Domain layer has no infrastructure dependencies
 """
 
-import subprocess
+import ast
 from pathlib import Path
+
+
+def _imports_backend(module_path: Path) -> bool:
+    """Detect whether a module imports backend components."""
+
+    try:
+        tree = ast.parse(module_path.read_text())
+    except SyntaxError:
+        # If the file cannot be parsed, treat it as non-violating to avoid false positives.
+        return False
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if node.module and node.module.split(".")[0] == "backend":
+                return True
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name.split(".")[0] == "backend":
+                    return True
+
+    return False
 
 
 def test_frontend_has_no_business_logic():
@@ -24,14 +45,11 @@ def test_frontend_has_no_business_logic():
         # No Python files yet, test passes
         return
 
-    result = subprocess.run(
-        ["grep", "-r", "from backend", str(frontend_path)],
-        capture_output=True,
-        text=True,
-    )
-    # grep returns 1 when no matches (which is what we want)
-    assert result.returncode == 1, (
+    violations = [path for path in python_files if _imports_backend(path)]
+
+    assert not violations, (
         "Frontend should not import from backend directly! Use API calls instead to maintain clean architecture."
+        f" Offending files: {[str(path.relative_to(frontend_path)) for path in violations]}"
     )
 
 

@@ -1,16 +1,9 @@
-"""End-to-end tests for Docker container build and runtime.
-
-These tests verify that:
-1. The Docker image builds successfully
-2. The container starts and becomes healthy
-3. Commands can be executed inside the container
-4. The Python environment is correctly configured
-5. Tests can run inside the container
-"""
+"""End-to-end tests for Docker container build and runtime."""
 
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -23,7 +16,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Path to docker-compose file
+pytestmark = [
+    pytest.mark.docker,
+    pytest.mark.slow,
+]
+
 COMPOSE_FILE = Path("docker/docker-compose.yml")
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 
@@ -59,9 +56,34 @@ def exec_in_container(
     return run_docker_compose("exec", "-T", "app", *cmd, check=check)
 
 
+def _check_docker_daemon() -> None:
+    """Ensure Docker daemon is reachable before running tests."""
+    try:
+        result = subprocess.run(
+            ["docker", "info"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+        )
+        if result.returncode != 0:
+            pytest.fail("Docker daemon not reachable (docker info failed).")
+    except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        pytest.fail(f"Docker daemon unavailable: {exc}")
+
+
+def _require_opt_in() -> None:
+    """Require explicit opt-in for Docker E2E runs."""
+    if os.getenv("RUN_DOCKER_E2E", "false").lower() not in ("true", "1", "yes"):
+        pytest.fail("Set RUN_DOCKER_E2E=true to run Docker E2E tests (no implicit skips).")
+
+
 @pytest.fixture(scope="module")
 def docker_container() -> Generator[None, None, None]:
     """Build and start the Docker container, tear down after tests."""
+    _require_opt_in()
+    _check_docker_daemon()
+
     logger.info("Building Docker image...")
     run_docker_compose("build")
 

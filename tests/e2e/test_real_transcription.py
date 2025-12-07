@@ -31,7 +31,7 @@ class TestRealTranscription:
         # Skip if test.mp3 doesn't exist
         test_mp3 = e2e_test_folder / "test.mp3"
         if not test_mp3.exists():
-            pytest.skip("test.mp3 not found in test folder")
+            pytest.fail("test.mp3 not found in test folder; add tests/test.mp3 for E2E transcription")
 
         result = subprocess.run(
             [
@@ -87,7 +87,7 @@ class TestRealTranscription:
         else:
             # If it failed, check if it's because models are not available
             if "model" in output.lower() or "not found" in output.lower():
-                pytest.skip("Transcription models not available")
+                pytest.fail(f"Transcription models not available: {output}")
             else:
                 pytest.fail(f"Transcription failed with unexpected error: {output}")
 
@@ -98,7 +98,7 @@ class TestRealTranscription:
         """
         test_mp3 = e2e_test_folder / "test.mp3"
         if not test_mp3.exists():
-            pytest.skip("test.mp3 not found in test folder")
+            pytest.fail("test.mp3 not found in test folder; add tests/test.mp3 for E2E transcription")
 
         # Run the process command
         subprocess.run(
@@ -129,7 +129,7 @@ class TestRealTranscription:
         """
         test_mp3 = e2e_test_folder / "test.mp3"
         if not test_mp3.exists():
-            pytest.skip("test.mp3 not found in test folder")
+            pytest.fail("test.mp3 not found in test folder; add tests/test.mp3 for E2E transcription")
 
         result = subprocess.run(
             [

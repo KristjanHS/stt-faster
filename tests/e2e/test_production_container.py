@@ -501,7 +501,7 @@ class TestProductionTranscription:
         Requires HF_TOKEN environment variable for downloading Estonian models.
         """
         if not TEST_AUDIO_FILE.exists():
-            pytest.skip("Test audio file not found")
+            pytest.fail("Test audio file not found; e2e container test requires tests/test.mp3")
 
         if not HF_TOKEN:
             pytest.fail(
