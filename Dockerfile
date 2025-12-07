@@ -68,6 +68,7 @@ RUN set -eux; \
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     apt-get update && \
     apt-get install -y --no-install-recommends \
+    ffmpeg \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
@@ -100,7 +101,7 @@ ENV STT_DEVICE=cpu/int8
 
 # Enable high-quality preprocessing pipeline by default.
 ENV STT_PREPROCESS_ENABLED=1
-ENV STT_PREPROCESS_TARGET_SR=22050
+ENV STT_PREPROCESS_TARGET_SR=16000
 ENV STT_PREPROCESS_TARGET_CH=0
 ENV STT_PREPROCESS_PROFILE=gpu
 

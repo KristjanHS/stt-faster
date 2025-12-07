@@ -7,7 +7,6 @@ from typing import Any, Dict
 
 import pytest
 
-import backend.preprocess.orchestrator as orchestrator
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import PreprocessError
 from backend.preprocess.io import AudioInfo, inspect_audio
@@ -18,10 +17,10 @@ def test_config_from_env_defaults() -> None:
     cfg = PreprocessConfig.from_env(env={})
 
     assert cfg.enabled is True
-    assert cfg.target_sample_rate == 22_050
+    assert cfg.target_sample_rate == 16_000
     assert cfg.target_channels is None
     assert cfg.temp_dir is None
-    assert cfg.profile == "gpu"
+    assert cfg.profile == "cpu"
 
 
 def test_config_from_env_overrides() -> None:
@@ -134,7 +133,6 @@ def test_preprocess_audio_runs_downmix(preprocess_pipeline_stubs, tmp_path: Path
         denoise_fn=preprocess_pipeline_stubs["denoise_fn"],
         snr_estimator=preprocess_pipeline_stubs["snr_estimator"],
         temp_dir_factory=preprocess_pipeline_stubs["temp_dir_factory"],
-        gpu_check=preprocess_pipeline_stubs["gpu_check"],
     )
 
     assert result.output_path.parent == temp_root
@@ -153,22 +151,7 @@ def test_preprocess_audio_runs_downmix(preprocess_pipeline_stubs, tmp_path: Path
     assert result.metrics.snr_before == 1.0
     assert result.metrics.snr_after == 3.0
     assert result.metrics.snr_delta == 2.0
-    assert result.profile == "gpu"
+    assert result.profile == "cpu"
 
     result.cleanup()
     assert temp_dir.cleaned is True
-
-
-def test_resolve_profile_prefers_gpu() -> None:
-    profile, note = orchestrator._resolve_profile("auto", gpu_check=lambda: True)
-
-    assert profile == "gpu"
-    assert note is None
-
-
-def test_resolve_profile_falls_back_to_cpu() -> None:
-    profile, note = orchestrator._resolve_profile("gpu", gpu_check=lambda: False)
-
-    assert profile == "cpu"
-    assert note is not None
-    assert "falling back to cpu" in note.lower()

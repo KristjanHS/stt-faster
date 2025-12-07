@@ -1,8 +1,9 @@
 """Unit tests for transcription database operations."""
 
+from datetime import datetime
 from pathlib import Path
 
-from backend.database import TranscriptionDatabase
+from backend.database import RunRecord, TranscriptionDatabase
 
 
 def test_database_initialization(temp_db: TranscriptionDatabase) -> None:
@@ -97,6 +98,42 @@ def test_get_summary(temp_db: TranscriptionDatabase) -> None:
     assert summary["pending"] == 2
     assert summary["completed"] == 1
     assert summary["failed"] == 1
+
+
+def test_record_run(temp_db: TranscriptionDatabase) -> None:
+    """Test that run metadata can be recorded."""
+    record = RunRecord(
+        recorded_at=datetime(2025, 1, 1, 0, 0),
+        input_folder="/tmp/input",
+        preset="turbo",
+        language="en",
+        preprocess_enabled=True,
+        preprocess_profile="cpu",
+        target_sample_rate=16000,
+        target_channels=1,
+        files_found=2,
+        succeeded=2,
+        failed=0,
+        total_processing_time=120.0,
+        total_preprocess_time=30.0,
+        total_transcribe_time=90.0,
+        total_audio_duration=180.0,
+        speed_ratio=2.0,
+        detected_languages={"en": 2},
+        parameters={"preset": "turbo"},
+        statistics={"avg_speed": 2.0},
+    )
+
+    temp_db.record_run(record)
+    history = temp_db.get_run_history()
+
+    assert len(history) == 1
+    entry = history[0]
+    assert entry["input_folder"] == "/tmp/input"
+    assert entry["preset"] == "turbo"
+    assert entry["files_found"] == 2
+    assert entry["parameters"]["preset"] == "turbo"
+    assert entry["statistics"]["avg_speed"] == 2.0
 
 
 def test_context_manager(temp_db: TranscriptionDatabase) -> None:

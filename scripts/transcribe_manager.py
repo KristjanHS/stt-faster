@@ -61,6 +61,18 @@ def cmd_process(args: argparse.Namespace) -> int:
             LOGGER.info("  Failed: %d", results.get("failed", 0))
             LOGGER.info("=" * 60)
 
+            run_stats = results.get("run_statistics")
+            if run_stats:
+                LOGGER.info(
+                    "Run stats: %.2f s total, %.2f s preprocess, %.2f s transcription, avg %.2f x speed",
+                    run_stats.get("total_processing_time", 0),
+                    run_stats.get("total_preprocess_time", 0),
+                    run_stats.get("total_transcribe_time", 0),
+                    float(run_stats.get("average_speed_ratio") or 0),
+                )
+                if run_stats.get("detected_languages"):
+                    LOGGER.info("Detected languages: %s", run_stats["detected_languages"])
+
         return 0
 
     except Exception as error:

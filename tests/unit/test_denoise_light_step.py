@@ -37,6 +37,9 @@ def test_apply_light_denoise_invokes_spectral_gate(tmp_path: Path) -> None:  # n
     assert calls["audio_dtype"] == np.float32
     assert calls["kwargs"]["stationary"] is True
     assert calls["kwargs"]["use_tqdm"] is False
+    assert calls["kwargs"]["n_fft"] == 512
+    assert calls["kwargs"]["win_length"] == 512
+    assert calls["kwargs"]["hop_length"] == 256
 
 
 def test_apply_light_denoise_rejects_rate_mismatch(tmp_path: Path) -> None:

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import logging
-import shutil
-import subprocess  # nosec B404 - used for fixed system tooling (ffmpeg/nvidia-smi)
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -13,9 +11,9 @@ from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import PreprocessError, StepExecutionError
 from backend.preprocess.io import AudioInfo, inspect_audio
 from backend.preprocess.metrics import PreprocessMetrics, StepMetrics, estimate_snr_db
+from backend.preprocess.steps.denoise_light import apply_light_denoise
 from backend.preprocess.steps.downmix_resample import downmix_and_resample
 from backend.preprocess.steps.loudness import apply_loudnorm
-from backend.preprocess.steps.denoise_light import apply_light_denoise
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,41 +27,6 @@ class PreprocessResult:
     cleanup: Callable[[], None] = field(default=lambda: None)
 
 
-def _gpu_available() -> bool:
-    """Return True if a CUDA-capable GPU is available (via nvidia-smi)."""
-    nvidia_smi = shutil.which("nvidia-smi")
-    if nvidia_smi is None:
-        return False
-
-    try:
-        result = subprocess.run(
-            [nvidia_smi],
-            capture_output=True,
-            check=False,
-            timeout=5,
-        )  # nosec B603 B607 - fixed binary path, no untrusted input
-        return result.returncode == 0
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        return False
-
-
-def _resolve_profile(
-    preferred: str | None, *, gpu_check: Callable[[], bool] = _gpu_available
-) -> tuple[str, str | None]:
-    """Pick GPU profile by default and fall back to CPU with a user-visible note."""
-    normalized = (preferred or "auto").lower()
-    if normalized not in {"auto", "gpu", "cpu"}:
-        normalized = "auto"
-
-    if normalized == "cpu":
-        return "cpu", None
-
-    if gpu_check():
-        return "gpu", None
-
-    return "cpu", "GPU preprocessing requested but no GPU detected; falling back to CPU."
-
-
 def preprocess_audio(
     input_path: str | Path,
     config: PreprocessConfig | None = None,
@@ -73,7 +36,6 @@ def preprocess_audio(
     loudnorm_fn: Callable[..., StepMetrics] = apply_loudnorm,
     denoise_fn: Callable[..., StepMetrics] = apply_light_denoise,
     snr_estimator: Callable[[Path, int, int], float | None] = estimate_snr_db,
-    gpu_check: Callable[[], bool] = _gpu_available,
     temp_dir_factory: Callable[..., TemporaryDirectory[str]] = TemporaryDirectory,
 ) -> PreprocessResult:
     """Run the light audio pre-processing pipeline."""
@@ -95,9 +57,7 @@ def preprocess_audio(
             profile="disabled",
         )
 
-    profile, profile_note = _resolve_profile(cfg.profile, gpu_check=gpu_check)
-    if profile_note:
-        LOGGER.info(profile_note)
+    profile = "cpu"
 
     input_channels = input_info.channels if input_info else None
     resolved_channels = cfg.target_channels or input_channels or 1
@@ -124,6 +84,7 @@ def preprocess_audio(
             loudnorm_fn=loudnorm_fn,
             denoise_fn=denoise_fn,
             resolved_channels=resolved_channels,
+            wrap_errors=True,
         )
     except PreprocessError:
         temp_dir.cleanup()
@@ -164,6 +125,7 @@ def _run_pipeline(
     downmix_fn: Callable[..., StepMetrics],
     loudnorm_fn: Callable[..., StepMetrics],
     denoise_fn: Callable[..., StepMetrics],
+    wrap_errors: bool = True,
 ) -> PreprocessMetrics:
     downmixed_path = destination.parent / "downmixed.wav"
     loudnorm_path = destination.parent / "loudnorm.wav"
@@ -176,17 +138,22 @@ def _run_pipeline(
         )
         step_metrics.append(step_metric)
     except StepExecutionError as exc:
-        raise PreprocessError(str(exc)) from exc
+        if wrap_errors:
+            raise PreprocessError(str(exc)) from exc
+        raise
 
     try:
         step_metric = loudnorm_fn(
             input_path=downmixed_path,
             output_path=loudnorm_path,
             sample_rate=cfg.target_sample_rate,
+            preset=cfg.loudnorm_preset,
         )
         step_metrics.append(step_metric)
     except StepExecutionError as exc:
-        raise PreprocessError(str(exc)) from exc
+        if wrap_errors:
+            raise PreprocessError(str(exc)) from exc
+        raise
 
     try:
         step_metric = denoise_fn(
@@ -196,6 +163,8 @@ def _run_pipeline(
         )
         step_metrics.append(step_metric)
     except StepExecutionError as exc:
-        raise PreprocessError(str(exc)) from exc
+        if wrap_errors:
+            raise PreprocessError(str(exc)) from exc
+        raise
 
     return PreprocessMetrics(total_duration=0.0, steps=step_metrics)
