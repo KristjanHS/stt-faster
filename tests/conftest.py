@@ -3,9 +3,12 @@
 
 from __future__ import annotations
 
+import atexit
 import logging
 import os
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -17,6 +20,13 @@ if TYPE_CHECKING:
 
 REPORTS_DIR = Path("reports")
 LOGS_DIR = REPORTS_DIR / "logs"
+
+_JOBLIB_TEMP_DIR = Path(tempfile.mkdtemp(prefix="joblib_tmp_"))
+os.environ.setdefault("JOBLIB_TEMP_FOLDER", str(_JOBLIB_TEMP_DIR))
+os.environ.setdefault("JOBLIB_MULTIPROCESSING", "0")
+
+# Ensure the temp dir is cleaned up after the test session finishes
+atexit.register(shutil.rmtree, _JOBLIB_TEMP_DIR, ignore_errors=True)
 
 # Hugging Face deprecated HF_HUB_ENABLE_HF_TRANSFER; normalize early to avoid warnings
 _legacy_hf_transfer = os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
@@ -56,6 +66,18 @@ def _migrate_hf_transfer_env() -> None:
     legacy = os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
     if legacy and "HF_XET_HIGH_PERFORMANCE" not in os.environ:
         os.environ["HF_XET_HIGH_PERFORMANCE"] = legacy
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _force_joblib_thread_backend() -> None:
+    """Prefer thread-based parallelism to avoid SemLock in WSL."""
+    try:
+        import joblib.parallel as joblib_parallel
+    except ImportError:
+        return
+
+    joblib_parallel.DEFAULT_BACKEND = "threading"
+    joblib_parallel.DEFAULT_THREAD_BACKEND = "threading"
 
 
 @pytest.fixture(scope="session")

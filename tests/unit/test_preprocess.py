@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import subprocess
 from typing import Any, Dict
 
+import pytest
 
 import backend.preprocess.orchestrator as orchestrator
 from backend.preprocess.config import PreprocessConfig
+from backend.preprocess.errors import PreprocessError
 from backend.preprocess.io import AudioInfo, inspect_audio
 from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
 
@@ -60,6 +63,27 @@ def test_inspect_audio_parses_ffprobe(tmp_path: Path) -> None:
     info = inspect_audio(fake_audio, run_command=fake_check_output)
 
     assert info == AudioInfo(channels=2, sample_rate=44100, duration=1.23, sample_format="s16")
+
+
+def test_inspect_audio_formats_ffprobe_errors(tmp_path: Path) -> None:
+    fake_audio = tmp_path / "broken.wav"
+    fake_audio.write_bytes(b"data")
+
+    def fake_check_output(cmd: list[str], stderr: Any, text: bool) -> str:  # noqa: ARG001
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=cmd,
+            output="[mov,mp4,m4a] moov atom not found\n/tmp/foo: Invalid data found when processing input\n{\n}\n",
+        )
+
+    with pytest.raises(PreprocessError) as excinfo:
+        inspect_audio(fake_audio, run_command=fake_check_output)
+
+    message = str(excinfo.value)
+    assert "ffprobe failed" in message
+    assert "moov atom not found" in message
+    assert "Invalid data" in message
+    assert "\n" not in message
 
 
 def test_preprocess_audio_disabled_passthrough(
