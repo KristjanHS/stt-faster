@@ -99,11 +99,14 @@ def preprocess_audio(
     if profile_note:
         LOGGER.info(profile_note)
 
+    input_channels = input_info.channels if input_info else None
+    resolved_channels = cfg.target_channels or input_channels or 1
     LOGGER.info(
-        "Audio preprocessing enabled (profile=%s, target=%dkHz, channels=%d)",
+        "Audio preprocessing enabled (profile=%s, target=%dkHz, channels=%s -> using %d)",
         profile,
         cfg.target_sample_rate,
-        cfg.target_channels,
+        str(cfg.target_channels or "auto"),
+        resolved_channels,
     )
 
     temp_dir: TemporaryDirectory[str] = temp_dir_factory(prefix="stt-preprocess_", dir=cfg.temp_dir)
@@ -120,6 +123,7 @@ def preprocess_audio(
             downmix_fn=downmix_fn,
             loudnorm_fn=loudnorm_fn,
             denoise_fn=denoise_fn,
+            resolved_channels=resolved_channels,
         )
     except PreprocessError:
         temp_dir.cleanup()
@@ -129,8 +133,8 @@ def preprocess_audio(
         raise PreprocessError(f"Unexpected preprocessing failure: {exc}") from exc
 
     metrics.total_duration = time.time() - overall_start
-    metrics.snr_before = snr_estimator(source, cfg.target_sample_rate, cfg.target_channels)
-    metrics.snr_after = snr_estimator(processed_path, cfg.target_sample_rate, cfg.target_channels)
+    metrics.snr_before = snr_estimator(source, cfg.target_sample_rate, resolved_channels)
+    metrics.snr_after = snr_estimator(processed_path, cfg.target_sample_rate, resolved_channels)
     LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
     if metrics.snr_delta is not None:
         LOGGER.info(
@@ -156,6 +160,7 @@ def _run_pipeline(
     cfg: PreprocessConfig,
     step_metrics: List[StepMetrics],
     *,
+    resolved_channels: int,
     downmix_fn: Callable[..., StepMetrics],
     loudnorm_fn: Callable[..., StepMetrics],
     denoise_fn: Callable[..., StepMetrics],
@@ -167,7 +172,7 @@ def _run_pipeline(
             input_path=source,
             output_path=downmixed_path,
             target_sample_rate=cfg.target_sample_rate,
-            target_channels=cfg.target_channels,
+            target_channels=resolved_channels,
         )
         step_metrics.append(step_metric)
     except StepExecutionError as exc:

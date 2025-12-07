@@ -94,8 +94,15 @@ RUN groupadd -g ${APP_GID} appgroup && \
 ENV HF_HOME=/home/appuser/.cache/hf
 
 # Force CPU-only for cloud portability (no cuDNN in slim image)
-# Local runs can use GPU by not setting this or setting STT_DEVICE=cuda
-ENV STT_DEVICE=cpu
+# STT_DEVICE now accepts `device/compute` (e.g., `cuda/float16` for GPU with higher precision).
+# Local runs can use GPU by not setting this or by setting STT_DEVICE=cuda/float16
+ENV STT_DEVICE=cpu/int8
+
+# Enable high-quality preprocessing pipeline by default.
+ENV STT_PREPROCESS_ENABLED=1
+ENV STT_PREPROCESS_TARGET_SR=22050
+ENV STT_PREPROCESS_TARGET_CH=0
+ENV STT_PREPROCESS_PROFILE=gpu
 
 # Create folders and set permissions for non-root user
 RUN mkdir -p /workspace /home/appuser/.local/share/stt-faster "${HF_HOME}" /app && \
@@ -123,4 +130,3 @@ LABEL org.opencontainers.image.description="Fast audio transcription using Whisp
 LABEL org.opencontainers.image.authors="stt-faster contributors"
 LABEL org.opencontainers.image.source="https://github.com/yourusername/stt-faster"
 LABEL org.opencontainers.image.documentation="https://github.com/yourusername/stt-faster/blob/main/README.md"
-
