@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import time
 from pathlib import Path
@@ -72,16 +71,9 @@ def _check_docker_daemon() -> None:
         pytest.fail(f"Docker daemon unavailable: {exc}")
 
 
-def _require_opt_in() -> None:
-    """Require explicit opt-in for Docker E2E runs."""
-    if os.getenv("RUN_DOCKER_E2E", "false").lower() not in ("true", "1", "yes"):
-        pytest.fail("Set RUN_DOCKER_E2E=true to run Docker E2E tests (no implicit skips).")
-
-
 @pytest.fixture(scope="module")
 def docker_container() -> Generator[None, None, None]:
     """Build and start the Docker container, tear down after tests."""
-    _require_opt_in()
     _check_docker_daemon()
 
     logger.info("Building Docker image...")
