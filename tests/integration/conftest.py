@@ -17,6 +17,19 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _migrate_hf_transfer_env() -> None:
+    """Prefer new Hugging Face high-performance env and drop deprecated one.
+
+    Hugging Face deprecated HF_HUB_ENABLE_HF_TRANSFER in favor of
+    HF_XET_HIGH_PERFORMANCE. Removing the legacy variable prevents noisy
+    deprecation warnings during test runs while keeping the intended behavior.
+    """
+    legacy = os.environ.pop("HF_HUB_ENABLE_HF_TRANSFER", None)
+    if legacy and "HF_XET_HIGH_PERFORMANCE" not in os.environ:
+        os.environ["HF_XET_HIGH_PERFORMANCE"] = legacy
+
+
 @pytest.fixture
 def cli_test_folder(tmp_path: Path) -> Path:
     """Create a temporary folder with test audio files.

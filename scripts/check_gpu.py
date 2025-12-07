@@ -176,7 +176,7 @@ def print_recommendations(results: dict[str, bool]) -> None:
     logger.info("\n6. Environment variables (add to ~/.bashrc):")
     logger.info('   export HF_HOME="$HOME/.cache/hf"')
     logger.info('   export HF_HUB_CACHE="$HF_HOME/hub"')
-    logger.info("   export HF_HUB_ENABLE_HF_TRANSFER=1")
+    logger.info("   export HF_XET_HIGH_PERFORMANCE=1")
 
     logger.info("\n7. WSL2 Users (if running on Windows):")
     logger.info("   - Ensure you have WSL2 with GPU support enabled")
