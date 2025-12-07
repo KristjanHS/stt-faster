@@ -223,7 +223,7 @@ def transcribe(
     *,
     preprocess_config_provider: Callable[[], PreprocessConfig] = PreprocessConfig.from_env,
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult] = preprocess_audio,
-    model_picker: Callable[[str], Any] = pick_model,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> Dict[str, Any]:
     LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
     overall_start = time.time()
@@ -235,7 +235,7 @@ def transcribe(
         LOGGER.info("🎧 Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     try:
-        model = model_picker(preset)
+        model = (model_picker or pick_model)(preset)
         segments: Iterable["Segment"]
         info: "TranscriptionInfo"
 
