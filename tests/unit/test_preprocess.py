@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import json
-from pathlib import Path
 import subprocess
+from pathlib import Path
 from typing import Any, Dict
 
 import pytest
 
-from backend.preprocess.config import PreprocessConfig
+from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.errors import PreprocessError
 from backend.preprocess.io import AudioInfo, inspect_audio
 from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
@@ -39,6 +39,50 @@ def test_config_from_env_overrides() -> None:
     assert cfg.target_channels == 2
     assert cfg.temp_dir == "/tmp/foo"
     assert cfg.profile == "cpu"
+
+
+def test_transcription_config_from_env_defaults() -> None:
+    """Test that TranscriptionConfig defaults match expected values."""
+    cfg = TranscriptionConfig.from_env(env={})
+
+    # Beam search parameters
+    assert cfg.beam_size == 5
+    assert cfg.patience == 1.1
+
+    # Timestamp and task parameters
+    assert cfg.word_timestamps is False
+    assert cfg.task == "transcribe"
+
+    # Chunk processing
+    assert cfg.chunk_length == 20
+
+    # VAD parameters
+    assert cfg.vad_filter is True
+    assert cfg.vad_threshold == 0.35
+    assert cfg.vad_parameters["min_speech_duration_ms"] == 250
+    assert cfg.vad_parameters["max_speech_duration_s"] == float("inf")
+    assert cfg.vad_parameters["min_silence_duration_ms"] == 800
+    assert cfg.vad_parameters["speech_pad_ms"] == 300
+
+    # Temperature and sampling parameters
+    assert cfg.temperature == [0.0, 0.2, 0.4, 0.8]
+    assert cfg.temperature_increment_on_fallback == 0.2
+    assert cfg.best_of == 5
+
+    # Quality thresholds
+    assert cfg.compression_ratio_threshold == 2.4
+    assert cfg.logprob_threshold == -1.0
+    assert cfg.no_speech_threshold == 0.5
+
+    # Decoding parameters
+    assert cfg.length_penalty == 1.0
+    assert cfg.repetition_penalty == 1.0
+    assert cfg.no_repeat_ngram_size == 3
+    assert cfg.condition_on_previous_text is True
+    assert cfg.suppress_tokens == "-1"
+
+    # Prompting
+    assert cfg.initial_prompt is None
 
 
 def test_inspect_audio_parses_ffprobe(tmp_path: Path) -> None:
