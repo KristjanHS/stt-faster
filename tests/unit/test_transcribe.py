@@ -11,7 +11,7 @@ import pytest
 
 from backend.exceptions import ModelLoadError, ModelNotFoundError
 from backend.model_loader import DeviceSelector, ModelLoader
-from backend.preprocess.config import PreprocessConfig
+from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.metrics import PreprocessMetrics
 from backend.transcribe import (
     TranscriptionMetrics,
@@ -370,10 +370,12 @@ class TestTranscribe:
         # Verify transcribe was called with correct parameters
         assert model.calls[0]["args"][0] == str(processed_path)
         call_kwargs = model.calls[0]["kwargs"]
-        assert call_kwargs["beam_size"] == 5
-        assert call_kwargs["word_timestamps"] is False
+        # Use config defaults to ensure consistency
+        default_config = TranscriptionConfig()
+        assert call_kwargs["beam_size"] == default_config.beam_size
+        assert call_kwargs["word_timestamps"] == default_config.word_timestamps
         assert call_kwargs["language"] == "et"
-        assert call_kwargs["task"] == "transcribe"
+        assert call_kwargs["task"] == default_config.task
 
     def test_transcribe_non_estonian_model(self, tmp_path: Path) -> None:
         """Test transcription with non-Estonian model (language=None)."""
