@@ -39,6 +39,7 @@ def test_apply_loudnorm_uses_pyloudnorm_with_correct_settings(mock_pyloudnorm, m
     mock_pyloudnorm.Meter.return_value = meter_instance
 
     mock_pyloudnorm.normalize.loudness.return_value = normalized_audio
+    mock_pyloudnorm.normalize.peak.return_value = normalized_audio
 
     # Execute
     result = loudness.apply_loudnorm(input_path, output_path, sample_rate, preset="default")
@@ -63,6 +64,13 @@ def test_apply_loudnorm_uses_pyloudnorm_with_correct_settings(mock_pyloudnorm, m
     assert np.array_equal(call_args[0][0], fake_samples)
     assert call_args[0][1] == fake_loudness
     assert call_args[0][2] == -20.0
+
+    # Check peak normalization call (default preset TP is -2.0)
+    mock_pyloudnorm.normalize.peak.assert_called_once()
+    peak_call_args = mock_pyloudnorm.normalize.peak.call_args
+    # args: (normalized_audio, target_peak)
+    assert np.array_equal(peak_call_args[0][0], normalized_audio)
+    assert peak_call_args[0][1] == -2.0
 
     # Check write
     mock_soundfile.write.assert_called_once_with(output_path, normalized_audio, sample_rate, subtype="PCM_16")
