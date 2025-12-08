@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -25,6 +26,33 @@ class PreprocessResult:
     metrics: PreprocessMetrics
     profile: str
     cleanup: Callable[[], None] = field(default=lambda: None)
+
+
+def _copy_stage_output(
+    source: Path,
+    output_dir: str | None,
+    stage_prefix: str,
+    original_filename: str,
+) -> None:
+    """Copy a preprocessing stage output to the configured output directory.
+
+    Args:
+        source: Path to the stage output file
+        output_dir: Directory to copy the file to (None to skip)
+        stage_prefix: Prefix for the output filename (e.g., "01_downmix")
+        original_filename: Original input filename (without extension)
+    """
+    if not output_dir:
+        return
+
+    try:
+        output_path = Path(output_dir)
+        output_path.mkdir(parents=True, exist_ok=True)
+        dest_file = output_path / f"{stage_prefix}_{original_filename}.wav"
+        shutil.copy2(source, dest_file)
+        LOGGER.info("Saved stage output: %s", dest_file)
+    except Exception as exc:
+        LOGGER.warning("Failed to copy stage output to %s: %s", output_dir, exc)
 
 
 def preprocess_audio(
@@ -72,6 +100,9 @@ def preprocess_audio(
     temp_dir: TemporaryDirectory[str] = temp_dir_factory(prefix="stt-preprocess_", dir=cfg.temp_dir)
     processed_path = Path(temp_dir.name) / "preprocessed.wav"
 
+    # Extract original filename (without extension) for stage output naming
+    original_filename = source.stem
+
     step_metrics: List[StepMetrics] = []
     overall_start = time.time()
     try:
@@ -84,6 +115,7 @@ def preprocess_audio(
             loudnorm_fn=loudnorm_fn,
             denoise_fn=denoise_fn,
             resolved_channels=resolved_channels,
+            original_filename=original_filename,
             wrap_errors=True,
         )
     except PreprocessError:
@@ -125,6 +157,7 @@ def _run_pipeline(
     downmix_fn: Callable[..., StepMetrics],
     loudnorm_fn: Callable[..., StepMetrics],
     denoise_fn: Callable[..., StepMetrics],
+    original_filename: str,
     wrap_errors: bool = True,
 ) -> PreprocessMetrics:
     downmixed_path = destination.parent / "downmixed.wav"
@@ -137,6 +170,7 @@ def _run_pipeline(
             target_channels=resolved_channels,
         )
         step_metrics.append(step_metric)
+        _copy_stage_output(downmixed_path, cfg.output_dir, "01_downmix", original_filename)
     except StepExecutionError as exc:
         if wrap_errors:
             raise PreprocessError(str(exc)) from exc
@@ -150,6 +184,7 @@ def _run_pipeline(
             preset=cfg.loudnorm_preset,
         )
         step_metrics.append(step_metric)
+        _copy_stage_output(loudnorm_path, cfg.output_dir, "02_loudnorm", original_filename)
     except StepExecutionError as exc:
         if wrap_errors:
             raise PreprocessError(str(exc)) from exc
@@ -162,6 +197,7 @@ def _run_pipeline(
             sample_rate=cfg.target_sample_rate,
         )
         step_metrics.append(step_metric)
+        _copy_stage_output(destination, cfg.output_dir, "03_denoise", original_filename)
     except StepExecutionError as exc:
         if wrap_errors:
             raise PreprocessError(str(exc)) from exc

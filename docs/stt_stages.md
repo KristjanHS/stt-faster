@@ -67,5 +67,6 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 | `STT_PREPROCESS_TARGET_CH` | `None` | Target channels (None = auto/inherit) |
 | `STT_PREPROCESS_PROFILE` | `cpu` | Processing profile (cpu/gpu/auto) |
 | `STT_PREPROCESS_TMP_DIR` | `None` | Temporary directory for preprocessing |
+| `STT_PREPROCESS_OUTPUT_DIR` | `None` | Directory to save intermediate preprocessing stage outputs for quality debugging |
 | `STT_PREPROCESS_LOUDNORM_PRESET` | `default` | Loudness normalization preset |
 
