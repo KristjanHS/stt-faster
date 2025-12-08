@@ -51,7 +51,13 @@ def cmd_process(args: argparse.Namespace) -> int:
 
     try:
         with TranscriptionDatabase(args.db_path) as db:
-            processor = TranscriptionProcessor(db, input_folder, preset=args.preset, language=args.language)
+            processor = TranscriptionProcessor(
+                db,
+                input_folder,
+                preset=args.preset,
+                language=args.language,
+                output_format=args.output_format,
+            )
             results = processor.process_folder()
 
             LOGGER.info("=" * 60)
@@ -169,6 +175,12 @@ def create_parser() -> argparse.ArgumentParser:
         "--language",
         default=None,
         help="Force language code (e.g., 'en', 'et', 'ru'). Auto-detect if not specified.",
+    )
+    process_parser.add_argument(
+        "--output-format",
+        default="txt",
+        choices=["txt", "json", "both"],
+        help="Output format for transcripts (default: txt)",
     )
 
     # Status command

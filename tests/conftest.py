@@ -56,6 +56,99 @@ logger = logging.getLogger(__name__)
 console = Console()
 
 
+def get_hf_token() -> str | None:
+    """Robustly discover HuggingFace token from multiple sources.
+
+    Checks in order:
+    1. Environment variables (HF_TOKEN, HUGGING_FACE_HUB_TOKEN)
+    2. huggingface_hub library (HfFolder)
+    3. Standard token file locations
+    4. huggingface-cli command output
+
+    Returns:
+        Token string if found, None otherwise
+    """
+    import subprocess
+
+    # 1. Check environment variables
+    token = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
+    if token:
+        logger.info("HuggingFace token found via environment variable (length: %d)", len(token))
+        return token
+
+    # 2. Try to get token from huggingface_hub library
+    try:
+        from huggingface_hub import HfFolder
+
+        token = HfFolder.get_token()
+        if token:
+            logger.info("HuggingFace token found via HfFolder (length: %d)", len(token))
+            return token
+    except Exception as e:
+        logger.debug("Failed to get token from HfFolder: %s", e)
+
+    # 3. Check standard token file locations
+    token_locations = [
+        Path.home() / ".cache" / "huggingface" / "token",
+        Path.home() / ".huggingface" / "token",
+    ]
+
+    for token_file in token_locations:
+        if token_file.exists():
+            try:
+                content = token_file.read_text().strip()
+                # Skip if it looks like a token name (starts with [ or is too short)
+                if content and not content.startswith("[") and len(content) > 30:
+                    token = content.split("\n")[0].strip()
+                    logger.info("HuggingFace token found at: %s", token_file)
+                    return token
+            except Exception as e:
+                logger.debug("Failed to read token from %s: %s", token_file, e)
+
+    # 4. Try huggingface-cli as last resort
+    try:
+        result = subprocess.run(
+            ["huggingface-cli", "whoami", "--token"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            token = result.stdout.strip()
+            if len(token) > 30:
+                logger.info("HuggingFace token found via huggingface-cli (length: %d)", len(token))
+                return token
+    except (FileNotFoundError, subprocess.TimeoutExpired) as e:
+        logger.debug("Failed to get token from huggingface-cli: %s", e)
+
+    # Debug: Log available environment variable keys (sanitized)
+    env_keys = [k for k in os.environ.keys() if "HF" in k or "HUGGING" in k.upper()]
+    if env_keys:
+        logger.warning("HF_TOKEN not found. Available HF-related env vars: %s", env_keys)
+    else:
+        logger.warning("HF_TOKEN not found. No HF-related environment variables detected.")
+
+    return None
+
+
+@pytest.fixture(scope="session")
+def hf_token() -> str | None:
+    """Session-scoped fixture providing HuggingFace token.
+
+    Returns None if token is not available. Tests requiring the token
+    should check for None and skip/fail appropriately.
+    """
+    token = get_hf_token()
+    if token:
+        logger.info("✅ HuggingFace token available for tests")
+    else:
+        logger.warning(
+            "⚠️  No HuggingFace token found - some tests may fail. Set HF_TOKEN or login with: huggingface-cli login"
+        )
+    return token
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _migrate_hf_transfer_env() -> None:
     """Prefer new Hugging Face transfer env var and drop deprecated one.

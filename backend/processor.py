@@ -12,7 +12,7 @@ from typing import Any, Callable
 from backend.database import RunRecord, TranscriptionDatabase
 from backend.exceptions import DatabaseError
 from backend.preprocess.config import PreprocessConfig
-from backend.transcribe import TranscriptionMetrics, transcribe
+from backend.transcribe import DEFAULT_OUTPUT_FORMAT, TranscriptionMetrics, transcribe
 
 LOGGER = logging.getLogger(__name__)
 
@@ -43,6 +43,7 @@ class TranscriptionProcessor:
         input_folder: str | Path,
         preset: str = "et-large",
         language: str | None = None,
+        output_format: str = DEFAULT_OUTPUT_FORMAT,
         transcribe_fn: Callable[[str, str, str, str | None], TranscriptionMetrics | None] | None = None,
         preprocess_config_provider: Callable[[], PreprocessConfig] | None = None,
         move_fn: Callable[[str, str], str | None] = shutil.move,
@@ -54,16 +55,18 @@ class TranscriptionProcessor:
             input_folder: Folder containing audio files to process
             preset: Model preset for transcription (default: 'et-large')
             language: Force specific language code (e.g., 'en', 'et'), None for auto-detect
+            output_format: Output format - "txt" or "json" (default: from DEFAULT_OUTPUT_FORMAT)
             preprocess_config_provider: Callable that returns preprocessing configuration
         """
         self.db = db
         self.input_folder = Path(input_folder)
         self.preset = preset
         self.language = language
+        self.output_format = output_format
         self._preprocess_config_provider = preprocess_config_provider or PreprocessConfig.from_env
 
         def _default_transcribe(
-            audio: str, json_path: str, preset: str, language: str | None = None
+            audio: str, output_path: str, preset: str, language: str | None = None
         ) -> TranscriptionMetrics | None:
             metrics_container: dict[str, TranscriptionMetrics] = {}
 
@@ -77,8 +80,34 @@ class TranscriptionProcessor:
                 preprocess_config_provider=self._preprocess_config_provider,
                 metrics_collector=_collect,
             )
-            with open(json_path, "w", encoding="utf-8") as json_file:
-                json.dump(payload, json_file, ensure_ascii=False, indent=2)
+
+            # Write output in the specified format
+            if self.output_format == "txt":
+                segments = payload.get("segments", [])
+                with open(output_path, "w", encoding="utf-8") as text_file:
+                    for segment in segments:
+                        text_file.write(segment["text"])
+                        text_file.write("\n")
+            elif self.output_format == "json":
+                with open(output_path, "w", encoding="utf-8") as json_file:
+                    json.dump(payload, json_file, ensure_ascii=False, indent=2)
+            elif self.output_format == "both":
+                # Write both txt and json files
+                base_path = Path(output_path)
+                txt_path = base_path.with_suffix(".txt")
+                json_path = base_path.with_suffix(".json")
+
+                # Write txt
+                segments = payload.get("segments", [])
+                with open(txt_path, "w", encoding="utf-8") as text_file:
+                    for segment in segments:
+                        text_file.write(segment["text"])
+                        text_file.write("\n")
+
+                # Write json
+                with open(json_path, "w", encoding="utf-8") as json_file:
+                    json.dump(payload, json_file, ensure_ascii=False, indent=2)
+
             return metrics_container.get("value")
 
         self._transcribe: Callable[[str, str, str, str | None], TranscriptionMetrics | None] = (
@@ -146,14 +175,31 @@ class TranscriptionProcessor:
         LOGGER.debug("Processing file: %s", file_path)
 
         try:
-            # Generate output JSON path (same name, .json extension)
-            json_path = file_path_obj.with_suffix(".json")
+            # Generate output path with appropriate extension
+            if self.output_format == "both":
+                # For both format, we'll use a base path and create both files
+                output_path = file_path_obj.with_suffix(".txt")  # Base path
+                output_files = [file_path_obj.with_suffix(".txt"), file_path_obj.with_suffix(".json")]
+            else:
+                output_ext = ".txt" if self.output_format == "txt" else ".json"
+                output_path = file_path_obj.with_suffix(output_ext)
+                output_files = [output_path]
 
             # Perform transcription and capture metrics
-            metrics = self._transcribe(str(file_path_obj), str(json_path), self.preset, self.language)
+            metrics = self._transcribe(str(file_path_obj), str(output_path), self.preset, self.language)
 
-            # Move both audio and JSON to processed folder
-            self._move_to_processed(file_path_obj, json_path)
+            # Move audio and all output files to processed folder
+            if audio_file := file_path_obj:
+                if audio_file.exists():
+                    dest_audio = self.processed_folder / audio_file.name
+                    self._move(str(audio_file), str(dest_audio))
+                    LOGGER.debug("Moved audio to: %s", dest_audio)
+
+            for out_file in output_files:
+                if out_file.exists():
+                    dest_output = self.processed_folder / out_file.name
+                    self._move(str(out_file), str(dest_output))
+                    LOGGER.debug("Moved output to: %s", dest_output)
 
             # Log success in database (for history/statistics)
             # Note: File location is source of truth, not database status
@@ -171,12 +217,12 @@ class TranscriptionProcessor:
             self._move_to_failed(file_path_obj)
             return FileProcessingStats(file_path=file_path, status="failed", error_message=error_msg)
 
-    def _move_to_processed(self, audio_file: Path, json_file: Path) -> None:
+    def _move_to_processed(self, audio_file: Path, output_file: Path) -> None:
         """Move successfully processed files to the processed subfolder.
 
         Args:
             audio_file: Path to audio file
-            json_file: Path to JSON file
+            output_file: Path to output file (txt or json)
 
         Raises:
             Exception: If file move operation fails
@@ -186,10 +232,10 @@ class TranscriptionProcessor:
             self._move(str(audio_file), str(dest_audio))
             LOGGER.debug("Moved audio to: %s", dest_audio)
 
-        if json_file.exists():
-            dest_json = self.processed_folder / json_file.name
-            self._move(str(json_file), str(dest_json))
-            LOGGER.debug("Moved JSON to: %s", dest_json)
+        if output_file.exists():
+            dest_output = self.processed_folder / output_file.name
+            self._move(str(output_file), str(dest_output))
+            LOGGER.debug("Moved output to: %s", dest_output)
 
     def _move_to_failed(self, audio_file: Path) -> None:
         """Move failed files to the failed subfolder.
