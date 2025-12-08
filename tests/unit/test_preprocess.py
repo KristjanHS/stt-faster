@@ -21,6 +21,16 @@ def test_config_from_env_defaults() -> None:
     assert cfg.target_channels is None
     assert cfg.temp_dir is None
     assert cfg.profile == "cpu"
+    assert cfg.rnnoise_model == "models/sh.rnnn"
+    assert cfg.rnnoise_mix == 0.5
+
+
+def test_config_class_defaults() -> None:
+    """Test that PreprocessConfig class defaults match expected values."""
+    cfg = PreprocessConfig()
+
+    assert cfg.rnnoise_model == "models/sh.rnnn"
+    assert cfg.rnnoise_mix == 0.5
 
 
 def test_config_from_env_overrides() -> None:

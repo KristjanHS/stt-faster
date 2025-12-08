@@ -1,7 +1,7 @@
 """Download an RNNoise .rnnn model to the repository `models/` folder.
 
 Usage:
-  python scripts/download_rnnoise_model.py --url <MODEL_URL> [--output models/general.rnnn]
+  python scripts/download_rnnoise_model.py --url <MODEL_URL> [--output models/sh.rnnn]
 
 If no URL is supplied, set the environment variable `RNNOISE_MODEL_URL` to point to a download location.
 This script avoids guessing URLs; if you want, provide the known URL for the model you trust.
