@@ -22,7 +22,7 @@ def test_config_from_env_defaults() -> None:
     assert cfg.temp_dir is None
     assert cfg.profile == "cpu"
     assert cfg.rnnoise_model == "models/sh.rnnn"
-    assert cfg.rnnoise_mix == 0.5
+    assert cfg.rnnoise_mix == 0.4
 
 
 def test_config_class_defaults() -> None:
@@ -30,7 +30,7 @@ def test_config_class_defaults() -> None:
     cfg = PreprocessConfig()
 
     assert cfg.rnnoise_model == "models/sh.rnnn"
-    assert cfg.rnnoise_mix == 0.5
+    assert cfg.rnnoise_mix == 0.4
 
 
 def test_config_from_env_overrides() -> None:
