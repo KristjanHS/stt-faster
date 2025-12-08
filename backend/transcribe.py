@@ -85,6 +85,8 @@ class TranscriptionMetrics:
     preprocess_snr_before: float | None
     preprocess_snr_after: float | None
     preprocess_steps: list[dict[str, Any]]
+    rnnoise_model: str | None = None
+    rnnoise_mix: float | None = None
 
     # Audio inspection (from input_info)
     input_channels: int | None = None
@@ -101,16 +103,40 @@ class TranscriptionMetrics:
     loudnorm_preset: str | None = None
     loudnorm_target_i: float | None = None
     loudnorm_target_tp: float | None = None
+    loudnorm_target_lra: float | None = None
     loudnorm_backend: str | None = None
 
     # Denoise parameters
     denoise_method: str | None = None
     denoise_library: str | None = None
 
+    # SNR estimation
+    snr_estimation_method: str | None = None
+
     # Transcription parameters
     beam_size: int | None = None
+    patience: float | None = None
     word_timestamps: bool | None = None
     task: str | None = None
+    chunk_length: int | None = None
+    vad_filter: bool | None = None
+    vad_threshold: float | None = None
+    vad_min_speech_duration_ms: int | None = None
+    vad_max_speech_duration_s: float | None = None
+    vad_min_silence_duration_ms: int | None = None
+    vad_speech_pad_ms: int | None = None
+    temperature: float | list[float] | None = None
+    temperature_increment_on_fallback: float | None = None
+    best_of: int | None = None
+    compression_ratio_threshold: float | None = None
+    logprob_threshold: float | None = None
+    no_speech_threshold: float | None = None
+    length_penalty: float | None = None
+    repetition_penalty: float | None = None
+    no_repeat_ngram_size: int | None = None
+    suppress_tokens: str | None = None
+    condition_on_previous_text: bool | None = None
+    initial_prompt: str | None = None
 
     # Model parameters
     model_id: str | None = None
@@ -460,6 +486,8 @@ def transcribe(
             preprocess_snr_before=preprocess_result.metrics.snr_before,
             preprocess_snr_after=preprocess_result.metrics.snr_after,
             preprocess_steps=preprocess_steps,
+            rnnoise_model=preprocess_config.rnnoise_model,
+            rnnoise_mix=preprocess_config.rnnoise_mix,
             # Audio inspection (from input_info)
             input_channels=preprocess_result.input_info.channels if preprocess_result.input_info else None,
             input_sample_rate=preprocess_result.input_info.sample_rate if preprocess_result.input_info else None,
@@ -472,15 +500,42 @@ def transcribe(
             # Loudness normalization parameters
             loudnorm_preset=preprocess_config.loudnorm_preset,
             loudnorm_target_i=preprocess_config.loudnorm_target_i(),
-            loudnorm_target_tp=-2.0,  # From presets (same for both)
+            loudnorm_target_tp=preprocess_config.loudnorm_target_tp(),
+            loudnorm_target_lra=preprocess_config.loudnorm_target_lra(),
             loudnorm_backend=loudnorm_step.backend if loudnorm_step else None,
             # Denoise parameters
             denoise_method="spectral_gate" if denoise_step else None,  # Hardcoded in denoise_light
             denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
+            # SNR estimation
+            snr_estimation_method="estimate_snr_db",  # Hardcoded method
             # Transcription parameters
             beam_size=transcription_config.beam_size,
+            patience=transcription_config.patience,
             word_timestamps=transcription_config.word_timestamps,
             task=transcription_config.task,
+            chunk_length=transcription_config.chunk_length,
+            vad_filter=transcription_config.vad_filter,
+            vad_threshold=transcription_config.vad_threshold,
+            vad_min_speech_duration_ms=cast(
+                int | None, transcription_config.vad_parameters.get("min_speech_duration_ms")
+            ),
+            vad_max_speech_duration_s=transcription_config.vad_parameters.get("max_speech_duration_s"),
+            vad_min_silence_duration_ms=cast(
+                int | None, transcription_config.vad_parameters.get("min_silence_duration_ms")
+            ),
+            vad_speech_pad_ms=cast(int | None, transcription_config.vad_parameters.get("speech_pad_ms")),
+            temperature=transcription_config.temperature,
+            temperature_increment_on_fallback=transcription_config.temperature_increment_on_fallback,
+            best_of=transcription_config.best_of,
+            compression_ratio_threshold=transcription_config.compression_ratio_threshold,
+            logprob_threshold=transcription_config.logprob_threshold,
+            no_speech_threshold=transcription_config.no_speech_threshold,
+            length_penalty=transcription_config.length_penalty,
+            repetition_penalty=transcription_config.repetition_penalty,
+            no_repeat_ngram_size=transcription_config.no_repeat_ngram_size,
+            suppress_tokens=transcription_config.suppress_tokens,
+            condition_on_previous_text=transcription_config.condition_on_previous_text,
+            initial_prompt=transcription_config.initial_prompt,
             # Model parameters
             model_id=preset_config.model_id,
             device=preset_config.device,

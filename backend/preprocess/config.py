@@ -7,9 +7,9 @@ from typing import Any, Final, Mapping, cast
 # Preset configurations for loudnorm
 _LOUDNORM_PRESETS: Final[dict[str, dict[str, float]]] = {
     "default": {
-        "I": -20.0,
+        "I": -23.0,
         "TP": -2.0,
-        "LRA": 7.0,
+        "LRA": 8.0,
     },
     "boost-quiet-voices": {
         "I": -18.0,
@@ -29,7 +29,7 @@ _PREPROCESS_PROFILE_ENV: Final = "STT_PREPROCESS_PROFILE"
 _PREPROCESS_LOUDNORM_PRESET_ENV: Final = "STT_PREPROCESS_LOUDNORM_PRESET"
 _PREPROCESS_RNNOISE_MODEL_ENV: Final = "STT_PREPROCESS_RNNOISE_MODEL"
 _PREPROCESS_RNNOISE_MIX_ENV: Final = "STT_PREPROCESS_RNNOISE_MIX"
-_RNNOISE_MIX_DEFAULT: Final = 0.5
+_RNNOISE_MIX_DEFAULT: Final = 0.4  #
 _LOUDNORM_PRESET_DEFAULT: Final = "default"
 
 # Transcription parameter environment variables

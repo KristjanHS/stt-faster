@@ -6,17 +6,20 @@ import time
 from pathlib import Path
 from typing import Any, Callable, cast
 
+import noisereduce as nr  # type: ignore[import-untyped]
 import numpy as np
 import soundfile as sf  # type: ignore[import-untyped]
-import noisereduce as nr  # type: ignore[import-untyped]
 
 from backend.preprocess.errors import StepExecutionError
 from backend.preprocess.metrics import StepMetrics
 
 _SPECTRAL_GATE_N_FFT = 512
-_SPECTRAL_GATE_WINDOW_SIZE = 512
-# 256-hop keeps updates frequent while keeping overlap for speech.
-_SPECTRAL_GATE_HOP_LENGTH = 256
+_SPECTRAL_GATE_WINDOW_SIZE = 400
+# 200-hop keeps updates frequent while keeping overlap for speech.
+_SPECTRAL_GATE_HOP_LENGTH = 200
+_SPECTRAL_GATE_PROP_DECREASE = 0.5
+_SPECTRAL_GATE_N_STD_THRESH_STATIONARY = 1.25
+_SPECTRAL_GATE_NOISE_CLIP_DURATION_S = 0.8
 
 _STEP_NAME = "denoise_light"
 _UNEXPECTED_KWARG_PATTERN = re.compile(r"unexpected keyword argument '([^']+)'")
@@ -54,13 +57,13 @@ def apply_light_denoise(
     else:
         default_reducer = nr.reduce_noise  # pyright: ignore[reportUnknownMemberType]
     reducer: Callable[..., np.ndarray] = noise_reducer or default_reducer  # type: ignore[assignment]
-    noise_clip = mono[: min(len(mono), sample_rate // 2)]  # use up to first 0.5s as noise profile
+    noise_clip = mono[: min(len(mono), int(sample_rate * _SPECTRAL_GATE_NOISE_CLIP_DURATION_S))]
     reducer_kwargs = {
         "y": mono,
         "sr": sample_rate,
         "noise_clip": noise_clip,
-        "n_std_thresh_stationary": 1.5,
-        "prop_decrease": 0.85,
+        "n_std_thresh_stationary": _SPECTRAL_GATE_N_STD_THRESH_STATIONARY,
+        "prop_decrease": _SPECTRAL_GATE_PROP_DECREASE,
         "use_tensor": False,
         "stationary": True,
         "use_tqdm": False,
