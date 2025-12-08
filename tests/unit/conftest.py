@@ -83,20 +83,46 @@ def preprocess_pipeline_stubs(
     def fake_inspect(_: Path) -> AudioInfo:
         return dummy_audio_info_stereo
 
-    def fake_downmix(input_path: Path, output_path: Path, target_sample_rate: int, target_channels: int) -> StepMetrics:
+    def fake_ffmpeg(
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        loudnorm_preset: str = "default",
+        rnnoise_model: str | None = None,
+        rnnoise_mix: float = 1.0,
+    ) -> StepMetrics:
         calls["input"] = input_path
         calls["output"] = output_path
         calls["sr"] = target_sample_rate
         calls["ch"] = target_channels
-        output_path.write_bytes(b"processed")  # ensure path exists
-        return StepMetrics(name="downmix_resample", backend="fake", duration=0.01)
+        calls["loudnorm_preset"] = loudnorm_preset
+        calls["rnnoise_model"] = rnnoise_model
+        calls["rnnoise_mix"] = rnnoise_mix
+        output_path.write_bytes(b"ffmpeg_processed")
+        return StepMetrics(name="ffmpeg_pipeline", backend="ffmpeg", duration=0.03)
 
-    def fake_loudnorm(input_path: Path, output_path: Path, sample_rate: int, *, preset: str = "default") -> StepMetrics:
+    def fake_downmix(input_path: Path, output_path: Path, sample_rate: int, channels: int) -> StepMetrics:
+        # simulate writing downmixed file
+        calls["input"] = input_path
+        downmixed = temp_root / "downmixed.wav"
+        downmixed.write_bytes(b"downmixed")
+        calls["downmix_output"] = downmixed
+        calls["downmix_sr"] = sample_rate
+        calls["downmix_ch"] = channels
+        # maintain legacy keys expected by tests
+        calls["sr"] = sample_rate
+        calls["ch"] = channels
+        return StepMetrics(name="downmix_resample", backend="ffmpeg", duration=0.02)
+
+    def fake_loudnorm(input_path: Path, output_path: Path, sample_rate: int) -> StepMetrics:
+        # simulate loudnorm step consuming downmixed file and producing loudnorm.wav
         calls["loudnorm_input"] = input_path
+        loudnorm_path = temp_root / "loudnorm.wav"
+        loudnorm_path.write_bytes(b"loudnormed")
         calls["loudnorm_sr"] = sample_rate
-        calls["loudnorm_preset"] = preset
-        output_path.write_bytes(b"normalized")
-        return StepMetrics(name="loudnorm", backend=str(input_path), duration=0.02)
+        output_path.write_bytes(b"loudnormed")
+        return StepMetrics(name="loudnorm", backend="ffmpeg", duration=0.02)
 
     def fake_denoise(input_path: Path, output_path: Path, sample_rate: int) -> StepMetrics:
         calls["denoise_input"] = input_path
@@ -121,6 +147,7 @@ def preprocess_pipeline_stubs(
         "temp_dir": temp_dir,
         "temp_root": temp_root,
         "inspector": fake_inspect,
+        "ffmpeg_fn": fake_ffmpeg,
         "downmix_fn": fake_downmix,
         "loudnorm_fn": fake_loudnorm,
         "denoise_fn": fake_denoise,
