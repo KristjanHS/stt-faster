@@ -107,7 +107,12 @@ class FakePreprocessResult:
         metrics: PreprocessMetrics | None = None,
     ):
         self.output_path = output_path
-        self.input_info = type("Info", (), {"duration": duration})() if duration is not None else None
+        self.output_path = output_path
+        self.input_info = (
+            type("Info", (), {"duration": duration, "channels": 1, "sample_rate": 16000, "sample_format": "s16"})()
+            if duration is not None
+            else None
+        )
         self.metrics = metrics or PreprocessMetrics(total_duration=0.0, steps=[])
         self.profile = "test"
         self.cleaned = False

@@ -62,16 +62,24 @@ FLOAT_PRECISION = 3
 class TranscriptionMetrics:
     """Canonical statistics emitted for a transcription run."""
 
+    # File and model info
     audio_path: str
     preset: str
+
+    # Language detection
     requested_language: str | None
     applied_language: str | None
     detected_language: str | None
     language_probability: float | None
+
+    # Timing metrics
     audio_duration: float | None
     total_processing_time: float
     transcribe_duration: float
     preprocess_duration: float
+    speed_ratio: float | None
+
+    # Preprocessing configuration
     preprocess_enabled: bool
     preprocess_profile: str
     target_sample_rate: int
@@ -79,7 +87,41 @@ class TranscriptionMetrics:
     preprocess_snr_before: float | None
     preprocess_snr_after: float | None
     preprocess_steps: list[dict[str, Any]]
-    speed_ratio: float | None
+
+    # Audio inspection (from input_info)
+    input_channels: int | None = None
+    input_sample_rate: int | None = None
+    input_bit_depth: int | None = None
+    input_format: str | None = None
+
+    # Downmix/resample parameters
+    volume_adjustment_db: float | None = None
+    resampler: str | None = None
+    sample_format: str | None = None
+
+    # Loudness normalization parameters
+    loudnorm_preset: str | None = None
+    loudnorm_target_i: float | None = None
+    loudnorm_target_tp: float | None = None
+    loudnorm_backend: str | None = None
+
+    # Denoise parameters
+    denoise_method: str | None = None
+    denoise_library: str | None = None
+
+    # Transcription parameters
+    beam_size: int | None = None
+    word_timestamps: bool | None = None
+    task: str | None = None
+
+    # Model parameters
+    model_id: str | None = None
+    device: str | None = None
+    compute_type: str | None = None
+
+    # Output parameters
+    output_format: str | None = None
+    float_precision: int | None = None
 
 
 def _get_estonian_model_path(
@@ -354,17 +396,27 @@ def transcribe(
             {"name": step.name, "backend": step.backend, "duration": step.duration}
             for step in preprocess_result.metrics.steps
         ]
+
+        # Extract preprocessing step details for new metrics fields
+        loudnorm_step = next((s for s in preprocess_result.metrics.steps if s.name == "loudnorm"), None)
+        denoise_step = next((s for s in preprocess_result.metrics.steps if s.name == "denoise_light"), None)
+
         metrics_payload = TranscriptionMetrics(
+            # File and model info
             audio_path=path,
             preset=preset,
+            # Language detection
             requested_language=requested_language,
             applied_language=applied_language,
             detected_language=detected_lang,
             language_probability=lang_prob,
+            # Timing metrics
             audio_duration=duration,
             total_processing_time=overall_time,
             transcribe_duration=transcribe_time,
             preprocess_duration=preprocess_result.metrics.total_duration,
+            speed_ratio=speed_ratio,
+            # Preprocessing configuration
             preprocess_enabled=preprocess_config.enabled,
             preprocess_profile=preprocess_result.profile,
             target_sample_rate=preprocess_config.target_sample_rate,
@@ -372,7 +424,34 @@ def transcribe(
             preprocess_snr_before=preprocess_result.metrics.snr_before,
             preprocess_snr_after=preprocess_result.metrics.snr_after,
             preprocess_steps=preprocess_steps,
-            speed_ratio=speed_ratio,
+            # Audio inspection (from input_info)
+            input_channels=preprocess_result.input_info.channels if preprocess_result.input_info else None,
+            input_sample_rate=preprocess_result.input_info.sample_rate if preprocess_result.input_info else None,
+            input_bit_depth=None,  # Not available in current AudioInfo
+            input_format=preprocess_result.input_info.sample_format if preprocess_result.input_info else None,
+            # Downmix/resample parameters
+            volume_adjustment_db=-6.0,  # Hardcoded in downmix_and_resample
+            resampler="soxr",  # Hardcoded in downmix_and_resample
+            sample_format="s16",  # Hardcoded in downmix_and_resample (16-bit signed)
+            # Loudness normalization parameters
+            loudnorm_preset=preprocess_config.loudnorm_preset,
+            loudnorm_target_i=-20.0 if preprocess_config.loudnorm_preset == "default" else -18.0,  # From presets
+            loudnorm_target_tp=-2.0,  # From presets (same for both)
+            loudnorm_backend=loudnorm_step.backend if loudnorm_step else None,
+            # Denoise parameters
+            denoise_method="spectral_gate" if denoise_step else None,  # Hardcoded in denoise_light
+            denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
+            # Transcription parameters
+            beam_size=DEFAULT_BEAM_SIZE,
+            word_timestamps=DEFAULT_WORD_TIMESTAMPS,
+            task=DEFAULT_TASK,
+            # Model parameters
+            model_id=preset_config.model_id,
+            device=preset_config.device,
+            compute_type=preset_config.compute_type,
+            # Output parameters (these will come from processor context in future enhancement)
+            output_format=None,  # Not available at this level, will be set by processor
+            float_precision=FLOAT_PRECISION,
         )
         if metrics_collector:
             metrics_collector(metrics_payload)
