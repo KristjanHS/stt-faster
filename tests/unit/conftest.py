@@ -25,6 +25,11 @@ def temp_db() -> Iterator[TranscriptionDatabase]:
     with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
         db_path = tmp.name
 
+    # DuckDB requires the file to be a valid DB or not exist.
+    # tempfile creates an empty file which DuckDB might treat as invalid/corrupt.
+    # Delete it so TranscriptionDatabase creates a fresh one.
+    Path(db_path).unlink(missing_ok=True)
+
     db = TranscriptionDatabase(db_path)
     yield db
     db.close()

@@ -4,8 +4,8 @@ import shutil
 from pathlib import Path
 
 from backend.database import TranscriptionDatabase
-from backend.transcribe import TranscriptionMetrics
 from backend.processor import TranscriptionProcessor
+from backend.transcribe import TranscriptionMetrics
 
 
 def test_processor_initialization(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
@@ -269,8 +269,8 @@ def test_process_folder(
     assert results["succeeded"] == 2
     assert results["failed"] == 0
     stats = results["run_statistics"]
-    assert stats["files_found"] == 2
-    assert len(stats["files"]) == 2
+    assert stats["updated_db"] is True
+    assert stats["run_id"] is not None
 
 
 def test_process_file_move_failure_keeps_pending_status(

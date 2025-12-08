@@ -4,12 +4,12 @@ import json
 import logging
 import shutil
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
-from backend.database import RunRecord, TranscriptionDatabase
+from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
 from backend.exceptions import DatabaseError
 from backend.preprocess.config import PreprocessConfig
 from backend.transcribe import DEFAULT_OUTPUT_FORMAT, TranscriptionMetrics, transcribe
@@ -317,10 +317,11 @@ class TranscriptionProcessor:
         config_snapshot: PreprocessConfig,
         total_processing_time: float,
     ) -> dict[str, Any]:
-        """Build and persist run metadata from the latest folder processing."""
+        """Build and persist run metadata and file metrics."""
         file_stats: list[FileProcessingStats] = results.get("file_stats", [])
         metrics_list = [entry.metrics for entry in file_stats if entry.metrics]
 
+        # Calculate aggregates
         preprocess_time_total = sum(metric.preprocess_duration for metric in metrics_list)
         transcribe_time_total = sum(metric.transcribe_duration for metric in metrics_list)
         audio_durations = [metric.audio_duration for metric in metrics_list if metric.audio_duration is not None]
@@ -329,58 +330,32 @@ class TranscriptionProcessor:
         speed_values = [metric.speed_ratio for metric in metrics_list if metric.speed_ratio is not None]
         average_speed_ratio = sum(speed_values) / len(speed_values) if speed_values else None
 
-        detected_languages: dict[str, int] = {}
-        for metric in metrics_list:
-            lang = metric.detected_language
-            if lang:
-                detected_languages[lang] = detected_languages.get(lang, 0) + 1
-
+        # Determine representative configuration from the first file if available
+        # (Assuming batch processing uses consistent settings)
         if metrics_list:
             sample_metric = metrics_list[0]
             preprocess_profile = sample_metric.preprocess_profile
             target_sample_rate = sample_metric.target_sample_rate
             target_channels = sample_metric.target_channels
+            loudnorm_preset = sample_metric.loudnorm_preset
+            model_id = sample_metric.model_id
+            device = sample_metric.device
+            compute_type = sample_metric.compute_type
+            beam_size = sample_metric.beam_size
+            word_timestamps = sample_metric.word_timestamps
         else:
+            # Fallback to config if no files processed successfully
             preprocess_profile = config_snapshot.profile
             target_sample_rate = config_snapshot.target_sample_rate
             target_channels = config_snapshot.target_channels
+            loudnorm_preset = config_snapshot.loudnorm_preset
+            model_id = None
+            device = None
+            compute_type = None
+            beam_size = None
+            word_timestamps = None
 
-        per_file_stats: list[dict[str, Any]] = []
-        for entry in file_stats:
-            record: dict[str, Any] = {
-                "file_path": entry.file_path,
-                "status": entry.status,
-                "error_message": entry.error_message,
-            }
-            if entry.metrics:
-                record["metrics"] = asdict(entry.metrics)
-            per_file_stats.append(record)
-
-        parameters = {
-            "input_folder": str(self.input_folder),
-            "preset": self.preset,
-            "language": self.language,
-            "preprocess": {
-                "enabled": config_snapshot.enabled,
-                "profile": config_snapshot.profile,
-                "target_sample_rate": config_snapshot.target_sample_rate,
-                "target_channels": config_snapshot.target_channels,
-            },
-        }
-
-        statistics = {
-            "files_found": results.get("files_found", 0),
-            "succeeded": results.get("succeeded", 0),
-            "failed": results.get("failed", 0),
-            "total_processing_time": total_processing_time,
-            "total_preprocess_time": preprocess_time_total,
-            "total_transcribe_time": transcribe_time_total,
-            "total_audio_duration": total_audio_duration,
-            "average_speed_ratio": average_speed_ratio,
-            "detected_languages": detected_languages,
-            "files": per_file_stats,
-        }
-
+        # Create RunRecord
         run_record = RunRecord(
             recorded_at=datetime.now(timezone.utc),
             input_folder=str(self.input_folder),
@@ -390,6 +365,12 @@ class TranscriptionProcessor:
             preprocess_profile=preprocess_profile,
             target_sample_rate=target_sample_rate,
             target_channels=target_channels,
+            loudnorm_preset=loudnorm_preset,
+            model_id=model_id,
+            device=device,
+            compute_type=compute_type,
+            beam_size=beam_size,
+            word_timestamps=word_timestamps,
             files_found=results.get("files_found", 0),
             succeeded=results.get("succeeded", 0),
             failed=results.get("failed", 0),
@@ -398,14 +379,77 @@ class TranscriptionProcessor:
             total_transcribe_time=transcribe_time_total,
             total_audio_duration=total_audio_duration,
             speed_ratio=average_speed_ratio,
-            detected_languages=detected_languages,
-            parameters=parameters,
-            statistics=statistics,
         )
 
         try:
-            self.db.record_run(run_record)
+            # 1. Record Run and get ID
+            run_id = self.db.record_run(run_record)
+
+            # 2. Record File Metrics
+            for entry in file_stats:
+                if not entry.metrics:
+                    # Record failed files with basic info if needed,
+                    # but FileMetricRecord ensures we have a path and status.
+                    # We can create a skeleton record for failures.
+                    file_record = FileMetricRecord(
+                        run_id=run_id,
+                        recorded_at=datetime.now(timezone.utc),
+                        audio_path=entry.file_path,
+                        preset=self.preset,
+                        status=entry.status,
+                        error_message=entry.error_message,
+                    )
+                else:
+                    m = entry.metrics
+                    file_record = FileMetricRecord(
+                        run_id=run_id,
+                        recorded_at=datetime.now(timezone.utc),
+                        audio_path=entry.file_path,
+                        preset=self.preset,
+                        status=entry.status,
+                        requested_language=self.language,
+                        applied_language=m.applied_language,  # TranscriptionMetrics.applied_language
+                        detected_language=m.detected_language,
+                        language_probability=m.language_probability,
+                        audio_duration=m.audio_duration,
+                        total_processing_time=m.total_processing_time,
+                        transcribe_duration=m.transcribe_duration,
+                        preprocess_duration=m.preprocess_duration,
+                        speed_ratio=m.speed_ratio,
+                        preprocess_enabled=m.preprocess_enabled,
+                        preprocess_profile=m.preprocess_profile,
+                        target_sample_rate=m.target_sample_rate,
+                        target_channels=m.target_channels,
+                        preprocess_snr_before=m.preprocess_snr_before,
+                        preprocess_snr_after=m.preprocess_snr_after,
+                        preprocess_steps=m.preprocess_steps,
+                        input_channels=m.input_channels,
+                        input_sample_rate=m.input_sample_rate,
+                        input_bit_depth=m.input_bit_depth,
+                        input_format=m.input_format,
+                        volume_adjustment_db=m.volume_adjustment_db,
+                        resampler=m.resampler,
+                        sample_format=m.sample_format,
+                        loudnorm_preset=m.loudnorm_preset,
+                        loudnorm_target_i=m.loudnorm_target_i,
+                        loudnorm_target_tp=m.loudnorm_target_tp,
+                        loudnorm_backend=m.loudnorm_backend,
+                        denoise_method=m.denoise_method,
+                        denoise_library=m.denoise_library,
+                        beam_size=m.beam_size,
+                        word_timestamps=m.word_timestamps,
+                        task=m.task,
+                        model_id=m.model_id,
+                        device=m.device,
+                        compute_type=m.compute_type,
+                        output_format=self.output_format,
+                        float_precision=m.float_precision,
+                    )
+
+                self.db.record_file_metric(file_record)
+
         except DatabaseError as exc:
             LOGGER.warning("Failed to record run metadata: %s", exc)
 
-        return statistics
+        # Return stats for display/logging if needed, though structure has changed
+        return {"updated_db": True, "run_id": locals().get("run_id")}
