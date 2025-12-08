@@ -39,12 +39,22 @@ def apply_loudnorm(
     """Normalize loudness using pyloudnorm. Falls back to ffmpeg is NOT supported."""
     preset_config = _LOUDNORM_PRESETS.get(preset, _LOUDNORM_PRESETS["default"])
     target_loudness = preset_config["I"]
+    target_peak = preset_config.get("TP", -2.0)
 
-    duration = _run_pyloudnorm(input_path, output_path, sample_rate, target_loudness=target_loudness)
+    duration = _run_pyloudnorm(
+        input_path, output_path, sample_rate, target_loudness=target_loudness, target_peak=target_peak
+    )
     return StepMetrics(name="loudnorm", backend="pyloudnorm", duration=duration)
 
 
-def _run_pyloudnorm(input_path: Path, output_path: Path, sample_rate: int, *, target_loudness: float = -20.0) -> float:
+def _run_pyloudnorm(
+    input_path: Path,
+    output_path: Path,
+    sample_rate: int,
+    *,
+    target_loudness: float = -20.0,
+    target_peak: float | None = None,
+) -> float:
     start = time.time()
     samples, detected_sr = cast(
         Tuple[np.ndarray, int],
@@ -60,6 +70,12 @@ def _run_pyloudnorm(input_path: Path, output_path: Path, sample_rate: int, *, ta
         meter = _create_meter(sample_rate)
         loudness = meter.integrated_loudness(waveform)  # pyright: ignore[reportUnknownMemberType]
         normalized = pyln.normalize.loudness(waveform, loudness, target_loudness)  # pyright: ignore[reportUnknownMemberType]
+
+        # Apply True Peak limiting if needed
+        # pyloudnorm's peak normalization simply scales the audio so the peak is at target_peak
+        # Standard EBU R128 compliance usually implies adhering to the TP limit.
+        if target_peak is not None:
+            normalized = pyln.normalize.peak(normalized, target_peak)  # pyright: ignore[reportUnknownMemberType]
     except Exception as exc:  # noqa: BLE001 - propagate wrapped failure
         raise StepExecutionError("loudnorm", f"pyloudnorm processing failed: {exc}") from exc
 
