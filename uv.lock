@@ -249,6 +249,18 @@ wheels = [
 ]
 
 [[package]]
+name = "ffmpeg-python"
+version = "0.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "future" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/dd/5e/d5f9105d59c1325759d838af4e973695081fbbc97182baf73afc78dec266/ffmpeg-python-0.2.0.tar.gz", hash = "sha256:65225db34627c578ef0e11c8b1eb528bb35e024752f6f10b78c011f6f64c4127", size = 21543, upload-time = "2019-07-06T00:19:08.989Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/d7/0c/56be52741f75bad4dc6555991fabd2e07b432d333da82c11ad701123888a/ffmpeg_python-0.2.0-py3-none-any.whl", hash = "sha256:ac441a0404e053f8b6a1113a77c0f452f1cfc62f6344a769475ffdc0f56c23c5", size = 25024, upload-time = "2019-07-06T00:19:07.215Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.20.0"
 source = { registry = "https://pypi.org/simple" }
@@ -705,20 +717,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pyloudnorm"
-version = "0.1.1"
-source = { registry = "https://pypi.org/simple" }
-dependencies = [
-    { name = "future" },
-    { name = "numpy" },
-    { name = "scipy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/75/b5/39d59c44ecd828fabfdbd796b50a561e6543ca90ef440ab307374f107856/pyloudnorm-0.1.1.tar.gz", hash = "sha256:63cd4e197dea4e7795160ea08ed02d318091bce883e436a6dbc5963326b71e1e", size = 8588, upload-time = "2023-01-05T16:11:28.601Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/58/f5/6724805521ab4e723a12182f92374031032aff28a8a89dc8505c52b79032/pyloudnorm-0.1.1-py3-none-any.whl", hash = "sha256:d7f12ebdd097a464d87ce2878fc4d942f15f8233e26cc03f33fefa226f869a14", size = 9636, upload-time = "2023-01-05T16:11:27.331Z" },
-]
-
-[[package]]
 name = "pyparsing"
 version = "3.2.5"
 source = { registry = "https://pypi.org/simple" }
@@ -1026,6 +1024,7 @@ dependencies = [
     { name = "ctranslate2" },
     { name = "duckdb" },
     { name = "faster-whisper" },
+    { name = "ffmpeg-python" },
     { name = "filelock" },
     { name = "fsspec" },
     { name = "hf-xet" },
@@ -1037,7 +1036,6 @@ dependencies = [
     { name = "numpy" },
     { name = "onnxruntime" },
     { name = "protobuf" },
-    { name = "pyloudnorm" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
     { name = "rich" },
@@ -1074,6 +1072,7 @@ requires-dist = [
     { name = "ctranslate2", specifier = "==4.6.2" },
     { name = "duckdb", specifier = ">=1.4.2,<2.0.0" },
     { name = "faster-whisper", specifier = "==1.2.1" },
+    { name = "ffmpeg-python", specifier = ">=0.2.0,<1.0.0" },
     { name = "filelock", specifier = "==3.20.0" },
     { name = "fsspec", specifier = "==2025.12.0" },
     { name = "hf-xet", specifier = "==1.2.0" },
@@ -1085,7 +1084,6 @@ requires-dist = [
     { name = "numpy", specifier = "==2.3.5" },
     { name = "onnxruntime", specifier = "==1.23.2" },
     { name = "protobuf", specifier = "==6.33.2" },
-    { name = "pyloudnorm", specifier = ">=0.1.1" },
     { name = "python-dotenv", specifier = ">=1.1.1,<2.0.0" },
     { name = "pyyaml", specifier = "==6.0.3" },
     { name = "rich", specifier = ">=14.1.0,<15.0.0" },

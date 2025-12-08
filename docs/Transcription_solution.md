@@ -2,19 +2,6 @@
 
 Batch audio transcription system with Estonian and multilingual Whisper models.
 
-## Architecture
-
-```
-backend/transcribe.py          # Model loading & transcription
-scripts/transcribe_manager.py  # CLI interface
-scripts/transcription/
-├── database.py                # SQLite state tracking
-└── processor.py               # File processing pipeline
-scripts/windows/*.bat          # Windows one-click launchers
-```
-
-**Workflow**: Scan → Register (SQLite) → Transcribe → Move to `processed/`|`failed/` → Update status
-
 ## Models
 
 ### Estonian (Default)
@@ -28,96 +15,6 @@ scripts/windows/*.bat          # Windows one-click launchers
 | `distil` | Distilled Whisper | ~756MB | English | Fastest |
 
 **Caching**: All models use `snapshot_download()` for HuggingFace cache (`~/.cache/hf/hub/`). Download once, reuse forever.
-
-## Database
-
-```sql
-CREATE TABLE transcriptions (
-    id INTEGER PRIMARY KEY,
-    file_path TEXT UNIQUE NOT NULL,
-    status TEXT NOT NULL,        -- 'pending', 'completed', 'failed'
-    error_message TEXT
-);
-```
-
-**Design**: Minimal schema. File location is source of truth, database tracks status only.
-
-## Implementation Details
-
-### Model Loading Fix
-**Problem**: Models re-downloaded every run  
-**Solution**: Use `snapshot_download()` for all presets to find cached models
-
-```python
-def _get_cached_model_path(model_id: str) -> str:
-    return snapshot_download(model_id)  # Uses HF cache
-
-def pick_model(preset: str = "et-large") -> WhisperModel:
-    if preset == "et-large":
-        path = _get_estonian_model_path("TalTechNLP/whisper-large-v3-turbo-et-verbatim")
-        return WhisperModel(path, device="cuda", compute_type="int8_float16")
-    # ... other presets use snapshot_download() too
-```
-
-### Language Detection
-```python
-language = "et" if preset.startswith("et-") else None
-segments, info = model.transcribe(path, language=language, task="transcribe")
-```
-
-### Device Overrides
-`STT_DEVICE` now accepts `device[/compute_type]` (for example `STT_DEVICE=cuda/float16`). When set, the loader honors the request, logs the requested device/precision, and only falls back to CPU-int8 with a clear `⚠️` warning if GPU initialization fails or is unavailable.
-
-### Preprocessing Defaults
-The audio preprocessing pipeline is now enabled by default (`STT_PREPROCESS_ENABLED=1`) with the GPU profile (`STT_PREPROCESS_PROFILE=gpu`) so preprocessing runs quickly on supported hardware. The default sample rate remains at 16 000 Hz (`STT_PREPROCESS_TARGET_SR=16000`) to match the 16 kHz working rate of the downmix step, and `STT_PREPROCESS_TARGET_CH=0` allows downmixing to inherit the original channel count instead of forcing mono. The ffmpeg downmix/resample step also adds `volume=-6dB` to give the downstream denoiser more headroom, while loudness normalization and the light denoise step run at the higher sample rate for clearer output.
-All preprocessing steps run on the CPU (ffmpeg with SoX resampling, `pyloudnorm` for EBU R128, and the spectral-gating denoise) so quality is consistent regardless of whether CUDA is present. The CPU loudness path relies on `pyloudnorm` to perform the full EBU R128 analysis (gating, K-weighted filtering, integrated loudness) before applying the target gain, ensuring the preprocessing stage stays compliant with broadcast standards.
-
-### Error Handling
-- **GPU fail** → CPU fallback (automatic)
-- **File fail** → Move to `failed/`, log error
-- **Model fail** → Raise `ModelLoadError`
-
-## Key Design Decisions
-
-1. **File Location = Truth**: File in root → pending, in `processed/` → done, in `failed/` → failed
-2. **Estonian Default**: Changed from English to `et-large` throughout codebase
-3. **Alternative 1**: Simplest approach (no retry/concurrency). Future: Alt 2 (retry, workers) or Alt 3 (production-grade)
-4. **Minimal Docs**: README → User guide → Technical details (no duplication)
-
-## Testing
-
-**Metrics**: 72 tests, 83% coverage, B+ grade  
-**Refactoring**: Removed 295 lines of duplicate/low-value tests (D+ → B+)
-
-```
-tests/unit/ (64 tests)          # Core logic, mocked dependencies
-tests/integration/ (8 tests)    # CLI workflows, real components
-```
-
-## Performance
-
-- **Speed**: Estonian ~4-8x realtime (GPU), ~1-2x (CPU). English ~3-6x (GPU), ~1x (CPU)
-- **Resources**: 4-8GB VRAM, model cache ~1.5-3GB per model
-- **Example**: 40min audio → 1-5min processing
-
-## Windows Integration
-
-**Batch files**: `transcribe_estonian.bat`, `transcribe_english.bat`  
-**Usage**: Copy to audio folder, double-click. Auto-processes all files.
-
-## Troubleshooting
-
-| Issue | Fix |
-|-------|-----|
-| Re-downloads model | Fixed via `snapshot_download()` |
-| "Folder not found" | Use `/mnt/c/Users/...` for WSL |
-| "No files found" | Check extensions, files must be in root folder |
-| Stuck pending | Run `status --verbose`, or delete `.db` file |
-
-## Future Enhancements
-
-**Alt 2** (~5h): Auto-retry (3×), concurrency, timestamps  
-**Alt 3** (~2wks): State machine, YAML config, migrations, audit trail, deduplication
 
 ## Dependencies
 
