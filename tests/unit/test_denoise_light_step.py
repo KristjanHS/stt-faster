@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any, cast
 
 import numpy as np
 import pytest
@@ -15,7 +16,7 @@ def test_apply_light_denoise_invokes_spectral_gate(tmp_path: Path) -> None:  # n
     samples = np.linspace(-0.5, 0.5, 1600, dtype=np.float32)
     sf.write(input_path, samples, 16_000, subtype="PCM_16")
 
-    calls: dict[str, object] = {}
+    calls: dict[str, Any] = {}
 
     def fake_reducer(y, sr, **kwargs):  # noqa: ANN001
         calls["audio_dtype"] = getattr(y, "dtype", None)
@@ -35,11 +36,12 @@ def test_apply_light_denoise_invokes_spectral_gate(tmp_path: Path) -> None:  # n
     assert output_path.exists()
     assert calls["rate"] == 16_000
     assert calls["audio_dtype"] == np.float32
-    assert calls["kwargs"]["stationary"] is True
-    assert calls["kwargs"]["use_tqdm"] is False
-    assert calls["kwargs"]["n_fft"] == 512
-    assert calls["kwargs"]["win_length"] == 512
-    assert calls["kwargs"]["hop_length"] == 256
+    kwargs = cast(dict[str, Any], calls["kwargs"])
+    assert kwargs["stationary"] is True
+    assert kwargs["use_tqdm"] is False
+    assert kwargs["n_fft"] == 512
+    assert kwargs["win_length"] == 400
+    assert kwargs["hop_length"] == 200
 
 
 def test_apply_light_denoise_rejects_rate_mismatch(tmp_path: Path) -> None:

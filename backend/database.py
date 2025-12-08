@@ -86,6 +86,8 @@ class FileMetricRecord:
     preprocess_snr_before: float | None = None
     preprocess_snr_after: float | None = None
     preprocess_steps: list[dict[str, Any]] | None = None
+    rnnoise_model: str | None = None
+    rnnoise_mix: float | None = None
 
     # Audio inspection
     input_channels: int | None = None
@@ -102,16 +104,40 @@ class FileMetricRecord:
     loudnorm_preset: str | None = None
     loudnorm_target_i: float | None = None
     loudnorm_target_tp: float | None = None
+    loudnorm_target_lra: float | None = None
     loudnorm_backend: str | None = None
 
     # Denoise parameters used
     denoise_method: str | None = None
     denoise_library: str | None = None
 
+    # SNR estimation
+    snr_estimation_method: str | None = None
+
     # Transcription parameters used
     beam_size: int | None = None
+    patience: float | None = None
     word_timestamps: bool | None = None
     task: str | None = None
+    chunk_length: int | None = None
+    vad_filter: bool | None = None
+    vad_threshold: float | None = None
+    vad_min_speech_duration_ms: int | None = None
+    vad_max_speech_duration_s: float | None = None
+    vad_min_silence_duration_ms: int | None = None
+    vad_speech_pad_ms: int | None = None
+    temperature: str | None = None  # Stored as JSON string for list[float] support
+    temperature_increment_on_fallback: float | None = None
+    best_of: int | None = None
+    compression_ratio_threshold: float | None = None
+    logprob_threshold: float | None = None
+    no_speech_threshold: float | None = None
+    length_penalty: float | None = None
+    repetition_penalty: float | None = None
+    no_repeat_ngram_size: int | None = None
+    suppress_tokens: str | None = None
+    condition_on_previous_text: bool | None = None
+    initial_prompt: str | None = None
 
     # Model parameters used
     model_id: str | None = None
@@ -266,6 +292,8 @@ class TranscriptionDatabase:
                     target_channels INTEGER,
                     preprocess_snr_before DOUBLE,
                     preprocess_snr_after DOUBLE,
+                    rnnoise_model VARCHAR,
+                    rnnoise_mix DOUBLE,
 
                     -- Audio inspection
                     input_channels INTEGER,
@@ -282,16 +310,40 @@ class TranscriptionDatabase:
                     loudnorm_preset VARCHAR,
                     loudnorm_target_i DOUBLE,
                     loudnorm_target_tp DOUBLE,
+                    loudnorm_target_lra DOUBLE,
                     loudnorm_backend VARCHAR,
 
                     -- Denoise parameters used
                     denoise_method VARCHAR,
                     denoise_library VARCHAR,
 
+                    -- SNR estimation
+                    snr_estimation_method VARCHAR,
+
                     -- Transcription parameters used
                     beam_size INTEGER,
+                    patience DOUBLE,
                     word_timestamps BOOLEAN,
                     task VARCHAR,
+                    chunk_length INTEGER,
+                    vad_filter BOOLEAN,
+                    vad_threshold DOUBLE,
+                    vad_min_speech_duration_ms INTEGER,
+                    vad_max_speech_duration_s DOUBLE,
+                    vad_min_silence_duration_ms INTEGER,
+                    vad_speech_pad_ms INTEGER,
+                    temperature VARCHAR,
+                    temperature_increment_on_fallback DOUBLE,
+                    best_of INTEGER,
+                    compression_ratio_threshold DOUBLE,
+                    logprob_threshold DOUBLE,
+                    no_speech_threshold DOUBLE,
+                    length_penalty DOUBLE,
+                    repetition_penalty DOUBLE,
+                    no_repeat_ngram_size INTEGER,
+                    suppress_tokens VARCHAR,
+                    condition_on_previous_text BOOLEAN,
+                    initial_prompt VARCHAR,
 
                     -- Model parameters used
                     model_id VARCHAR,
@@ -467,12 +519,19 @@ class TranscriptionDatabase:
                     requested_language, applied_language, detected_language, language_probability,
                     audio_duration, total_processing_time, transcribe_duration, preprocess_duration, speed_ratio,
                     preprocess_enabled, preprocess_profile, target_sample_rate, target_channels,
-                    preprocess_snr_before, preprocess_snr_after,
+                    preprocess_snr_before, preprocess_snr_after, rnnoise_model, rnnoise_mix,
                     input_channels, input_sample_rate, input_bit_depth, input_format,
                     volume_adjustment_db, resampler, sample_format,
-                    loudnorm_preset, loudnorm_target_i, loudnorm_target_tp, loudnorm_backend,
+                    loudnorm_preset, loudnorm_target_i, loudnorm_target_tp, loudnorm_target_lra, loudnorm_backend,
                     denoise_method, denoise_library,
-                    beam_size, word_timestamps, task,
+                    snr_estimation_method,
+                    beam_size, patience, word_timestamps, task, chunk_length,
+                    vad_filter, vad_threshold, vad_min_speech_duration_ms, vad_max_speech_duration_s,
+                    vad_min_silence_duration_ms, vad_speech_pad_ms,
+                    temperature, temperature_increment_on_fallback, best_of,
+                    compression_ratio_threshold, logprob_threshold, no_speech_threshold,
+                    length_penalty, repetition_penalty, no_repeat_ngram_size,
+                    suppress_tokens, condition_on_previous_text, initial_prompt,
                     model_id, device, compute_type,
                     output_format, float_precision,
                     preprocess_steps_json, error_message
@@ -481,14 +540,20 @@ class TranscriptionDatabase:
                     ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
-                    ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?,
+                    ?,
+                    ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     ?, ?,
                     ?, ?, ?,
                     ?, ?, ?,
-                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
                     ?, ?
                 )
                 """,
@@ -513,6 +578,8 @@ class TranscriptionDatabase:
                     record.target_channels,
                     record.preprocess_snr_before,
                     record.preprocess_snr_after,
+                    record.rnnoise_model,
+                    record.rnnoise_mix,
                     record.input_channels,
                     record.input_sample_rate,
                     record.input_bit_depth,
@@ -523,12 +590,34 @@ class TranscriptionDatabase:
                     record.loudnorm_preset,
                     record.loudnorm_target_i,
                     record.loudnorm_target_tp,
+                    record.loudnorm_target_lra,
                     record.loudnorm_backend,
                     record.denoise_method,
                     record.denoise_library,
+                    record.snr_estimation_method,
                     record.beam_size,
+                    record.patience,
                     int(record.word_timestamps) if record.word_timestamps is not None else None,
                     record.task,
+                    record.chunk_length,
+                    int(record.vad_filter) if record.vad_filter is not None else None,
+                    record.vad_threshold,
+                    record.vad_min_speech_duration_ms,
+                    record.vad_max_speech_duration_s,
+                    record.vad_min_silence_duration_ms,
+                    record.vad_speech_pad_ms,
+                    record.temperature,
+                    record.temperature_increment_on_fallback,
+                    record.best_of,
+                    record.compression_ratio_threshold,
+                    record.logprob_threshold,
+                    record.no_speech_threshold,
+                    record.length_penalty,
+                    record.repetition_penalty,
+                    record.no_repeat_ngram_size,
+                    record.suppress_tokens,
+                    int(record.condition_on_previous_text) if record.condition_on_previous_text is not None else None,
+                    record.initial_prompt,
                     record.model_id,
                     record.device,
                     record.compute_type,
