@@ -15,7 +15,6 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 | **Preprocessing** | Loudnorm preset | `default` | N/A | env: `STT_PREPROCESS_LOUDNORM_PRESET` (didn't exist) |
 | **Downmix/Resample** | Target sample rate | `16000` Hz | `16000` Hz | From config |
 | **Downmix/Resample** | Target channels | Auto/inherit or `1` | `1` | Resolved from config |
-| **Downmix/Resample** | Volume adjustment | `-6dB` | N/A | Hardcoded (didn't exist) |
 | **Downmix/Resample** | Resampler | `soxr` | Default (not specified) | Hardcoded (ffmpeg) |
 | **Downmix/Resample** | Sample format | `s16` | `s16` | Hardcoded (16-bit signed) |
 | **Loudness Normalization** | Preset | `default` | N/A | Didn't exist (hardcoded values) |
