@@ -15,7 +15,6 @@ Set HF_TOKEN environment variable or run: huggingface-cli login
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 import tempfile
 from pathlib import Path
@@ -34,46 +33,8 @@ DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
 IMAGE_NAME = "stt-faster:test-prod"
 TEST_AUDIO_FILE = PROJECT_ROOT / "tests" / "test.mp3"
 
-# Check for HuggingFace token (needed for gated models like Systran/faster-whisper-large-v3-turbo)
-HF_TOKEN = os.getenv("HF_TOKEN") or os.getenv("HUGGING_FACE_HUB_TOKEN")
-
-# Try to get token from huggingface_hub library first (most reliable)
-if not HF_TOKEN:
-    try:
-        from huggingface_hub import HfFolder
-
-        HF_TOKEN = HfFolder.get_token()
-        if HF_TOKEN:
-            logger.info("HuggingFace token found via HfFolder (length: %d)", len(HF_TOKEN))
-    except Exception as e:
-        logger.debug("Failed to get token from HfFolder: %s", e)
-
-# Fallback: Check standard token file locations (but these may have token names, not actual tokens)
-if not HF_TOKEN:
-    token_locations = [
-        Path.home() / ".cache" / "huggingface" / "token",
-        Path.home() / ".huggingface" / "token",
-    ]
-
-    for token_file in token_locations:
-        if token_file.exists():
-            try:
-                content = token_file.read_text().strip()
-                # Skip if it looks like a token name (starts with [ or is too short)
-                if content and not content.startswith("[") and len(content) > 30:
-                    HF_TOKEN = content.split("\n")[0].strip()
-                    logger.info("Found HuggingFace token at: %s", token_file)
-                    break
-            except Exception as e:
-                logger.debug("Failed to read token from %s: %s", token_file, e)
-
-if HF_TOKEN:
-    logger.info("✅ HuggingFace token found - gated models will be accessible")
-else:
-    logger.warning(
-        "⚠️  No HuggingFace token found - some models may not be accessible. "
-        "Set HF_TOKEN or login with: huggingface-cli login"
-    )
+# HuggingFace token is now provided via the hf_token fixture in tests/conftest.py
+# Tests requiring the token should accept it as a fixture parameter
 
 
 def run_docker(
@@ -459,7 +420,7 @@ class TestProductionVolumes:
 class TestProductionTranscription:
     """Test actual transcription functionality (requires network for model download)."""
 
-    def test_transcribe_status_command(self, production_image: str) -> None:
+    def test_transcribe_status_command(self, production_image: str, hf_token: str | None) -> None:
         """Verify status command works."""
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
@@ -474,7 +435,7 @@ class TestProductionTranscription:
                     (f"{tmpdir}/.cache", "/home/appuser/.cache/hf"),
                     (f"{tmpdir}/.local/share/stt-faster", "/home/appuser/.local/share/stt-faster"),
                 ],
-                env_vars={"HF_TOKEN": HF_TOKEN} if HF_TOKEN else None,
+                env_vars={"HF_TOKEN": hf_token} if hf_token else None,
             )
             # Should work even with empty database
             assert result.returncode == 0
@@ -493,21 +454,18 @@ class TestProductionTranscription:
         assert "preset" in result.stdout
 
     @pytest.mark.slow
-    def test_transcribe_with_test_audio(self, production_image: str) -> None:
+    def test_transcribe_with_test_audio(self, production_image: str, hf_token: str | None) -> None:
         """Test transcription with actual audio file (slow, downloads model).
 
         Note: test.mp3 is in Estonian, so we use the et-large preset (production default).
         GPU is enabled if available for faster transcription.
-        Requires HF_TOKEN environment variable for downloading Estonian models.
+
+        Authentication: Uses HF_TOKEN if available, otherwise relies on huggingface-cli login.
+        If the model requires authentication and neither is available, the test will fail
+        with a clear error from huggingface_hub.
         """
         if not TEST_AUDIO_FILE.exists():
             pytest.fail("Test audio file not found; e2e container test requires tests/test.mp3")
-
-        if not HF_TOKEN:
-            pytest.fail(
-                "HF_TOKEN not found. Set HF_TOKEN environment variable or run: huggingface-cli login\n"
-                "Get a token from: https://huggingface.co/settings/tokens"
-            )
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmppath = Path(tmpdir)
@@ -544,7 +502,7 @@ class TestProductionTranscription:
                     (local_hf_cache, "/home/appuser/.cache/hf"),
                     (str(data_dir), "/home/appuser/.local/share/stt-faster"),
                 ],
-                env_vars={"HF_TOKEN": HF_TOKEN},
+                env_vars={"HF_TOKEN": hf_token} if hf_token else {},
                 use_gpu=False,  # Production container is CPU-only
                 timeout=600,  # 10 minutes for model download + CPU transcription
                 check=False,

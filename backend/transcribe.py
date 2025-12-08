@@ -27,10 +27,10 @@ import json
 import logging
 import os
 import time
-from dataclasses import dataclass
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Callable, cast
+from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
@@ -48,9 +48,10 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 # Default transcription parameters
-DEFAULT_BEAM_SIZE = 9
+DEFAULT_BEAM_SIZE = 5
 DEFAULT_WORD_TIMESTAMPS = False
 DEFAULT_TASK = "transcribe"
+DEFAULT_OUTPUT_FORMAT = "txt"
 PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
 # Float rounding precision for JSON output
@@ -397,12 +398,112 @@ def transcribe_to_json(
         json_dumper(payload, json_file, ensure_ascii=False, indent=2)
 
 
+def transcribe_to_text(
+    audio_path: str,
+    text_path: str,
+    preset: str = "et-large",
+    language: str | None = None,
+    *,
+    transcribe_fn: Callable[..., Dict[str, Any]] = transcribe,
+    opener: Callable[..., Any] = open,
+) -> None:
+    """Transcribe audio and save as plain text.
+
+    Args:
+        audio_path: Path to input audio file
+        text_path: Path to output text file
+        preset: Model preset name
+        language: Optional language code
+        transcribe_fn: Transcription function to use
+        opener: File opener function (for testing)
+    """
+    payload = transcribe_fn(audio_path, preset, language=language)
+    segments = payload.get("segments", [])
+
+    with opener(text_path, "w", encoding="utf-8") as text_file:
+        for segment in segments:
+            text_file.write(segment["text"])
+            text_file.write("\n")
+
+
+def transcribe_and_save(
+    audio_path: str,
+    output_path: str,
+    preset: str = "et-large",
+    language: str | None = None,
+    output_format: str = DEFAULT_OUTPUT_FORMAT,
+    *,
+    transcribe_fn: Callable[..., Dict[str, Any]] = transcribe,
+    json_dumper: Callable[..., None] = json.dump,
+    opener: Callable[..., Any] = open,
+) -> None:
+    """Transcribe audio and save in the specified format.
+
+    Args:
+        audio_path: Path to input audio file
+        output_path: Path to output file (extension will be adjusted based on format)
+        preset: Model preset name
+        language: Optional language code
+        output_format: Output format - "txt", "json", or "both" (default: "txt")
+        transcribe_fn: Transcription function to use
+        json_dumper: JSON dump function (for testing)
+        opener: File opener function (for testing)
+
+    Raises:
+        ValueError: If output_format is not "txt", "json", or "both"
+    """
+    if output_format == "txt":
+        transcribe_to_text(
+            audio_path,
+            output_path,
+            preset,
+            language,
+            transcribe_fn=transcribe_fn,
+            opener=opener,
+        )
+    elif output_format == "json":
+        transcribe_to_json(
+            audio_path,
+            output_path,
+            preset,
+            language,
+            transcribe_fn=transcribe_fn,
+            json_dumper=json_dumper,
+            opener=opener,
+        )
+    elif output_format == "both":
+        # Generate both txt and json files
+        base_path = Path(output_path)
+        txt_path = base_path.with_suffix(".txt")
+        json_path = base_path.with_suffix(".json")
+
+        transcribe_to_text(
+            audio_path,
+            str(txt_path),
+            preset,
+            language,
+            transcribe_fn=transcribe_fn,
+            opener=opener,
+        )
+        transcribe_to_json(
+            audio_path,
+            str(json_path),
+            preset,
+            language,
+            transcribe_fn=transcribe_fn,
+            json_dumper=json_dumper,
+            opener=opener,
+        )
+    else:
+        raise ValueError(f"Invalid output_format: {output_format}. Must be 'txt', 'json', or 'both'")
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
 
     project_root = Path(__file__).resolve().parent.parent
     input_audio_path = project_root / "UserData" / "RelMan.wav"
-    output_json_path = input_audio_path.with_suffix(".json")
+    output_text_path = input_audio_path.with_suffix(".txt")
 
-    transcribe_to_json(str(input_audio_path), str(output_json_path), preset="et-large")
-    LOGGER.info("Wrote JSON transcript to %s", output_json_path)
+    transcribe_to_text(str(input_audio_path), str(output_text_path), preset="et-large")
+    LOGGER.info("Wrote text transcript to %s", output_text_path)

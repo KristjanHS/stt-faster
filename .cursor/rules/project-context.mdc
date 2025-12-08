@@ -1,0 +1,14 @@
+---
+description: "Project context: root, python version, frameworks, and key directories"
+type: agent-select
+alwaysApply: true
+---
+- **Root**: `stt-faster`
+- **Python**: 3.12 via `.venv`
+- **Core Frameworks**: `faster-whisper`, Docker Compose
+- **Key Directories**:
+    - `backend/`: Application source code
+    - `scripts/`: Utility scripts
+    - `tests/`: Test suites (unit/integration/e2e/ui)
+    - `docker/`: Docker configuration
+    - `reports/`: Generated reports
