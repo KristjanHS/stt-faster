@@ -27,6 +27,9 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Sensitive environment variable names that should be masked in logs
+SENSITIVE_ENV_VARS = {"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "API_KEY", "SECRET", "PASSWORD", "TOKEN"}
+
 # Production Dockerfile is at project root
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
@@ -37,6 +40,36 @@ TEST_AUDIO_FILE = PROJECT_ROOT / "tests" / "test.mp3"
 # Tests requiring the token should accept it as a fixture parameter
 
 
+def _sanitize_command_for_logging(cmd: list[str]) -> str:
+    """Sanitize command for logging by masking sensitive values.
+
+    Args:
+        cmd: Command list to sanitize
+
+    Returns:
+        Sanitized command string safe for logging
+    """
+    sanitized = []
+    i = 0
+    while i < len(cmd):
+        arg = cmd[i]
+        # Check if this is an environment variable flag
+        if arg == "-e" and i + 1 < len(cmd):
+            env_arg = cmd[i + 1]
+            # Check if it contains a sensitive variable name
+            if any(sensitive in env_arg.upper() for sensitive in SENSITIVE_ENV_VARS):
+                # Mask the value (keep key=, replace value with ***)
+                if "=" in env_arg:
+                    key, _ = env_arg.split("=", 1)
+                    sanitized.append(arg)
+                    sanitized.append(f"{key}=***")
+                    i += 2
+                    continue
+        sanitized.append(arg)
+        i += 1
+    return " ".join(sanitized)
+
+
 def run_docker(
     *args: str,
     check: bool = True,
@@ -44,9 +77,13 @@ def run_docker(
     text: bool = True,
     timeout: int | None = None,
 ) -> subprocess.CompletedProcess:
-    """Run docker command with standard options."""
+    """Run docker command with standard options.
+
+    Sensitive environment variables in the command are masked in logs.
+    """
     cmd = ["docker", *args]
-    logger.info("Running: %s", " ".join(cmd))
+    sanitized_cmd = _sanitize_command_for_logging(cmd)
+    logger.info("Running: %s", sanitized_cmd)
     result = subprocess.run(
         cmd,
         cwd=PROJECT_ROOT,
@@ -72,6 +109,9 @@ def run_docker_with_env(
 ) -> subprocess.CompletedProcess:
     """Run docker container with environment variables and volumes.
 
+    Sensitive environment variables (like HF_TOKEN) are passed via --env-file
+    to avoid appearing in command line or logs. Non-sensitive variables use -e flags.
+
     Args:
         image: Docker image name
         command_args: Command and arguments to pass to container
@@ -86,11 +126,41 @@ def run_docker_with_env(
     if use_gpu:
         docker_args.extend(["--gpus", "all"])
 
-    # Add environment variables
+    # Separate sensitive and non-sensitive environment variables
+    sensitive_vars: dict[str, str] = {}
+    non_sensitive_vars: dict[str, str] = {}
+
     if env_vars:
         for key, value in env_vars.items():
             if value:  # Only add if value is not empty
+                # Check if this is a sensitive variable
+                if any(sensitive in key.upper() for sensitive in SENSITIVE_ENV_VARS):
+                    sensitive_vars[key] = value
+                else:
+                    non_sensitive_vars[key] = value
+
+    # Add non-sensitive environment variables via -e flags (visible in logs but safe)
+    for key, value in non_sensitive_vars.items():
+        docker_args.extend(["-e", f"{key}={value}"])
+
+    # Add sensitive environment variables via --env-file (not visible in command line)
+    env_file_path: Path | None = None
+    if sensitive_vars:
+        # Create temporary env file
+        env_file = tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".env")
+        try:
+            for key, value in sensitive_vars.items():
+                env_file.write(f"{key}={value}\n")
+            env_file_path = Path(env_file.name)
+            env_file.close()
+            docker_args.extend(["--env-file", str(env_file_path)])
+            logger.debug("Using env-file for sensitive variables: %s", list(sensitive_vars.keys()))
+        except Exception as e:
+            # Fallback to -e flags if env file creation fails (with masking in logs)
+            logger.warning("Failed to create env file, falling back to -e flags: %s", e)
+            for key, value in sensitive_vars.items():
                 docker_args.extend(["-e", f"{key}={value}"])
+            env_file_path = None
 
     # Add volume mounts
     if volumes:
@@ -101,7 +171,15 @@ def run_docker_with_env(
     docker_args.append(image)
     docker_args.extend(command_args)
 
-    return run_docker(*docker_args, **kwargs)
+    try:
+        return run_docker(*docker_args, **kwargs)
+    finally:
+        # Clean up temporary env file
+        if env_file_path and env_file_path.exists():
+            try:
+                env_file_path.unlink()
+            except Exception as e:
+                logger.warning("Failed to clean up env file %s: %s", env_file_path, e)
 
 
 def container_exec(
