@@ -271,6 +271,12 @@ def test_process_folder(
     stats = results["run_statistics"]
     assert stats["updated_db"] is True
     assert stats["run_id"] is not None
+    # Verify statistics are correctly calculated and returned
+    # For 2 files with default metrics: preprocess=0.1, transcribe=0.5 each
+    assert stats["total_processing_time"] > 0
+    assert stats["total_preprocess_time"] == 0.2  # 0.1 + 0.1
+    assert stats["total_transcribe_time"] == 1.0  # 0.5 + 0.5
+    assert stats["average_speed_ratio"] == 120.0  # (120.0 + 120.0) / 2
 
 
 def test_process_file_move_failure_keeps_pending_status(

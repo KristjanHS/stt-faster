@@ -68,11 +68,11 @@ def test_transcription_config_from_env_defaults() -> None:
 
     # VAD parameters
     assert cfg.vad_filter is True
-    assert cfg.vad_threshold == 0.35
-    assert cfg.vad_parameters["min_speech_duration_ms"] == 250
-    assert cfg.vad_parameters["max_speech_duration_s"] == float("inf")
-    assert cfg.vad_parameters["min_silence_duration_ms"] == 800
-    assert cfg.vad_parameters["speech_pad_ms"] == 300
+    assert cfg.vad_threshold == 0.30
+    assert cfg.vad_parameters["min_speech_duration_ms"] == 200
+    assert cfg.vad_parameters["max_speech_duration_s"] == 30.0
+    assert cfg.vad_parameters["min_silence_duration_ms"] == 700
+    assert cfg.vad_parameters["speech_pad_ms"] == 500
 
     # Temperature and sampling parameters
     assert cfg.temperature == [0.0, 0.2, 0.4, 0.8]
