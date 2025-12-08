@@ -17,7 +17,8 @@ REM Run the transcription script via WSL (uses default et-large preset)
 REM Set HF_HOME to use the correct cache location
 REM Force Estonian language to avoid auto-detection errors
 REM Enable light audio pre-processing (downmix/resample + loudnorm)
-wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && export STT_PREPROCESS_ENABLED=1 && cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe --language et"
+REM Output both txt and json formats
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && export STT_PREPROCESS_ENABLED=1 && cd ~/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe --language et --output-format both"
 
 echo.
 echo ========================================
