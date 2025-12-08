@@ -28,7 +28,7 @@ def downmix_and_resample(
         "-ar",
         str(target_sample_rate),
         "-af",
-        "volume=-6dB,aresample=resampler=soxr",
+        "aresample=resampler=soxr",
         "-sample_fmt",
         "s16",
         str(output_path),
