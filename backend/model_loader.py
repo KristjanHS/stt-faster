@@ -110,12 +110,12 @@ class ModelLoader:
 
         # If device is CPU, use it directly (no fallback needed)
         if device == "cpu":
-            LOGGER.info("Using CPU device for model: %s", model_path)
+            LOGGER.info("Loading model on CPU (compute=int8): %s", model_path)
             return self._load_on_device(model_path, "cpu", "int8")
 
         # Try GPU first, fall back to CPU if it fails
         try:
-            LOGGER.info("Attempting to load model on GPU: %s", model_path)
+            LOGGER.info("Loading model on GPU (compute=%s): %s", compute_type, model_path)
             return self._load_on_device(model_path, device, compute_type)
         except Exception as error:
             LOGGER.warning(

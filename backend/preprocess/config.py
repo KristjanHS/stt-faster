@@ -8,10 +8,13 @@ _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 _PREPROCESS_ENABLED_ENV: Final = "STT_PREPROCESS_ENABLED"
 _PREPROCESS_TMP_ENV: Final = "STT_PREPROCESS_TMP_DIR"
+_PREPROCESS_OUTPUT_DIR_ENV: Final = "STT_PREPROCESS_OUTPUT_DIR"
 _PREPROCESS_TARGET_SR_ENV: Final = "STT_PREPROCESS_TARGET_SR"
 _PREPROCESS_TARGET_CH_ENV: Final = "STT_PREPROCESS_TARGET_CH"
 _PREPROCESS_PROFILE_ENV: Final = "STT_PREPROCESS_PROFILE"
 _PREPROCESS_LOUDNORM_PRESET_ENV: Final = "STT_PREPROCESS_LOUDNORM_PRESET"
+_PREPROCESS_RNNOISE_MODEL_ENV: Final = "STT_PREPROCESS_RNNOISE_MODEL"
+_PREPROCESS_RNNOISE_MIX_ENV: Final = "STT_PREPROCESS_RNNOISE_MIX"
 _LOUDNORM_PRESET_DEFAULT: Final = "default"
 _LOUDNORM_PRESET_ALIASES: Final = {
     _LOUDNORM_PRESET_DEFAULT: _LOUDNORM_PRESET_DEFAULT,
@@ -75,8 +78,11 @@ class PreprocessConfig:
     target_sample_rate: int = 16_000
     target_channels: int | None = None
     temp_dir: str | None = None
+    output_dir: str | None = None
     profile: str = "cpu"
     loudnorm_preset: str = _LOUDNORM_PRESET_DEFAULT
+    rnnoise_model: str | None = "models/sh.rnnn"
+    rnnoise_mix: float = 1.0
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "PreprocessConfig":
@@ -88,6 +94,9 @@ class PreprocessConfig:
             target_sample_rate=_parse_int(source_env.get(_PREPROCESS_TARGET_SR_ENV), 16_000),
             target_channels=_parse_positive_int(source_env.get(_PREPROCESS_TARGET_CH_ENV)),
             temp_dir=source_env.get(_PREPROCESS_TMP_ENV),
+            output_dir=source_env.get(_PREPROCESS_OUTPUT_DIR_ENV),
             profile=_env_profile(source_env.get(_PREPROCESS_PROFILE_ENV)),
             loudnorm_preset=_normalize_loudnorm_preset(source_env.get(_PREPROCESS_LOUDNORM_PRESET_ENV)),
+            rnnoise_model=source_env.get(_PREPROCESS_RNNOISE_MODEL_ENV) or "models/general.rnnn",
+            rnnoise_mix=float(source_env.get(_PREPROCESS_RNNOISE_MIX_ENV) or 1.0),
         )

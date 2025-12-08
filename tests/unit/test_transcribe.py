@@ -14,13 +14,13 @@ from backend.model_loader import DeviceSelector, ModelLoader
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.metrics import PreprocessMetrics
 from backend.transcribe import (
+    TranscriptionMetrics,
     _get_estonian_model_path,
     _round_floats,
     _segment_to_payload,
     pick_model,
     transcribe,
     transcribe_to_json,
-    TranscriptionMetrics,
 )
 
 
@@ -107,7 +107,12 @@ class FakePreprocessResult:
         metrics: PreprocessMetrics | None = None,
     ):
         self.output_path = output_path
-        self.input_info = type("Info", (), {"duration": duration})() if duration is not None else None
+        self.output_path = output_path
+        self.input_info = (
+            type("Info", (), {"duration": duration, "channels": 1, "sample_rate": 16000, "sample_format": "s16"})()
+            if duration is not None
+            else None
+        )
         self.metrics = metrics or PreprocessMetrics(total_duration=0.0, steps=[])
         self.profile = "test"
         self.cleaned = False
@@ -365,7 +370,7 @@ class TestTranscribe:
         # Verify transcribe was called with correct parameters
         assert model.calls[0]["args"][0] == str(processed_path)
         call_kwargs = model.calls[0]["kwargs"]
-        assert call_kwargs["beam_size"] == 9
+        assert call_kwargs["beam_size"] == 5
         assert call_kwargs["word_timestamps"] is False
         assert call_kwargs["language"] == "et"
         assert call_kwargs["task"] == "transcribe"

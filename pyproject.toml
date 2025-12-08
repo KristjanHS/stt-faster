@@ -22,7 +22,6 @@ dependencies = [
     "av==16.0.1",
     "soundfile>=0.12.1,<0.14.0",
     "noisereduce>=3.0.0,<4.0.0",
-    "pyloudnorm>=0.1.1",
     "idna==3.11",
     "httpx==0.28.1",
     "httpcore==1.0.9",
@@ -34,6 +33,7 @@ dependencies = [
     # Core app
     "python-dotenv>=1.1.1,<2.0.0",
     "rich>=14.1.0,<15.0.0",
+    "duckdb>=1.4.2,<2.0.0",
 ]
 
 [dependency-groups]

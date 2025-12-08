@@ -119,9 +119,6 @@ def test_record_run(temp_db: TranscriptionDatabase) -> None:
         total_transcribe_time=90.0,
         total_audio_duration=180.0,
         speed_ratio=2.0,
-        detected_languages={"en": 2},
-        parameters={"preset": "turbo"},
-        statistics={"avg_speed": 2.0},
     )
 
     temp_db.record_run(record)
@@ -132,8 +129,6 @@ def test_record_run(temp_db: TranscriptionDatabase) -> None:
     assert entry["input_folder"] == "/tmp/input"
     assert entry["preset"] == "turbo"
     assert entry["files_found"] == 2
-    assert entry["parameters"]["preset"] == "turbo"
-    assert entry["statistics"]["avg_speed"] == 2.0
 
 
 def test_context_manager(temp_db: TranscriptionDatabase) -> None:

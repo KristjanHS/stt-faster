@@ -3,11 +3,12 @@
 import json
 import logging
 import os
-import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+import duckdb
 
 from backend.exceptions import DatabaseError
 
@@ -16,27 +17,113 @@ LOGGER = logging.getLogger(__name__)
 
 @dataclass(slots=True)
 class RunRecord:
-    """Structured information about a single transcription run."""
+    """Structured configuration and summary for a transcription batch."""
 
     recorded_at: str | datetime
     input_folder: str | None
+
+    # Configuration (Static for all files in run)
     preset: str
     language: str | None
+
+    # Preprocessing Config
     preprocess_enabled: bool
     preprocess_profile: str | None
     target_sample_rate: int | None
     target_channels: int | None
-    files_found: int
-    succeeded: int
-    failed: int
-    total_processing_time: float | None
-    total_preprocess_time: float | None
-    total_transcribe_time: float | None
-    total_audio_duration: float | None
-    speed_ratio: float | None
-    detected_languages: dict[str, int] | None = None
-    parameters: dict[str, Any] | None = None
-    statistics: dict[str, Any] | None = None
+    loudnorm_preset: str | None = None
+
+    # Model Config
+    model_id: str | None = None
+    device: str | None = None
+    compute_type: str | None = None
+
+    # Transcription Config
+    beam_size: int | None = None
+    word_timestamps: bool | None = None
+
+    # Batch Aggregates (Outcomes)
+    files_found: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    total_processing_time: float | None = None
+    total_preprocess_time: float | None = None
+    total_transcribe_time: float | None = None
+    total_audio_duration: float | None = None
+    speed_ratio: float | None = None
+
+
+@dataclass(slots=True)
+class FileMetricRecord:
+    """Detailed metrics for a single file transcription."""
+
+    run_id: int
+    recorded_at: str | datetime
+
+    # Identifier
+    audio_path: str
+    preset: str
+    status: str
+
+    # Language detection
+    requested_language: str | None = None
+    applied_language: str | None = None
+    detected_language: str | None = None
+    language_probability: float | None = None
+
+    # Timing metrics
+    audio_duration: float | None = None
+    total_processing_time: float = 0.0
+    transcribe_duration: float = 0.0
+    preprocess_duration: float = 0.0
+    speed_ratio: float | None = None
+
+    # Preprocessing
+    preprocess_enabled: bool = False
+    preprocess_profile: str | None = None
+    target_sample_rate: int | None = None
+    target_channels: int | None = None
+    preprocess_snr_before: float | None = None
+    preprocess_snr_after: float | None = None
+    preprocess_steps: list[dict[str, Any]] | None = None
+
+    # Audio inspection
+    input_channels: int | None = None
+    input_sample_rate: int | None = None
+    input_bit_depth: int | None = None
+    input_format: str | None = None
+
+    # Downmix/resample parameters used
+    volume_adjustment_db: float | None = None
+    resampler: str | None = None
+    sample_format: str | None = None
+
+    # Loudness normalization parameters used
+    loudnorm_preset: str | None = None
+    loudnorm_target_i: float | None = None
+    loudnorm_target_tp: float | None = None
+    loudnorm_backend: str | None = None
+
+    # Denoise parameters used
+    denoise_method: str | None = None
+    denoise_library: str | None = None
+
+    # Transcription parameters used
+    beam_size: int | None = None
+    word_timestamps: bool | None = None
+    task: str | None = None
+
+    # Model parameters used
+    model_id: str | None = None
+    device: str | None = None
+    compute_type: str | None = None
+
+    # Output parameters
+    output_format: str | None = None
+    float_precision: int | None = None
+
+    # Error
+    error_message: str | None = None
 
 
 def _format_timestamp(value: str | datetime | None) -> str:
@@ -69,7 +156,7 @@ def get_default_db_path() -> Path:
     app_data_dir = data_dir / "stt-faster"
     app_data_dir.mkdir(parents=True, exist_ok=True)
 
-    return app_data_dir / "transcribe_state.db"
+    return app_data_dir / "transcribe_state.duckdb"
 
 
 class TranscriptionDatabase:
@@ -88,51 +175,143 @@ class TranscriptionDatabase:
         else:
             self.db_path = str(db_path)
 
-        self.conn: sqlite3.Connection | None = None
+        self.conn: duckdb.DuckDBPyConnection | None = None
         self._init_db()
 
     def _init_db(self) -> None:
         """Initialize database schema if it doesn't exist."""
         try:
-            self.conn = sqlite3.connect(self.db_path)
-            self.conn.row_factory = sqlite3.Row
+            self.conn = duckdb.connect(self.db_path)
 
-            cursor = self.conn.cursor()
-            cursor.execute("""
+            # DuckDB doesn't use row_factory like sqlite3, we'll handle dict conversion manually
+
+            # Legacy table for status tracking (kept for file status persistence)
+            self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS transcriptions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    file_path TEXT UNIQUE NOT NULL,
-                    status TEXT NOT NULL,
-                    error_message TEXT
-                )
+                    -- DuckDB uses SEQUENCE for auto-increment usually, but INTEGER PRIMARY KEY implies it
+                    id INTEGER PRIMARY KEY,
+                    file_path VARCHAR UNIQUE NOT NULL,
+                    status VARCHAR NOT NULL,
+                    error_message VARCHAR
+                );
+                CREATE SEQUENCE IF NOT EXISTS seq_transcriptions_id START 1;
+                ALTER TABLE transcriptions ALTER COLUMN id SET DEFAULT nextval('seq_transcriptions_id');
             """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS run_history (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    recorded_at TEXT NOT NULL,
-                    input_folder TEXT,
-                    preset TEXT NOT NULL,
-                    language TEXT,
-                    preprocess_enabled INTEGER NOT NULL,
-                    preprocess_profile TEXT,
+
+            # Runs table - Stores BATCH CONFIGURATION and AGGREGATES
+            # Removed JSON blobs, expanded config columns
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS runs (
+                    id INTEGER PRIMARY KEY,
+                    recorded_at TIMESTAMP NOT NULL,
+                    input_folder VARCHAR,
+
+                    -- Configuration
+                    preset VARCHAR NOT NULL,
+                    language VARCHAR,
+                    preprocess_enabled BOOLEAN NOT NULL,
+                    preprocess_profile VARCHAR,
                     target_sample_rate INTEGER,
                     target_channels INTEGER,
+                    loudnorm_preset VARCHAR,
+
+                    model_id VARCHAR,
+                    device VARCHAR,
+                    compute_type VARCHAR,
+
+                    beam_size INTEGER,
+                    word_timestamps BOOLEAN,
+
+                    -- Aggregates
                     files_found INTEGER NOT NULL,
                     succeeded INTEGER NOT NULL,
                     failed INTEGER NOT NULL,
-                    total_processing_time REAL,
-                    total_preprocess_time REAL,
-                    total_transcribe_time REAL,
-                    total_audio_duration REAL,
-                    speed_ratio REAL,
-                    detected_languages TEXT,
-                    parameters_json TEXT NOT NULL,
-                    statistics_json TEXT NOT NULL
-                )
+                    total_processing_time DOUBLE,
+                    total_preprocess_time DOUBLE,
+                    total_transcribe_time DOUBLE,
+                    total_audio_duration DOUBLE,
+                    speed_ratio DOUBLE
+                );
+                CREATE SEQUENCE IF NOT EXISTS seq_runs_id START 1;
+                ALTER TABLE runs ALTER COLUMN id SET DEFAULT nextval('seq_runs_id');
             """)
-            self.conn.commit()
-            LOGGER.info("Database initialized at %s", self.db_path)
-        except sqlite3.Error as e:
+
+            # File Metrics table - Stores PER-FILE OUTCOMES
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS file_metrics (
+                    id INTEGER PRIMARY KEY,
+                    run_id INTEGER,
+                    recorded_at TIMESTAMP NOT NULL,
+                    audio_path VARCHAR NOT NULL,
+                    preset VARCHAR NOT NULL,
+                    status VARCHAR NOT NULL,
+
+                    -- Language detection
+                    requested_language VARCHAR,
+                    applied_language VARCHAR,
+                    detected_language VARCHAR,
+                    language_probability DOUBLE,
+
+                    -- Timing metrics
+                    audio_duration DOUBLE,
+                    total_processing_time DOUBLE NOT NULL,
+                    transcribe_duration DOUBLE NOT NULL,
+                    preprocess_duration DOUBLE NOT NULL,
+                    speed_ratio DOUBLE,
+
+                    -- Preprocessing (Outcomes/Specifics)
+                    preprocess_enabled BOOLEAN NOT NULL,
+                    preprocess_profile VARCHAR NOT NULL,
+                    target_sample_rate INTEGER NOT NULL,
+                    target_channels INTEGER,
+                    preprocess_snr_before DOUBLE,
+                    preprocess_snr_after DOUBLE,
+
+                    -- Audio inspection
+                    input_channels INTEGER,
+                    input_sample_rate INTEGER,
+                    input_bit_depth INTEGER,
+                    input_format VARCHAR,
+
+                    -- Downmix/resample parameters used
+                    volume_adjustment_db DOUBLE,
+                    resampler VARCHAR,
+                    sample_format VARCHAR,
+
+                    -- Loudness normalization parameters used
+                    loudnorm_preset VARCHAR,
+                    loudnorm_target_i DOUBLE,
+                    loudnorm_target_tp DOUBLE,
+                    loudnorm_backend VARCHAR,
+
+                    -- Denoise parameters used
+                    denoise_method VARCHAR,
+                    denoise_library VARCHAR,
+
+                    -- Transcription parameters used
+                    beam_size INTEGER,
+                    word_timestamps BOOLEAN,
+                    task VARCHAR,
+
+                    -- Model parameters used
+                    model_id VARCHAR,
+                    device VARCHAR,
+                    compute_type VARCHAR,
+
+                    -- Output parameters
+                    output_format VARCHAR,
+                    float_precision INTEGER,
+
+                    -- Complex/Error
+                    preprocess_steps_json VARCHAR,
+                    error_message VARCHAR
+                );
+                CREATE SEQUENCE IF NOT EXISTS seq_file_metrics_id START 1;
+                ALTER TABLE file_metrics ALTER COLUMN id SET DEFAULT nextval('seq_file_metrics_id');
+            """)
+
+            LOGGER.info("DuckDB initialized at %s", self.db_path)
+        except Exception as e:
             msg = f"Failed to initialize database at {self.db_path}: {e}"
             raise DatabaseError(msg) from e
 
@@ -147,17 +326,16 @@ class TranscriptionDatabase:
             msg = "Database not initialized"
             raise DatabaseError(msg)
 
-        cursor = self.conn.cursor()
         try:
-            cursor.execute(
+            self.conn.execute(
                 "INSERT INTO transcriptions (file_path, status) VALUES (?, ?)",
                 (file_path, status),
             )
             self.conn.commit()
             LOGGER.debug("Added file: %s with status: %s", file_path, status)
-        except sqlite3.IntegrityError:
+        except duckdb.ConstraintException:  # DuckDB equivalent of IntegrityError for UNIQUE constraint
             LOGGER.debug("File already exists in database: %s", file_path)
-        except sqlite3.Error as e:
+        except Exception as e:
             msg = f"Failed to add file {file_path}: {e}"
             raise DatabaseError(msg) from e
 
@@ -179,14 +357,13 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute(
+            self.conn.execute(
                 "UPDATE transcriptions SET status = ?, error_message = ? WHERE file_path = ?",
                 (status, error_message, file_path),
             )
             self.conn.commit()
             LOGGER.debug("Updated %s to status: %s", file_path, status)
-        except sqlite3.Error as e:
+        except Exception as e:
             msg = f"Failed to update status for {file_path}: {e}"
             raise DatabaseError(msg) from e
 
@@ -204,14 +381,20 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute(
+            # DuckDB execute returns self, fetchone returns tuple
+            # We need column names to make a dict
+            cursor = self.conn.execute(
                 "SELECT * FROM transcriptions WHERE file_path = ?",
-                (file_path,),
+                [file_path],
             )
             row = cursor.fetchone()
-            return dict(row) if row else None
-        except sqlite3.Error as e:
+            if not row:
+                return None
+
+            # Map tuple to dict using column descriptions
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+        except Exception as e:
             msg = f"Failed to get status for {file_path}: {e}"
             raise DatabaseError(msg) from e
 
@@ -229,14 +412,18 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute(
+            cursor = self.conn.execute(
                 "SELECT * FROM transcriptions WHERE status = ?",
-                (status,),
+                [status],
             )
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except sqlite3.Error as e:
+
+            if not rows:
+                return []
+
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
             msg = f"Failed to get files by status {status}: {e}"
             raise DatabaseError(msg) from e
 
@@ -251,50 +438,146 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT * FROM transcriptions")
+            cursor = self.conn.execute("SELECT * FROM transcriptions")
             rows = cursor.fetchall()
-            return [dict(row) for row in rows]
-        except sqlite3.Error as e:
+
+            if not rows:
+                return []
+
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
             msg = f"Failed to get all files: {e}"
             raise DatabaseError(msg) from e
 
-    def record_run(self, record: RunRecord) -> None:
-        """Persist metadata and statistics for a transcription run."""
+    def record_file_metric(self, record: FileMetricRecord) -> None:
+        """Persist detailed metrics for a single file."""
         if not self.conn:
             msg = "Database not initialized"
             raise DatabaseError(msg)
 
-        parameters_json = json.dumps(record.parameters or {}, sort_keys=True)
-        statistics_json = json.dumps(record.statistics or {}, sort_keys=True)
-        detected_languages_json = json.dumps(record.detected_languages or {}, sort_keys=True)
+        preprocess_steps_json = json.dumps(record.preprocess_steps or [], sort_keys=True)
         recorded_at = _format_timestamp(record.recorded_at)
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute(
+            self.conn.execute(
                 """
-                INSERT INTO run_history (
+                INSERT INTO file_metrics (
+                    run_id, recorded_at, audio_path, preset, status,
+                    requested_language, applied_language, detected_language, language_probability,
+                    audio_duration, total_processing_time, transcribe_duration, preprocess_duration, speed_ratio,
+                    preprocess_enabled, preprocess_profile, target_sample_rate, target_channels,
+                    preprocess_snr_before, preprocess_snr_after,
+                    input_channels, input_sample_rate, input_bit_depth, input_format,
+                    volume_adjustment_db, resampler, sample_format,
+                    loudnorm_preset, loudnorm_target_i, loudnorm_target_tp, loudnorm_backend,
+                    denoise_method, denoise_library,
+                    beam_size, word_timestamps, task,
+                    model_id, device, compute_type,
+                    output_format, float_precision,
+                    preprocess_steps_json, error_message
+                ) VALUES (
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, ?
+                )
+                """,
+                (
+                    record.run_id,
                     recorded_at,
-                    input_folder,
-                    preset,
-                    language,
-                    preprocess_enabled,
-                    preprocess_profile,
-                    target_sample_rate,
-                    target_channels,
-                    files_found,
-                    succeeded,
-                    failed,
+                    record.audio_path,
+                    record.preset,
+                    record.status,
+                    record.requested_language,
+                    record.applied_language,
+                    record.detected_language,
+                    record.language_probability,
+                    record.audio_duration,
+                    record.total_processing_time,
+                    record.transcribe_duration,
+                    record.preprocess_duration,
+                    record.speed_ratio,
+                    int(record.preprocess_enabled),
+                    record.preprocess_profile,
+                    record.target_sample_rate,
+                    record.target_channels,
+                    record.preprocess_snr_before,
+                    record.preprocess_snr_after,
+                    record.input_channels,
+                    record.input_sample_rate,
+                    record.input_bit_depth,
+                    record.input_format,
+                    record.volume_adjustment_db,
+                    record.resampler,
+                    record.sample_format,
+                    record.loudnorm_preset,
+                    record.loudnorm_target_i,
+                    record.loudnorm_target_tp,
+                    record.loudnorm_backend,
+                    record.denoise_method,
+                    record.denoise_library,
+                    record.beam_size,
+                    int(record.word_timestamps) if record.word_timestamps is not None else None,
+                    record.task,
+                    record.model_id,
+                    record.device,
+                    record.compute_type,
+                    record.output_format,
+                    record.float_precision,
+                    preprocess_steps_json,
+                    record.error_message,
+                ),
+            )
+            self.conn.commit()
+            LOGGER.debug("Recorded file metric for %s", record.audio_path)
+        except Exception as e:
+            msg = f"Failed to record file metrics for {record.audio_path}: {e}"
+            raise DatabaseError(msg) from e
+
+    def record_run(self, record: RunRecord) -> int:
+        """Persist a new run record and return its ID."""
+        if not self.conn:
+            msg = "Database not initialized"
+            raise DatabaseError(msg)
+
+        recorded_at = _format_timestamp(record.recorded_at)
+
+        try:
+            # DuckDB execute with parameters and RETURNING clause
+            cursor = self.conn.execute(
+                """
+                INSERT INTO runs (
+                    recorded_at, input_folder,
+                    preset, language,
+                    preprocess_enabled, preprocess_profile, target_sample_rate, target_channels, loudnorm_preset,
+                    model_id, device, compute_type,
+                    beam_size, word_timestamps,
+                    files_found, succeeded, failed,
                     total_processing_time,
                     total_preprocess_time,
                     total_transcribe_time,
                     total_audio_duration,
-                    speed_ratio,
-                    detected_languages,
-                    parameters_json,
-                    statistics_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    speed_ratio
+                ) VALUES (
+                    ?, ?,
+                    ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?, ?
+                )
+                RETURNING id;
                 """,
                 (
                     recorded_at,
@@ -305,6 +588,12 @@ class TranscriptionDatabase:
                     record.preprocess_profile,
                     record.target_sample_rate,
                     record.target_channels,
+                    record.loudnorm_preset,
+                    record.model_id,
+                    record.device,
+                    record.compute_type,
+                    record.beam_size,
+                    int(record.word_timestamps) if record.word_timestamps is not None else None,
                     record.files_found,
                     record.succeeded,
                     record.failed,
@@ -313,15 +602,20 @@ class TranscriptionDatabase:
                     record.total_transcribe_time,
                     record.total_audio_duration,
                     record.speed_ratio,
-                    detected_languages_json,
-                    parameters_json,
-                    statistics_json,
                 ),
             )
-            self.conn.commit()
-            LOGGER.debug("Recorded run metadata for preset=%s folder=%s", record.preset, record.input_folder)
-        except sqlite3.Error as e:
-            msg = f"Failed to record run metadata: {e}"
+
+            # Fetch the returned ID
+            row = cursor.fetchone()
+            if row:
+                run_id = row[0]
+                LOGGER.debug("Recorded run with ID: %s", run_id)
+                return run_id
+
+            raise DatabaseError("Failed to retrieve inserted run ID")
+
+        except Exception as e:
+            msg = f"Failed to record run: {e}"
             raise DatabaseError(msg) from e
 
     def get_run_history(self, limit: int | None = None) -> list[dict[str, Any]]:
@@ -332,22 +626,20 @@ class TranscriptionDatabase:
 
         try:
             cursor = self.conn.cursor()
-            query = "SELECT * FROM run_history ORDER BY recorded_at DESC"
+            query = "SELECT * FROM runs ORDER BY recorded_at DESC"
             params: tuple[int, ...] = ()
             if limit is not None:
                 query += " LIMIT ?"
                 params = (limit,)
             cursor.execute(query, params)
             rows = cursor.fetchall()
-            history: list[dict[str, Any]] = []
-            for row in rows:
-                entry = dict(row)
-                entry["parameters"] = json.loads(entry.pop("parameters_json"))
-                entry["statistics"] = json.loads(entry.pop("statistics_json"))
-                entry["detected_languages"] = json.loads(entry.get("detected_languages") or "{}")
-                history.append(entry)
-            return history
-        except sqlite3.Error as e:
+
+            if not rows:
+                return []
+
+            columns = [desc[0] for desc in cursor.description]
+            return [dict(zip(columns, row)) for row in rows]
+        except Exception as e:
             msg = f"Failed to fetch run history: {e}"
             raise DatabaseError(msg) from e
 
@@ -362,11 +654,9 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.cursor()
-            cursor.execute("SELECT status, COUNT(*) as count FROM transcriptions GROUP BY status")
-            rows = cursor.fetchall()
-            return {row["status"]: row["count"] for row in rows}
-        except sqlite3.Error as e:
+            rows = self.conn.execute("SELECT status, COUNT(*) as count FROM transcriptions GROUP BY status").fetchall()
+            return {row[0]: row[1] for row in rows}
+        except Exception as e:
             msg = f"Failed to get summary: {e}"
             raise DatabaseError(msg) from e
 
