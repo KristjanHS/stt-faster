@@ -39,6 +39,7 @@ from backend.exceptions import ModelNotFoundError
 from backend.model_config import ModelConfig, get_preset
 from backend.model_loader import ModelLoader
 from backend.preprocess import PreprocessConfig, preprocess_audio
+from backend.preprocess.config import TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult
 
 if TYPE_CHECKING:
@@ -47,10 +48,7 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-# Default transcription parameters
-DEFAULT_BEAM_SIZE = 5
-DEFAULT_WORD_TIMESTAMPS = False
-DEFAULT_TASK = "transcribe"
+# Output format and logging constants
 DEFAULT_OUTPUT_FORMAT = "txt"
 PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
@@ -290,6 +288,7 @@ def transcribe(
     language: str | None = None,
     *,
     preprocess_config_provider: Callable[[], PreprocessConfig] = PreprocessConfig.from_env,
+    transcription_config_provider: Callable[[], TranscriptionConfig] = TranscriptionConfig.from_env,
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult] = preprocess_audio,
     model_picker: Callable[[str], Any] | None = None,
     metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
@@ -302,10 +301,11 @@ def transcribe(
         preset_config.compute_type,
         preset_config.device,
     )
-    LOGGER.info("⚙️ Beam size: %d", DEFAULT_BEAM_SIZE)
-    overall_start = time.time()
 
     preprocess_config = preprocess_config_provider()
+    transcription_config = transcription_config_provider()
+    LOGGER.info("⚙️ Beam size: %d", transcription_config.beam_size)
+    overall_start = time.time()
     preprocess_result = preprocess_runner(path, preprocess_config)
     duration_hint = preprocess_result.input_info.duration if preprocess_result.input_info else None
     if duration_hint:
@@ -330,12 +330,29 @@ def transcribe(
 
         LOGGER.info("🔄 Transcribing audio...")
         transcribe_start = time.time()
+        # Merge vad_threshold into vad_parameters as 'threshold'
+        vad_params = dict(transcription_config.vad_parameters)
+        vad_params["threshold"] = transcription_config.vad_threshold
         segments, info = model.transcribe(
             str(preprocess_result.output_path),
-            beam_size=DEFAULT_BEAM_SIZE,
-            word_timestamps=DEFAULT_WORD_TIMESTAMPS,
+            beam_size=transcription_config.beam_size,
+            patience=transcription_config.patience,
+            word_timestamps=transcription_config.word_timestamps,
             language=applied_language,
-            task=DEFAULT_TASK,
+            task=transcription_config.task,
+            chunk_length=transcription_config.chunk_length,
+            vad_filter=transcription_config.vad_filter,
+            vad_parameters=vad_params,
+            temperature=transcription_config.temperature,
+            temperature_increment_on_fallback=transcription_config.temperature_increment_on_fallback,
+            compression_ratio_threshold=transcription_config.compression_ratio_threshold,
+            logprob_threshold=transcription_config.logprob_threshold,
+            no_speech_threshold=transcription_config.no_speech_threshold,
+            best_of=transcription_config.best_of,
+            length_penalty=transcription_config.length_penalty,
+            suppress_tokens=transcription_config.suppress_tokens,
+            condition_on_previous_text=transcription_config.condition_on_previous_text,
+            initial_prompt=transcription_config.initial_prompt,
         )
 
         total_audio_duration = getattr(info, "duration", None) or duration_hint
@@ -435,16 +452,16 @@ def transcribe(
             sample_format="s16",  # Hardcoded in downmix_and_resample (16-bit signed)
             # Loudness normalization parameters
             loudnorm_preset=preprocess_config.loudnorm_preset,
-            loudnorm_target_i=-20.0 if preprocess_config.loudnorm_preset == "default" else -18.0,  # From presets
+            loudnorm_target_i=preprocess_config.loudnorm_target_i(),
             loudnorm_target_tp=-2.0,  # From presets (same for both)
             loudnorm_backend=loudnorm_step.backend if loudnorm_step else None,
             # Denoise parameters
             denoise_method="spectral_gate" if denoise_step else None,  # Hardcoded in denoise_light
             denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
             # Transcription parameters
-            beam_size=DEFAULT_BEAM_SIZE,
-            word_timestamps=DEFAULT_WORD_TIMESTAMPS,
-            task=DEFAULT_TASK,
+            beam_size=transcription_config.beam_size,
+            word_timestamps=transcription_config.word_timestamps,
+            task=transcription_config.task,
             # Model parameters
             model_id=preset_config.model_id,
             device=preset_config.device,
