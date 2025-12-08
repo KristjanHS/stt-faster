@@ -7,6 +7,7 @@ from typing import Iterator
 import pytest
 
 from backend.database import TranscriptionDatabase
+from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.io import AudioInfo
 from backend.preprocess.metrics import StepMetrics
 
@@ -73,6 +74,12 @@ def dummy_audio_info_stereo() -> AudioInfo:
 
 
 @pytest.fixture
+def default_rnnoise_mix() -> float:
+    """Provide the default rnnoise_mix value from PreprocessConfig."""
+    return PreprocessConfig().rnnoise_mix
+
+
+@pytest.fixture
 def preprocess_pipeline_stubs(
     tmp_path: Path,
     dummy_audio_info_stereo: AudioInfo,
@@ -88,9 +95,9 @@ def preprocess_pipeline_stubs(
         output_path: Path,
         target_sample_rate: int,
         target_channels: int,
+        rnnoise_mix: float,
         loudnorm_preset: str = "default",
         rnnoise_model: str | None = None,
-        rnnoise_mix: float = 1.0,
     ) -> StepMetrics:
         calls["input"] = input_path
         calls["output"] = output_path
@@ -155,3 +162,23 @@ def preprocess_pipeline_stubs(
         "temp_dir_factory": temp_dir_factory,
         "gpu_check": lambda: True,
     }
+
+
+@pytest.fixture
+def ffmpeg_run() -> tuple[dict, callable]:
+    """Provide a fake ffmpeg runner callable and a captured dict for tests.
+
+    Yields (captured, runner) where `runner(cmd, **kwargs)` records the command
+    into `captured['cmd']` and returns a dummy object with `returncode`.
+    """
+    captured: dict = {}
+
+    def runner(cmd, check=True, capture_output=True, text=True):
+        captured["cmd"] = cmd
+
+        class _Res:
+            returncode = 0
+
+        return _Res()
+
+    return captured, runner
