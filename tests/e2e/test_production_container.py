@@ -496,7 +496,7 @@ class TestProductionTranscription:
             # CPU-optimized for containers without cuDNN
             result = run_docker_with_env(
                 image=production_image,
-                command_args=["process", "/workspace", "--preset", "et-large"],
+                command_args=["process", "/workspace", "--preset", "et-large", "--output-format", "json"],
                 volumes=[
                     (str(workspace_audio), "/workspace"),
                     (local_hf_cache, "/home/appuser/.cache/hf"),
