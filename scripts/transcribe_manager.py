@@ -168,7 +168,7 @@ def create_parser() -> argparse.ArgumentParser:
     process_parser.add_argument(
         "--preset",
         default="et-large",
-        choices=["turbo", "distil", "large8gb", "et-large"],
+        choices=["turbo", "distil", "large8gb", "et-large", "et-32", "small"],
         help="Model preset to use (default: et-large)",
     )
     process_parser.add_argument(

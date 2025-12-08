@@ -34,7 +34,13 @@ PRESETS: dict[str, ModelConfig] = {
     "et-large": ModelConfig(
         model_id="TalTechNLP/whisper-large-v3-turbo-et-verbatim",
         device="cuda",
-        compute_type="float32",
+        compute_type="float16",  # Recommended for GPU by model authors
+        is_estonian=True,
+    ),
+    "et-32": ModelConfig(
+        model_id="TalTechNLP/whisper-large-v3-turbo-et-verbatim",
+        device="cpu",
+        compute_type="float32",  # float32 for CPU execution
         is_estonian=True,
     ),
     # English/multilingual models (Systran faster-whisper)
