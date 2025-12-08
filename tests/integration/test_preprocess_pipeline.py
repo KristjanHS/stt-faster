@@ -26,8 +26,7 @@ def test_preprocess_pipeline_runs_full_path(
 
     assert result.output_path.exists()
     step_names = [metric.name for metric in result.metrics.steps]
-    assert "downmix_resample" in step_names
-    assert "loudnorm" in step_names
+    assert "ffmpeg_pipeline" in step_names
     assert "denoise_light" in step_names
 
     result.cleanup()

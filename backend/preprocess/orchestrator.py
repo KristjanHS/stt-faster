@@ -191,9 +191,9 @@ def _run_pipeline(
                 output_path=intermediate_path,
                 target_sample_rate=cfg.target_sample_rate,
                 target_channels=resolved_channels,
+                rnnoise_mix=cfg.rnnoise_mix,
                 loudnorm_preset=cfg.loudnorm_preset,
                 rnnoise_model=cfg.rnnoise_model,
-                rnnoise_mix=cfg.rnnoise_mix,
             )
             step_metrics.append(step_metric)
             _copy_stage_output(intermediate_path, cfg.output_dir, "01_ffmpeg_processed", original_filename)

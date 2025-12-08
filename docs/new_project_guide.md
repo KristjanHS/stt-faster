@@ -1,4 +1,4 @@
-# Reuse this repo as a template
+# How you can Reuse this repo as a template:
 
 Scripts automate most of the cloning/cleanup so you can start a fresh project (e.g., `xls-analyser`) while keeping configs and automations. Assumes new repos live under `~/projects/`.
 

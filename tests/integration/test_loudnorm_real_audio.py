@@ -20,7 +20,7 @@ def test_loudnorm_runs_on_real_audio(tmp_path: Path, real_audio_sample: Path, ff
         pytest.fail(f"Preprocess failed in environment: {exc}")
 
     assert result.output_path.exists()
-    assert any(metric.name == "loudnorm" for metric in result.metrics.steps)
+    assert any(metric.name == "ffmpeg_pipeline" for metric in result.metrics.steps)
     assert result.metrics.snr_before is not None
     assert result.metrics.snr_after is not None
     assert result.metrics.snr_delta is not None
