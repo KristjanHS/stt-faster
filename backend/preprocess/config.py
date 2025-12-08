@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import Final, Mapping
+from typing import Any, Final, Mapping, cast
 
 # Preset configurations for loudnorm
 _LOUDNORM_PRESETS: Final[dict[str, dict[str, float]]] = {
@@ -54,6 +54,8 @@ _TRANSCRIBE_VAD_MIN_SPEECH_DURATION_MS_ENV: Final = "STT_TRANSCRIBE_VAD_MIN_SPEE
 _TRANSCRIBE_VAD_MAX_SPEECH_DURATION_S_ENV: Final = "STT_TRANSCRIBE_VAD_MAX_SPEECH_DURATION_S"
 _TRANSCRIBE_VAD_MIN_SILENCE_DURATION_MS_ENV: Final = "STT_TRANSCRIBE_VAD_MIN_SILENCE_DURATION_MS"
 _TRANSCRIBE_VAD_SPEECH_PAD_MS_ENV: Final = "STT_TRANSCRIBE_VAD_SPEECH_PAD_MS"
+_TRANSCRIBE_REPETITION_PENALTY_ENV: Final = "STT_TRANSCRIBE_REPETITION_PENALTY"
+_TRANSCRIBE_NO_REPEAT_NGRAM_SIZE_ENV: Final = "STT_TRANSCRIBE_NO_REPEAT_NGRAM_SIZE"
 _LOUDNORM_PRESET_ALIASES: Final = {
     _LOUDNORM_PRESET_DEFAULT: _LOUDNORM_PRESET_DEFAULT,
     "boost-quiet-voices": "boost-quiet-voices",
@@ -107,6 +109,24 @@ def _parse_float(raw: str | None, default: float) -> float:
         return default
 
 
+def _parse_temperature(raw: str | None, default: float | list[float]) -> float | list[float]:
+    """Parse temperature which can be a single float or a comma-separated list of floats."""
+    if raw is None:
+        return default
+    try:
+        # Try parsing as a list (comma-separated values)
+        values = [float(x.strip()) for x in raw.split(",")]
+        if len(values) == 1:
+            return values[0]
+        return values
+    except ValueError:
+        # Fallback to single float
+        try:
+            return float(raw)
+        except ValueError:
+            return default
+
+
 def _env_profile(value: str | None) -> str:
     """Normalize profile preference."""
     if value is None:
@@ -122,6 +142,20 @@ def _normalize_loudnorm_preset(value: str | None) -> str:
     if value is None:
         return _LOUDNORM_PRESET_DEFAULT
     return _LOUDNORM_PRESET_ALIASES.get(value.strip().lower(), _LOUDNORM_PRESET_DEFAULT)
+
+
+def _get_dataclass_default(cls: type, field_name: str) -> Any:
+    """Get the default value for a dataclass field, handling default_factory if needed."""
+    from dataclasses import MISSING, fields  # noqa: PLC0415
+
+    for dataclass_field in fields(cls):
+        if dataclass_field.name == field_name:
+            if dataclass_field.default is not MISSING:
+                return dataclass_field.default
+            if dataclass_field.default_factory is not MISSING:
+                return dataclass_field.default_factory()
+            break
+    raise ValueError(f"Field {field_name} not found in {cls.__name__}")
 
 
 @dataclass(slots=True)
@@ -186,39 +220,41 @@ class TranscriptionConfig:
 
     # Beam search parameters
     beam_size: int = 5
-    patience: float = 1.0
+    patience: float = 1.1
 
     # Timestamp and task parameters
     word_timestamps: bool = False
     task: str = "transcribe"  # "transcribe" or "translate"
 
     # Chunk processing
-    chunk_length: int = 30  # Length of audio chunks in seconds
+    chunk_length: int = 20  # Length of audio chunks in seconds
 
     # VAD (Voice Activity Detection) parameters
     vad_filter: bool = True
-    vad_threshold: float = 0.5  # Speech probability threshold for VAD
+    vad_threshold: float = 0.35  # Speech probability threshold for VAD
     vad_parameters: dict[str, float | int] = field(
         default_factory=lambda: {
             "min_speech_duration_ms": 250,
             "max_speech_duration_s": float("inf"),
-            "min_silence_duration_ms": 2000,
-            "speech_pad_ms": 400,
+            "min_silence_duration_ms": 800,
+            "speech_pad_ms": 300,
         }
     )
 
     # Temperature and sampling parameters
-    temperature: float = 0.0
+    temperature: float | list[float] = field(default_factory=lambda: [0.0, 0.2, 0.4, 0.8])
     temperature_increment_on_fallback: float = 0.2
     best_of: int = 5  # Number of candidates for non-zero temperature sampling
 
     # Quality thresholds
     compression_ratio_threshold: float = 2.4
     logprob_threshold: float = -1.0
-    no_speech_threshold: float = 0.6
+    no_speech_threshold: float = 0.5
 
     # Decoding parameters
     length_penalty: float = 1.0
+    repetition_penalty: float = 1.0
+    no_repeat_ngram_size: int = 3
     suppress_tokens: str = "-1"  # Token IDs to suppress (comma-separated or "-1" for default)
     condition_on_previous_text: bool = True
 
@@ -230,33 +266,96 @@ class TranscriptionConfig:
         """Build configuration from environment variables or a provided mapping."""
         source_env: Mapping[str, str] = env or os.environ
 
-        # Parse VAD parameters
+        # Get default VAD parameters from class defaults
+        default_vad_params = _get_dataclass_default(cls, "vad_parameters")
+        if not isinstance(default_vad_params, dict):
+            msg = f"Expected dict for vad_parameters default, got {type(default_vad_params).__name__}"
+            raise TypeError(msg)
+        default_vad_dict = cast(dict[str, float | int], default_vad_params)
+
+        # Parse VAD parameters, using class defaults
         vad_params = {
-            "min_speech_duration_ms": _parse_int(source_env.get(_TRANSCRIBE_VAD_MIN_SPEECH_DURATION_MS_ENV), 250),
-            "max_speech_duration_s": _parse_float(
-                source_env.get(_TRANSCRIBE_VAD_MAX_SPEECH_DURATION_S_ENV), float("inf")
+            "min_speech_duration_ms": _parse_int(
+                source_env.get(_TRANSCRIBE_VAD_MIN_SPEECH_DURATION_MS_ENV),
+                int(default_vad_dict["min_speech_duration_ms"]),
             ),
-            "min_silence_duration_ms": _parse_int(source_env.get(_TRANSCRIBE_VAD_MIN_SILENCE_DURATION_MS_ENV), 2000),
-            "speech_pad_ms": _parse_int(source_env.get(_TRANSCRIBE_VAD_SPEECH_PAD_MS_ENV), 400),
+            "max_speech_duration_s": _parse_float(
+                source_env.get(_TRANSCRIBE_VAD_MAX_SPEECH_DURATION_S_ENV),
+                float(default_vad_dict["max_speech_duration_s"]),
+            ),
+            "min_silence_duration_ms": _parse_int(
+                source_env.get(_TRANSCRIBE_VAD_MIN_SILENCE_DURATION_MS_ENV),
+                int(default_vad_dict["min_silence_duration_ms"]),
+            ),
+            "speech_pad_ms": _parse_int(
+                source_env.get(_TRANSCRIBE_VAD_SPEECH_PAD_MS_ENV),
+                int(default_vad_dict["speech_pad_ms"]),
+            ),
         }
 
+        # Get default temperature value (handles list case)
+        default_temperature = _get_dataclass_default(cls, "temperature")
+
         return cls(
-            beam_size=_parse_int(source_env.get(_TRANSCRIBE_BEAM_SIZE_ENV), 5),
-            patience=_parse_float(source_env.get(_TRANSCRIBE_PATIENCE_ENV), 1.0),
-            word_timestamps=_env_bool(source_env.get(_TRANSCRIBE_WORD_TIMESTAMPS_ENV), False),
-            task=source_env.get(_TRANSCRIBE_TASK_ENV, "transcribe"),
-            chunk_length=_parse_int(source_env.get(_TRANSCRIBE_CHUNK_LENGTH_ENV), 30),
-            vad_filter=_env_bool(source_env.get(_TRANSCRIBE_VAD_FILTER_ENV), True),
-            vad_threshold=_parse_float(source_env.get(_TRANSCRIBE_VAD_THRESHOLD_ENV), 0.5),
+            beam_size=_parse_int(
+                source_env.get(_TRANSCRIBE_BEAM_SIZE_ENV), cast(int, _get_dataclass_default(cls, "beam_size"))
+            ),
+            patience=_parse_float(
+                source_env.get(_TRANSCRIBE_PATIENCE_ENV), cast(float, _get_dataclass_default(cls, "patience"))
+            ),
+            word_timestamps=_env_bool(
+                source_env.get(_TRANSCRIBE_WORD_TIMESTAMPS_ENV),
+                cast(bool, _get_dataclass_default(cls, "word_timestamps")),
+            ),
+            task=source_env.get(_TRANSCRIBE_TASK_ENV, cast(str, _get_dataclass_default(cls, "task"))),
+            chunk_length=_parse_int(
+                source_env.get(_TRANSCRIBE_CHUNK_LENGTH_ENV), cast(int, _get_dataclass_default(cls, "chunk_length"))
+            ),
+            vad_filter=_env_bool(
+                source_env.get(_TRANSCRIBE_VAD_FILTER_ENV), cast(bool, _get_dataclass_default(cls, "vad_filter"))
+            ),
+            vad_threshold=_parse_float(
+                source_env.get(_TRANSCRIBE_VAD_THRESHOLD_ENV), cast(float, _get_dataclass_default(cls, "vad_threshold"))
+            ),
             vad_parameters=vad_params,
-            temperature=_parse_float(source_env.get(_TRANSCRIBE_TEMPERATURE_ENV), 0.0),
-            temperature_increment_on_fallback=_parse_float(source_env.get(_TRANSCRIBE_TEMPERATURE_INCREMENT_ENV), 0.2),
-            best_of=_parse_int(source_env.get(_TRANSCRIBE_BEST_OF_ENV), 5),
-            compression_ratio_threshold=_parse_float(source_env.get(_TRANSCRIBE_COMPRESSION_RATIO_THRESHOLD_ENV), 2.4),
-            logprob_threshold=_parse_float(source_env.get(_TRANSCRIBE_LOGPROB_THRESHOLD_ENV), -1.0),
-            no_speech_threshold=_parse_float(source_env.get(_TRANSCRIBE_NO_SPEECH_THRESHOLD_ENV), 0.6),
-            length_penalty=_parse_float(source_env.get(_TRANSCRIBE_LENGTH_PENALTY_ENV), 1.0),
-            suppress_tokens=source_env.get(_TRANSCRIBE_SUPPRESS_TOKENS_ENV, "-1"),
-            condition_on_previous_text=_env_bool(source_env.get(_TRANSCRIBE_CONDITION_ON_PREVIOUS_TEXT_ENV), True),
+            temperature=_parse_temperature(source_env.get(_TRANSCRIBE_TEMPERATURE_ENV), default_temperature),
+            temperature_increment_on_fallback=_parse_float(
+                source_env.get(_TRANSCRIBE_TEMPERATURE_INCREMENT_ENV),
+                cast(float, _get_dataclass_default(cls, "temperature_increment_on_fallback")),
+            ),
+            best_of=_parse_int(
+                source_env.get(_TRANSCRIBE_BEST_OF_ENV), cast(int, _get_dataclass_default(cls, "best_of"))
+            ),
+            compression_ratio_threshold=_parse_float(
+                source_env.get(_TRANSCRIBE_COMPRESSION_RATIO_THRESHOLD_ENV),
+                cast(float, _get_dataclass_default(cls, "compression_ratio_threshold")),
+            ),
+            logprob_threshold=_parse_float(
+                source_env.get(_TRANSCRIBE_LOGPROB_THRESHOLD_ENV),
+                cast(float, _get_dataclass_default(cls, "logprob_threshold")),
+            ),
+            no_speech_threshold=_parse_float(
+                source_env.get(_TRANSCRIBE_NO_SPEECH_THRESHOLD_ENV),
+                cast(float, _get_dataclass_default(cls, "no_speech_threshold")),
+            ),
+            length_penalty=_parse_float(
+                source_env.get(_TRANSCRIBE_LENGTH_PENALTY_ENV),
+                cast(float, _get_dataclass_default(cls, "length_penalty")),
+            ),
+            repetition_penalty=_parse_float(
+                source_env.get(_TRANSCRIBE_REPETITION_PENALTY_ENV),
+                cast(float, _get_dataclass_default(cls, "repetition_penalty")),
+            ),
+            no_repeat_ngram_size=_parse_int(
+                source_env.get(_TRANSCRIBE_NO_REPEAT_NGRAM_SIZE_ENV),
+                cast(int, _get_dataclass_default(cls, "no_repeat_ngram_size")),
+            ),
+            suppress_tokens=source_env.get(
+                _TRANSCRIBE_SUPPRESS_TOKENS_ENV, cast(str, _get_dataclass_default(cls, "suppress_tokens"))
+            ),
+            condition_on_previous_text=_env_bool(
+                source_env.get(_TRANSCRIBE_CONDITION_ON_PREVIOUS_TEXT_ENV),
+                cast(bool, _get_dataclass_default(cls, "condition_on_previous_text")),
+            ),
             initial_prompt=source_env.get(_TRANSCRIBE_INITIAL_PROMPT_ENV),
         )

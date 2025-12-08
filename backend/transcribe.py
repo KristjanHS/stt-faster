@@ -333,6 +333,24 @@ def transcribe(
         # Merge vad_threshold into vad_parameters as 'threshold'
         vad_params = dict(transcription_config.vad_parameters)
         vad_params["threshold"] = transcription_config.vad_threshold
+
+        # Parse suppress_tokens from string to list[int] or None
+        # faster-whisper expects Optional[List[int]], default is [-1]
+        suppress_tokens_list: list[int] | None = None
+        if transcription_config.suppress_tokens:
+            if transcription_config.suppress_tokens == "-1":
+                suppress_tokens_list = [-1]  # Default value
+            else:
+                # Parse comma-separated token IDs
+                try:
+                    suppress_tokens_list = [int(t.strip()) for t in transcription_config.suppress_tokens.split(",")]
+                except ValueError:
+                    LOGGER.warning(
+                        "Invalid suppress_tokens format '%s', using default [-1]",
+                        transcription_config.suppress_tokens,
+                    )
+                    suppress_tokens_list = [-1]
+
         segments, info = model.transcribe(
             str(preprocess_result.output_path),
             beam_size=transcription_config.beam_size,
@@ -344,13 +362,14 @@ def transcribe(
             vad_filter=transcription_config.vad_filter,
             vad_parameters=vad_params,
             temperature=transcription_config.temperature,
-            temperature_increment_on_fallback=transcription_config.temperature_increment_on_fallback,
             compression_ratio_threshold=transcription_config.compression_ratio_threshold,
-            logprob_threshold=transcription_config.logprob_threshold,
+            log_prob_threshold=transcription_config.logprob_threshold,
             no_speech_threshold=transcription_config.no_speech_threshold,
             best_of=transcription_config.best_of,
             length_penalty=transcription_config.length_penalty,
-            suppress_tokens=transcription_config.suppress_tokens,
+            repetition_penalty=transcription_config.repetition_penalty,
+            no_repeat_ngram_size=transcription_config.no_repeat_ngram_size,
+            suppress_tokens=suppress_tokens_list,
             condition_on_previous_text=transcription_config.condition_on_previous_text,
             initial_prompt=transcription_config.initial_prompt,
         )
