@@ -14,18 +14,13 @@ echo Processing audio files in: %~dp0
 echo.
 
 REM Run the transcription script via WSL (uses default et-large preset)
-REM Set HF_HOME to use the correct cache location
-REM Force Estonian language to avoid auto-detection errors
-REM Enable light audio pre-processing (downmix/resample + loudnorm)
-REM Save preprocessing stage outputs for quality debugging
-REM Output both txt and json formats
-wsl -e bash -c ^
-  "export STT_PREPROCESS_ENABLED=1 && ^
-   export HF_HOME=\"$HOME/.cache/hf\" && ^
-   export HF_HUB_CACHE=\"$HF_HOME/hub\" && ^
-   export STT_PREPROCESS_OUTPUT_DIR=\"/mnt/c/Users/PC/Downloads/transcribe/preprocess_stages\" && ^
-   cd /home/kristjans/projects/stt-faster && ^
-   .venv/bin/python scripts/transcribe_manager.py process /mnt/c/Users/PC/Downloads/transcribe --language et --output-format both"
+REM Environment variables:
+REM   STT_PREPROCESS_ENABLED=1 - Enable audio preprocessing pipeline
+REM   HF_HOME - Hugging Face cache location
+REM   HF_HUB_CACHE - Hugging Face hub cache
+REM   STT_PREPROCESS_OUTPUT_DIR - Save preprocessing stage outputs (01_downmix, 02_loudnorm, 03_denoise)
+REM Output: Both txt and json formats
+wsl -e bash -c "export STT_PREPROCESS_ENABLED=1 && export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && export STT_PREPROCESS_OUTPUT_DIR=\"/mnt/c/Users/PC/Downloads/transcribe/preprocess_stages\" && cd /home/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process /home/Downloads/transcribe --language et --output-format both"
 
 echo.
 echo ========================================
