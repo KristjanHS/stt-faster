@@ -231,13 +231,13 @@ class TranscriptionConfig:
 
     # VAD (Voice Activity Detection) parameters
     vad_filter: bool = True
-    vad_threshold: float = 0.35  # Speech probability threshold for VAD
+    vad_threshold: float = 0.30  # was 0.35  Speech probability threshold for VAD
     vad_parameters: dict[str, float | int] = field(
         default_factory=lambda: {
-            "min_speech_duration_ms": 250,
-            "max_speech_duration_s": float("inf"),
-            "min_silence_duration_ms": 800,
-            "speech_pad_ms": 300,
+            "min_speech_duration_ms": 200,  # was 250
+            "max_speech_duration_s": 30,  # was float("inf"),
+            "min_silence_duration_ms": 700,  # was 800
+            "speech_pad_ms": 500,  # was 300
         }
     )
 

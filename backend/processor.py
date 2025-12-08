@@ -474,6 +474,14 @@ class TranscriptionProcessor:
 
         except DatabaseError as exc:
             LOGGER.warning("Failed to record run metadata: %s", exc)
+            run_id = None
 
-        # Return stats for display/logging if needed, though structure has changed
-        return {"updated_db": True, "run_id": locals().get("run_id")}
+        # Return stats for display/logging
+        return {
+            "updated_db": True,
+            "run_id": run_id,
+            "total_processing_time": total_processing_time,
+            "total_preprocess_time": preprocess_time_total,
+            "total_transcribe_time": transcribe_time_total,
+            "average_speed_ratio": average_speed_ratio,
+        }
