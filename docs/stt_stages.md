@@ -10,7 +10,7 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 | **Preprocessing** | Target channels | `None` | `1` | Auto/inherit, env: `STT_PREPROCESS_TARGET_CH` |
 | **Preprocessing** | Profile | `cpu` | `auto` | env: `STT_PREPROCESS_PROFILE` |
 | **Preprocessing** | Loudnorm preset | `default` | N/A | env: `STT_PREPROCESS_LOUDNORM_PRESET` |
-| **Preprocessing** | RNNoise model | `models/general.rnnn` | `models/general.rnnn` | env: `STT_PREPROCESS_RNNOISE_MODEL` (class default: `models/sh.rnnn`) |
+| **Preprocessing** | RNNoise model | `models/sh.rnnn` | `models/sh.rnnn` | env: `STT_PREPROCESS_RNNOISE_MODEL` (default: `models/sh.rnnn`) |
 | **Preprocessing** | RNNoise mix | `0.5` | `0.5` | Denoising strength (0.0-1.0), env: `STT_PREPROCESS_RNNOISE_MIX` |
 | **Downmix/Resample** | Target sample rate | `16000` Hz | `16000` Hz | From config |
 | **Downmix/Resample** | Target channels | Auto/inherit or `1` | `1` | Resolved from config |

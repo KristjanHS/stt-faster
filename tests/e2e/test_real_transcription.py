@@ -13,6 +13,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.preprocess.config import PreprocessConfig
+
 
 @pytest.mark.slow
 @pytest.mark.network
@@ -50,6 +52,13 @@ class TestRealTranscription:
         )
 
         output = result.stdout + result.stderr
+
+        # Verify that PreprocessConfig defaults to sh.rnnn
+        # This ensures the e2e test uses the correct default model
+        config = PreprocessConfig.from_env()
+        assert config.rnnoise_model == "models/sh.rnnn", (
+            f"Expected default rnnoise_model to be 'models/sh.rnnn', got '{config.rnnoise_model}'"
+        )
 
         # Check if transcription succeeded
         if result.returncode == 0:

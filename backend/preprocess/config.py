@@ -205,7 +205,7 @@ class PreprocessConfig:
             output_dir=source_env.get(_PREPROCESS_OUTPUT_DIR_ENV),
             profile=_env_profile(source_env.get(_PREPROCESS_PROFILE_ENV)),
             loudnorm_preset=_normalize_loudnorm_preset(source_env.get(_PREPROCESS_LOUDNORM_PRESET_ENV)),
-            rnnoise_model=source_env.get(_PREPROCESS_RNNOISE_MODEL_ENV) or "models/general.rnnn",
+            rnnoise_model=source_env.get(_PREPROCESS_RNNOISE_MODEL_ENV) or "models/sh.rnnn",
             rnnoise_mix=float(source_env.get(_PREPROCESS_RNNOISE_MIX_ENV) or _RNNOISE_MIX_DEFAULT),
         )
 
