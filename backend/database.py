@@ -362,10 +362,35 @@ class TranscriptionDatabase:
                 ALTER TABLE file_metrics ALTER COLUMN id SET DEFAULT nextval('seq_file_metrics_id');
             """)
 
+            # Migrate existing tables: add missing columns if they don't exist
+            self._migrate_schema()
+
             LOGGER.info("DuckDB initialized at %s", self.db_path)
         except Exception as e:
             msg = f"Failed to initialize database at {self.db_path}: {e}"
             raise DatabaseError(msg) from e
+
+    def _migrate_schema(self) -> None:
+        """Migrate existing database schema by adding missing columns."""
+        if self.conn is None:
+            return
+
+        try:
+            # Check if file_metrics table exists by trying to describe it
+            try:
+                columns_result = self.conn.execute("DESCRIBE file_metrics").fetchall()
+                existing_columns = {row[0] for row in columns_result}
+            except Exception:
+                # Table doesn't exist yet, no migration needed
+                return
+
+            # Add rnnoise_model column if it doesn't exist
+            if "rnnoise_model" not in existing_columns:
+                LOGGER.info("Migrating schema: adding rnnoise_model column to file_metrics")
+                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_model VARCHAR")
+        except Exception as e:
+            # Log but don't fail - migration errors shouldn't break initialization
+            LOGGER.warning("Schema migration encountered an issue: %s", e)
 
     def add_file(self, file_path: str, status: str = "pending") -> None:
         """Add a file to track or update its status if it exists.
