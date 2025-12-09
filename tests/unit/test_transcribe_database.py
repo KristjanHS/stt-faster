@@ -900,26 +900,22 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
     columns_text = match.group(1)
     insert_columns = {col.strip() for col in columns_text.split(",") if col.strip()}
 
-    # This should catch the missing column
+    # After migration, all INSERT columns should exist in the database
+    # This test enforces that migrations actually add missing columns
     missing_in_db = insert_columns - db_columns
 
-    if missing_in_db:
-        # The test successfully detected the missing column!
-        # This is what we want - it would have caught the production error
-        assert "loudnorm_target_lra" in missing_in_db, (
-            f"Expected to find 'loudnorm_target_lra' in missing columns, but found: {missing_in_db}"
-        )
-        # This assertion will pass, demonstrating the test works
-        # In production, this would have been caught before deployment
-        return
-
-    # If we get here, either:
-    # 1. Migration added the column (good - migration works)
-    # 2. Column was never missing (unexpected)
-    # Let's verify the column exists
+    # Verify that loudnorm_target_lra was added by migration
     assert "loudnorm_target_lra" in db_columns, (
         "Column loudnorm_target_lra should exist after migration. "
-        "If migration doesn't add it, the schema consistency test would catch it."
+        "The migration must add this column to prevent production errors. "
+        "If this test fails, add loudnorm_target_lra to _migrate_schema() in database.py"
+    )
+
+    # If there are any other missing columns, that's also a problem
+    # (though the main schema consistency test should catch most of these)
+    assert not missing_in_db, (
+        f"Migration did not add all required columns. Missing: {missing_in_db}. "
+        f"This will cause production errors. Add these columns to _migrate_schema() in database.py"
     )
 
     db.close()

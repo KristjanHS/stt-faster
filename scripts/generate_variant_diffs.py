@@ -28,6 +28,9 @@ VARIANT_DESCRIPTIONS = {
     "noprep_noparamtrans": "No preprocessing + minimal transcription parameters",
     "normonly_noparamtrans": "Only normalization + minimal transcription parameters",
     "onlyden_noparamtrans": "Only denoise + minimal transcription parameters",
+    "noprep_noparamtrans_thres1": "No preprocessing + minimal params + no_speech_threshold=0.5",
+    "noprep_noparamtrans_chunk1": "No preprocessing + minimal params + chunk_length=20",
+    "noprep_noparamtrans_condprev1": "No preprocessing + minimal params + condition_on_previous_text=False",
 }
 
 

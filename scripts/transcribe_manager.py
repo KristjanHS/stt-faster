@@ -14,17 +14,47 @@ import logging
 import sys
 from pathlib import Path
 
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
 from backend.variants.registry import get_variant_by_number
 
-# Setup logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="[%(asctime)s] %(levelname)s [%(name)s] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+# Rich console for structured output
+console = Console()
+
+# Setup logging - will be configured based on verbose flag
 LOGGER = logging.getLogger(__name__)
+
+
+def _configure_logging(verbose: bool) -> None:
+    """Configure logging levels based on verbosity.
+
+    Args:
+        verbose: If True, show DEBUG logs. If False, show only WARNING+ for noisy modules.
+    """
+    if verbose:
+        level = logging.DEBUG
+    else:
+        level = logging.INFO
+        # Reduce noise from internal modules in non-verbose mode
+        logging.getLogger("backend.processor").setLevel(logging.WARNING)
+        logging.getLogger("backend.database").setLevel(logging.WARNING)
+        logging.getLogger("backend.model_loader").setLevel(logging.WARNING)
+        logging.getLogger("faster_whisper").setLevel(logging.WARNING)
+        # Keep important progress loggers at INFO
+        logging.getLogger("backend.variants.executor").setLevel(logging.INFO)
+        logging.getLogger("backend.variants.preprocess_steps").setLevel(logging.INFO)
+
+    # Configure root logger
+    logging.basicConfig(
+        level=level,
+        format="[%(asctime)s] %(levelname)s [%(name)s] %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+        force=True,  # Override any existing configuration
+    )
 
 
 def cmd_process(args: argparse.Namespace) -> int:
@@ -36,34 +66,49 @@ def cmd_process(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for failure)
     """
+    # Configure logging based on verbosity
+    _configure_logging(getattr(args, "verbose", False))
+
     input_folder = Path(args.input_folder)
 
     if not input_folder.exists():
-        LOGGER.error("Input folder does not exist: %s", input_folder)
+        console.print(f"[red]Error:[/red] Input folder does not exist: {input_folder}")
         return 1
 
     if not input_folder.is_dir():
-        LOGGER.error("Input path is not a directory: %s", input_folder)
+        console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
-
-    LOGGER.info("Starting transcription processing")
-    LOGGER.info("Input folder: %s", input_folder)
-    LOGGER.info("Model preset: %s", args.preset)
 
     # Get variant - default to variant 7 if not specified
     if args.variant is not None:
         variant = get_variant_by_number(args.variant)
         if variant is None:
-            LOGGER.error("Invalid variant number: %d", args.variant)
+            console.print(f"[red]Error:[/red] Invalid variant number: {args.variant}")
             return 1
-        LOGGER.info("Using variant %d: %s", variant.number, variant.name)
     else:
         # Default to variant 7 (no preprocessing + minimal transcription parameters)
         variant = get_variant_by_number(7)
         if variant is None:
-            LOGGER.error("Failed to load default variant 7")
+            console.print("[red]Error:[/red] Failed to load default variant 7")
             return 1
-        LOGGER.info("Using default variant %d: %s", variant.number, variant.name)
+
+    # Display configuration using Rich
+    config_table = Table.grid(padding=(0, 2))
+    config_table.add_row("[bold]Input folder:[/bold]", str(input_folder))
+    config_table.add_row("[bold]Model preset:[/bold]", args.preset)
+    config_table.add_row("[bold]Variant:[/bold]", f"{variant.number}: {variant.name}")
+    if args.language:
+        config_table.add_row("[bold]Language:[/bold]", args.language)
+    config_table.add_row("[bold]Output format:[/bold]", args.output_format)
+
+    console.print("\n[bold]Transcription Configuration[/bold]")
+    console.print(Panel(config_table, border_style="blue", padding=(0, 1)))
+    console.print()
+
+    LOGGER.debug("Starting transcription processing")
+    LOGGER.debug("Input folder: %s", input_folder)
+    LOGGER.debug("Model preset: %s", args.preset)
+    LOGGER.debug("Using variant %d: %s", variant.number, variant.name)
 
     try:
         with TranscriptionDatabase(args.db_path) as db:
@@ -77,29 +122,53 @@ def cmd_process(args: argparse.Namespace) -> int:
             )
             results = processor.process_folder()
 
-            LOGGER.info("=" * 60)
-            LOGGER.info("Processing Summary:")
-            LOGGER.info("  Files found: %d", results.get("files_found", 0))
-            LOGGER.info("  Successfully processed: %d", results.get("succeeded", 0))
-            LOGGER.info("  Failed: %d", results.get("failed", 0))
-            LOGGER.info("=" * 60)
+            # Display summary using Rich
+            console.print()
+            summary_table = Table.grid(padding=(0, 2))
+            summary_table.add_row("[bold]Files found:[/bold]", str(results.get("files_found", 0)))
+            summary_table.add_row(
+                "[bold]Successfully processed:[/bold]", f"[green]{results.get('succeeded', 0)}[/green]"
+            )
+            summary_table.add_row("[bold]Failed:[/bold]", f"[red]{results.get('failed', 0)}[/red]")
+
+            console.print("[bold]Processing Summary[/bold]")
+            console.print(Panel(summary_table, border_style="green", padding=(0, 1)))
 
             run_stats = results.get("run_statistics")
             if run_stats:
-                LOGGER.info(
-                    "Run stats: %.2f s total, %.2f s preprocess, %.2f s transcription, avg %.2f x speed",
-                    run_stats.get("total_processing_time", 0),
-                    run_stats.get("total_preprocess_time", 0),
-                    run_stats.get("total_transcribe_time", 0),
-                    float(run_stats.get("average_speed_ratio") or 0),
+                stats_table = Table.grid(padding=(0, 2))
+                stats_table.add_row(
+                    "[bold]Total time:[/bold]",
+                    f"{run_stats.get('total_processing_time', 0):.2f} s",
+                )
+                stats_table.add_row(
+                    "[bold]Preprocessing:[/bold]",
+                    f"{run_stats.get('total_preprocess_time', 0):.2f} s",
+                )
+                stats_table.add_row(
+                    "[bold]Transcription:[/bold]",
+                    f"{run_stats.get('total_transcribe_time', 0):.2f} s",
+                )
+                stats_table.add_row(
+                    "[bold]Average speed:[/bold]",
+                    f"{float(run_stats.get('average_speed_ratio') or 0):.2f}x realtime",
                 )
                 if run_stats.get("detected_languages"):
-                    LOGGER.info("Detected languages: %s", run_stats["detected_languages"])
+                    stats_table.add_row(
+                        "[bold]Detected languages:[/bold]",
+                        ", ".join(run_stats["detected_languages"]),
+                    )
+
+                console.print()
+                console.print("[bold]Run Statistics[/bold]")
+                console.print(Panel(stats_table, border_style="cyan", padding=(0, 1)))
 
         return 0
 
     except Exception as error:
-        LOGGER.error("Processing failed: %s", error, exc_info=True)
+        console.print(f"[red]Processing failed:[/red] {error}")
+        if getattr(args, "verbose", False):
+            LOGGER.exception("Full error details:")
         return 1
 
 
@@ -207,6 +276,12 @@ def create_parser() -> argparse.ArgumentParser:
             "Variant number to use (1-16). "
             "Default: 7 (no preprocessing + minimal transcription parameters without VAD filter)."
         ),
+    )
+    process_parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Show detailed debug logs (default: show only important progress)",
     )
 
     # Status command
