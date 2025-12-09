@@ -50,14 +50,20 @@ def cmd_process(args: argparse.Namespace) -> int:
     LOGGER.info("Input folder: %s", input_folder)
     LOGGER.info("Model preset: %s", args.preset)
 
-    # Get variant if specified
-    variant = None
+    # Get variant - default to variant 7 if not specified
     if args.variant is not None:
         variant = get_variant_by_number(args.variant)
         if variant is None:
             LOGGER.error("Invalid variant number: %d", args.variant)
             return 1
         LOGGER.info("Using variant %d: %s", variant.number, variant.name)
+    else:
+        # Default to variant 7 (no preprocessing + minimal transcription parameters)
+        variant = get_variant_by_number(7)
+        if variant is None:
+            LOGGER.error("Failed to load default variant 7")
+            return 1
+        LOGGER.info("Using default variant %d: %s", variant.number, variant.name)
 
     try:
         with TranscriptionDatabase(args.db_path) as db:
@@ -197,7 +203,10 @@ def create_parser() -> argparse.ArgumentParser:
         "--variant",
         type=int,
         default=None,
-        help="Variant number to use (1-16). Variant 7 uses minimal transcription parameters without VAD filter.",
+        help=(
+            "Variant number to use (1-16). "
+            "Default: 7 (no preprocessing + minimal transcription parameters without VAD filter)."
+        ),
     )
 
     # Status command

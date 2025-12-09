@@ -37,20 +37,19 @@ echo ========================================
 echo.
 echo Model: TalTech Estonian Whisper (large-v3-turbo)
 echo Language: Estonian
-echo Pre-processing: enabled (downmix/resample + loudnorm)
+echo Variant: 16 (2-pass loudnorm in linear mode + minimal params)
 echo Processing audio files in: %SCRIPT_DIR%
 echo WSL path: !WSL_INPUT_DIR!
 echo.
 
-REM Run the transcription script via WSL (uses default et-large preset)
+REM Run the transcription script via WSL with variant 16
 REM Environment variables:
-REM   STT_PREPROCESS_ENABLED=1 - Enable audio preprocessing pipeline
 REM   HF_HOME - Hugging Face cache location
 REM   HF_HUB_CACHE - Hugging Face hub cache
-REM   STT_PREPROCESS_OUTPUT_DIR - Save preprocessing stage outputs (01_downmix, 02_loudnorm, 03_denoise)
 REM Output: Both txt and json formats
 REM Note: Using delayed expansion variable with single quotes in bash command
-wsl -e bash -c "export STT_PREPROCESS_ENABLED=1 && export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && export STT_PREPROCESS_OUTPUT_DIR=\"'!WSL_INPUT_DIR!'/preprocess_stages\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --language et --output-format both"
+REM Variant 16: 2-pass loudnorm in linear mode (I=-24, TP=-2, LRA=15) + minimal transcription parameters
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --language et --output-format both --variant 16"
 
 echo.
 echo ========================================

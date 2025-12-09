@@ -309,12 +309,26 @@ def _loudnorm_2pass_linear(
     target_sample_rate: int,
     target_channels: int,
     loudnorm_preset: str = "default",
+    *,
+    target_i: float | None = None,
+    target_tp: float | None = None,
+    target_lra: float | None = None,
 ) -> StepMetrics:
     """2-pass loudnorm in linear mode: first pass measures I/LRA/TP, second pass applies file-wide gain.
 
     First pass: measure I/LRA/TP/threshold.
     Second pass: set linear=true and reuse measured_I/LRA/TP/threshold.
     This becomes a simple, file-wide gain change instead of frame-by-frame AGC.
+
+    Args:
+        input_path: Input audio file path
+        output_path: Output audio file path
+        target_sample_rate: Target sample rate in Hz
+        target_channels: Target number of channels
+        loudnorm_preset: Preset name (used if custom values not provided)
+        target_i: Optional custom integrated loudness target (LUFS)
+        target_tp: Optional custom true peak target (dB)
+        target_lra: Optional custom loudness range target (LU)
     """
     import json
 
@@ -324,24 +338,24 @@ def _loudnorm_2pass_linear(
 
     start = time.time()
     try:
-        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-        target_i = preset_config["I"]
-        target_tp = preset_config.get("TP", -2.0)
-        target_lra = preset_config["LRA"]
+        # Use custom values if provided, otherwise use preset
+        if target_i is None or target_tp is None or target_lra is None:
+            preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+            target_i = target_i if target_i is not None else preset_config["I"]
+            target_tp = target_tp if target_tp is not None else preset_config.get("TP", -2.0)
+            target_lra = target_lra if target_lra is not None else preset_config["LRA"]
 
         # First pass: measure I/LRA/TP/threshold
-        # Use loudnorm with print_format=json to get measurements
-        first_pass_filter = (
-            f"aresample=resampler=soxr:osr={target_sample_rate},"
-            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json"
-        )
+        # Use loudnorm with print_format=json to get measurements (no target values needed for measurement)
+        first_pass_filter = f"aresample=resampler=soxr:osr={target_sample_rate},loudnorm=print_format=json"
 
         # Run first pass to null output (we only need the JSON stats)
+        # Force mono (ac=1) for Whisper/faster-whisper compatibility
         stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
         stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             "null",
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=first_pass_filter,
             ar=target_sample_rate,
             f="null",
@@ -388,21 +402,28 @@ def _loudnorm_2pass_linear(
         measured_lra = measurements.get("input_lra", target_lra)
         measured_tp = measurements.get("input_tp", target_tp)
         measured_thresh = measurements.get("input_thresh", -70.0)
+        measured_offset = measurements.get("target_offset", None)
 
         # Second pass: apply linear mode with measured values
         # linear=true makes it a simple file-wide gain change
+        # offset ensures precise target IL and predictable behavior
+        # Use measured LRA to ensure target LRA ≥ measured LRA (required for linear mode)
+        # This avoids extra compression and ensures linear=true stays in effect
         second_pass_filter = (
             f"aresample=resampler=soxr:osr={target_sample_rate},"
-            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={measured_lra}:"
             f"measured_I={measured_i}:measured_LRA={measured_lra}:"
             f"measured_TP={measured_tp}:measured_thresh={measured_thresh}:linear=true"
         )
+        # Add offset if available from first pass
+        if measured_offset is not None:
+            second_pass_filter += f":offset={measured_offset}"
 
         stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
         stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=second_pass_filter,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -795,12 +816,19 @@ def create_preprocess_runner(
                 elif step.step_type == "loudnorm_2pass_linear":
                     # 2-pass loudnorm in linear mode step
                     intermediate_path = Path(temp_dir.name) / f"loudnorm_2pass_linear_{step_index}.wav"
+                    # Get custom loudnorm values from step config if provided
+                    custom_i = step.config.get("I") if step.config else None
+                    custom_tp = step.config.get("TP") if step.config else None
+                    custom_lra = step.config.get("LRA") if step.config else None
                     step_metric = _loudnorm_2pass_linear(
                         input_path=current_path,
                         output_path=intermediate_path,
                         target_sample_rate=merged_config.target_sample_rate,
                         target_channels=resolved_channels,
                         loudnorm_preset=merged_config.loudnorm_preset,
+                        target_i=custom_i,
+                        target_tp=custom_tp,
+                        target_lra=custom_lra,
                     )
                     step_metrics.append(step_metric)
                     current_path = intermediate_path

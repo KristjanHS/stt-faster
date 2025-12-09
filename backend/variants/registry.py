@@ -166,7 +166,12 @@ def get_builtin_variants() -> list[Variant]:
             number=16,
             description="lnorm2p_linear_noparam",
             preprocess_steps=[
-                PreprocessStep(name="loudnorm_2pass_linear", enabled=True, step_type="loudnorm_2pass_linear"),
+                PreprocessStep(
+                    name="loudnorm_2pass_linear",
+                    enabled=True,
+                    step_type="loudnorm_2pass_linear",
+                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                ),
             ],
             transcription_preset="minimal",
         ),

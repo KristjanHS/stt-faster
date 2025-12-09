@@ -519,6 +519,7 @@ class TranscriptionProcessor:
                     # Record failed files with basic info if needed,
                     # but FileMetricRecord ensures we have a path and status.
                     # We can create a skeleton record for failures.
+                    # Set required NOT NULL fields from config_snapshot
                     file_record = FileMetricRecord(
                         run_id=run_id,
                         recorded_at=datetime.now(timezone.utc),
@@ -526,6 +527,13 @@ class TranscriptionProcessor:
                         preset=self.preset,
                         status=entry.status,
                         error_message=entry.error_message,
+                        # Required NOT NULL fields
+                        total_processing_time=0.0,
+                        transcribe_duration=0.0,
+                        preprocess_duration=0.0,
+                        preprocess_enabled=config_snapshot.enabled,
+                        preprocess_profile=config_snapshot.profile,
+                        target_sample_rate=config_snapshot.target_sample_rate,
                     )
                 else:
                     m = entry.metrics
