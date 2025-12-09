@@ -40,7 +40,28 @@ class RunRecord:
 
     # Transcription Config
     beam_size: int | None = None
+    patience: float | None = None
     word_timestamps: bool | None = None
+    task: str | None = None
+    chunk_length: int | None = None
+    vad_filter: bool | None = None
+    vad_threshold: float | None = None
+    vad_min_speech_duration_ms: int | None = None
+    vad_max_speech_duration_s: float | None = None
+    vad_min_silence_duration_ms: int | None = None
+    vad_speech_pad_ms: int | None = None
+    temperature: str | None = None  # Stored as JSON string for list[float] support
+    temperature_increment_on_fallback: float | None = None
+    best_of: int | None = None
+    compression_ratio_threshold: float | None = None
+    logprob_threshold: float | None = None
+    no_speech_threshold: float | None = None
+    length_penalty: float | None = None
+    repetition_penalty: float | None = None
+    no_repeat_ngram_size: int | None = None
+    suppress_tokens: str | None = None
+    condition_on_previous_text: bool | None = None
+    initial_prompt: str | None = None
 
     # Batch Aggregates (Outcomes)
     files_found: int = 0
@@ -246,7 +267,28 @@ class TranscriptionDatabase:
                     compute_type VARCHAR,
 
                     beam_size INTEGER,
+                    patience DOUBLE,
                     word_timestamps BOOLEAN,
+                    task VARCHAR,
+                    chunk_length INTEGER,
+                    vad_filter BOOLEAN,
+                    vad_threshold DOUBLE,
+                    vad_min_speech_duration_ms INTEGER,
+                    vad_max_speech_duration_s DOUBLE,
+                    vad_min_silence_duration_ms INTEGER,
+                    vad_speech_pad_ms INTEGER,
+                    temperature VARCHAR,
+                    temperature_increment_on_fallback DOUBLE,
+                    best_of INTEGER,
+                    compression_ratio_threshold DOUBLE,
+                    logprob_threshold DOUBLE,
+                    no_speech_threshold DOUBLE,
+                    length_penalty DOUBLE,
+                    repetition_penalty DOUBLE,
+                    no_repeat_ngram_size INTEGER,
+                    suppress_tokens VARCHAR,
+                    condition_on_previous_text BOOLEAN,
+                    initial_prompt VARCHAR,
 
                     -- Aggregates
                     files_found INTEGER NOT NULL,
@@ -376,13 +418,13 @@ class TranscriptionDatabase:
             return
 
         try:
-            # Check if file_metrics table exists by trying to describe it
+            # Migrate file_metrics table
             try:
                 columns_result = self.conn.execute("DESCRIBE file_metrics").fetchall()
-                existing_columns = {row[0] for row in columns_result}
+                existing_columns: set[str] = {row[0] for row in columns_result}
             except Exception:
                 # Table doesn't exist yet, no migration needed
-                return
+                existing_columns = set()
 
             # Add rnnoise_model column if it doesn't exist
             if "rnnoise_model" not in existing_columns:
@@ -398,6 +440,58 @@ class TranscriptionDatabase:
             if "loudnorm_target_lra" not in existing_columns:
                 LOGGER.debug("Migrating schema: adding loudnorm_target_lra column to file_metrics")
                 self.conn.execute("ALTER TABLE file_metrics ADD COLUMN loudnorm_target_lra DOUBLE")
+
+            # Migrate runs table - add missing transcription parameters
+            try:
+                runs_columns_result = self.conn.execute("DESCRIBE runs").fetchall()
+                runs_existing_columns: set[str] = {row[0] for row in runs_columns_result}
+            except Exception:
+                # Table doesn't exist yet, no migration needed
+                runs_existing_columns = set()
+
+            # List of new transcription parameter columns to add
+            # Using hardcoded strings for each column to match existing migration pattern
+            # and avoid any potential SQL injection risks
+            new_columns_to_add = {
+                "patience": "DOUBLE",
+                "task": "VARCHAR",
+                "chunk_length": "INTEGER",
+                "vad_filter": "BOOLEAN",
+                "vad_threshold": "DOUBLE",
+                "vad_min_speech_duration_ms": "INTEGER",
+                "vad_max_speech_duration_s": "DOUBLE",
+                "vad_min_silence_duration_ms": "INTEGER",
+                "vad_speech_pad_ms": "INTEGER",
+                "temperature": "VARCHAR",
+                "temperature_increment_on_fallback": "DOUBLE",
+                "best_of": "INTEGER",
+                "compression_ratio_threshold": "DOUBLE",
+                "logprob_threshold": "DOUBLE",
+                "no_speech_threshold": "DOUBLE",
+                "length_penalty": "DOUBLE",
+                "repetition_penalty": "DOUBLE",
+                "no_repeat_ngram_size": "INTEGER",
+                "suppress_tokens": "VARCHAR",
+                "condition_on_previous_text": "BOOLEAN",
+                "initial_prompt": "VARCHAR",
+            }
+
+            for column_name, column_type in new_columns_to_add.items():
+                if column_name not in runs_existing_columns:
+                    LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
+                    # Use hardcoded SQL statements matching existing migration pattern
+                    # This avoids any potential SQL injection risks
+                    if column_type == "DOUBLE":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
+                    elif column_type == "VARCHAR":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
+                    elif column_type == "INTEGER":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
+                    elif column_type == "BOOLEAN":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
+                    else:
+                        LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+
         except Exception as e:
             # Log but don't fail - migration errors shouldn't break initialization
             LOGGER.warning("Schema migration encountered an issue: %s", e)
@@ -686,7 +780,13 @@ class TranscriptionDatabase:
                     preset, language,
                     preprocess_enabled, preprocess_profile, target_sample_rate, target_channels, loudnorm_preset,
                     model_id, device, compute_type,
-                    beam_size, word_timestamps,
+                    beam_size, patience, word_timestamps, task, chunk_length,
+                    vad_filter, vad_threshold, vad_min_speech_duration_ms, vad_max_speech_duration_s,
+                    vad_min_silence_duration_ms, vad_speech_pad_ms,
+                    temperature, temperature_increment_on_fallback, best_of,
+                    compression_ratio_threshold, logprob_threshold, no_speech_threshold,
+                    length_penalty, repetition_penalty, no_repeat_ngram_size,
+                    suppress_tokens, condition_on_previous_text, initial_prompt,
                     files_found, succeeded, failed,
                     total_processing_time,
                     total_preprocess_time,
@@ -698,7 +798,13 @@ class TranscriptionDatabase:
                     ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?
                 )
@@ -718,7 +824,28 @@ class TranscriptionDatabase:
                     record.device,
                     record.compute_type,
                     record.beam_size,
+                    record.patience,
                     int(record.word_timestamps) if record.word_timestamps is not None else None,
+                    record.task,
+                    record.chunk_length,
+                    int(record.vad_filter) if record.vad_filter is not None else None,
+                    record.vad_threshold,
+                    record.vad_min_speech_duration_ms,
+                    record.vad_max_speech_duration_s,
+                    record.vad_min_silence_duration_ms,
+                    record.vad_speech_pad_ms,
+                    record.temperature,
+                    record.temperature_increment_on_fallback,
+                    record.best_of,
+                    record.compression_ratio_threshold,
+                    record.logprob_threshold,
+                    record.no_speech_threshold,
+                    record.length_penalty,
+                    record.repetition_penalty,
+                    record.no_repeat_ngram_size,
+                    record.suppress_tokens,
+                    int(record.condition_on_previous_text) if record.condition_on_previous_text is not None else None,
+                    record.initial_prompt,
                     record.files_found,
                     record.succeeded,
                     record.failed,
