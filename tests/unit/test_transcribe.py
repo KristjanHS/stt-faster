@@ -17,8 +17,8 @@ from backend.transcribe import (
     TranscriptionMetrics,
     _get_estonian_model_path,
     _round_floats,
-    _segment_to_payload,
     pick_model,
+    segment_to_payload,
     transcribe,
     transcribe_to_json,
 )
@@ -288,13 +288,13 @@ class TestRoundFloats:
 
 
 class TestSegmentToPayload:
-    """Tests for _segment_to_payload function."""
+    """Tests for segment_to_payload function."""
 
     def test_basic_segment(self) -> None:
         """Test conversion of a basic segment."""
         segment = FakeSegment(1, 0.0, 5.123456, "  Hello world  ")
 
-        result = _segment_to_payload(segment)
+        result = segment_to_payload(segment)
 
         assert result == {
             "id": 1,
@@ -307,7 +307,7 @@ class TestSegmentToPayload:
         """Test segment with speaker information."""
         segment = FakeSegment(2, 5.0, 10.5, "Speaker text", speaker="SPEAKER_01")
 
-        result = _segment_to_payload(segment)
+        result = segment_to_payload(segment)
 
         assert result == {
             "id": 2,
@@ -321,7 +321,7 @@ class TestSegmentToPayload:
         """Test that None values are excluded from payload."""
         segment = FakeSegment(None, 1.0, None, "text")
 
-        result = _segment_to_payload(segment)
+        result = segment_to_payload(segment)
 
         assert result == {"start": 1.0, "text": "text"}
         assert "id" not in result
@@ -332,7 +332,7 @@ class TestSegmentToPayload:
         """Test that segment text is properly stripped."""
         segment = FakeSegment(1, 0.0, 1.0, "\n\t  Whitespace everywhere  \t\n")
 
-        result = _segment_to_payload(segment)
+        result = segment_to_payload(segment)
 
         assert result["text"] == "Whitespace everywhere"
 

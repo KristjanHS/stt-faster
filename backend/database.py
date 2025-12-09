@@ -388,6 +388,11 @@ class TranscriptionDatabase:
             if "rnnoise_model" not in existing_columns:
                 LOGGER.info("Migrating schema: adding rnnoise_model column to file_metrics")
                 self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_model VARCHAR")
+
+            # Add rnnoise_mix column if it doesn't exist
+            if "rnnoise_mix" not in existing_columns:
+                LOGGER.info("Migrating schema: adding rnnoise_mix column to file_metrics")
+                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_mix DOUBLE")
         except Exception as e:
             # Log but don't fail - migration errors shouldn't break initialization
             LOGGER.warning("Schema migration encountered an issue: %s", e)

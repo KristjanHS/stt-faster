@@ -293,3 +293,293 @@ def test_schema_migration_adds_rnnoise_model_column(tmp_path: Path) -> None:
     assert result[0] == "models/sh.rnnn"
 
     db.close()
+
+
+def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
+    """Test that migration adds rnnoise_mix column to existing databases."""
+    db_path = tmp_path / "test_migration_mix.db"
+
+    # Create a database with old schema (without rnnoise_mix column)
+    # This simulates an existing database created before rnnoise_mix was added
+    conn = duckdb.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_metrics (
+            id INTEGER PRIMARY KEY,
+            run_id INTEGER,
+            recorded_at TIMESTAMP NOT NULL,
+            audio_path VARCHAR NOT NULL,
+            preset VARCHAR NOT NULL,
+            status VARCHAR NOT NULL,
+
+            -- Language detection
+            requested_language VARCHAR,
+            applied_language VARCHAR,
+            detected_language VARCHAR,
+            language_probability DOUBLE,
+
+            -- Timing metrics
+            audio_duration DOUBLE,
+            total_processing_time DOUBLE NOT NULL,
+            transcribe_duration DOUBLE NOT NULL,
+            preprocess_duration DOUBLE NOT NULL,
+            speed_ratio DOUBLE,
+
+            -- Preprocessing (Outcomes/Specifics)
+            preprocess_enabled BOOLEAN NOT NULL,
+            preprocess_profile VARCHAR NOT NULL,
+            target_sample_rate INTEGER NOT NULL,
+            target_channels INTEGER,
+            preprocess_snr_before DOUBLE,
+            preprocess_snr_after DOUBLE,
+            rnnoise_model VARCHAR,
+            -- rnnoise_mix column is MISSING (old schema)
+
+            -- Audio inspection
+            input_channels INTEGER,
+            input_sample_rate INTEGER,
+            input_bit_depth INTEGER,
+            input_format VARCHAR,
+
+            -- Downmix/resample parameters used
+            volume_adjustment_db DOUBLE,
+            resampler VARCHAR,
+            sample_format VARCHAR,
+
+            -- Loudness normalization parameters used
+            loudnorm_preset VARCHAR,
+            loudnorm_target_i DOUBLE,
+            loudnorm_target_tp DOUBLE,
+            loudnorm_target_lra DOUBLE,
+            loudnorm_backend VARCHAR,
+
+            -- Denoise parameters used
+            denoise_method VARCHAR,
+            denoise_library VARCHAR,
+
+            -- SNR estimation
+            snr_estimation_method VARCHAR,
+
+            -- Transcription parameters used
+            beam_size INTEGER,
+            patience DOUBLE,
+            word_timestamps BOOLEAN,
+            task VARCHAR,
+            chunk_length INTEGER,
+            vad_filter BOOLEAN,
+            vad_threshold DOUBLE,
+            vad_min_speech_duration_ms INTEGER,
+            vad_max_speech_duration_s DOUBLE,
+            vad_min_silence_duration_ms INTEGER,
+            vad_speech_pad_ms INTEGER,
+            temperature VARCHAR,
+            temperature_increment_on_fallback DOUBLE,
+            best_of INTEGER,
+            compression_ratio_threshold DOUBLE,
+            logprob_threshold DOUBLE,
+            no_speech_threshold DOUBLE,
+            length_penalty DOUBLE,
+            repetition_penalty DOUBLE,
+            no_repeat_ngram_size INTEGER,
+            suppress_tokens VARCHAR,
+            condition_on_previous_text BOOLEAN,
+            initial_prompt VARCHAR,
+
+            -- Model parameters used
+            model_id VARCHAR,
+            device VARCHAR,
+            compute_type VARCHAR,
+
+            -- Output parameters
+            output_format VARCHAR,
+            float_precision INTEGER,
+
+            -- Complex/Error
+            preprocess_steps_json VARCHAR,
+            error_message VARCHAR
+        )
+    """)
+    conn.close()
+
+    # Now open with TranscriptionDatabase - should trigger migration
+    db = TranscriptionDatabase(db_path)
+
+    # Verify the column was added
+    columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
+    column_names = {row[0] for row in columns_result}
+    assert "rnnoise_mix" in column_names, "Migration should have added rnnoise_mix column"
+
+    # Verify we can insert a record with rnnoise_mix
+    record = FileMetricRecord(
+        run_id=1,
+        recorded_at=datetime.now(timezone.utc),
+        audio_path="/test/audio2.mp3",
+        preset="turbo",
+        status="completed",
+        preprocess_enabled=True,
+        preprocess_profile="cpu",
+        target_sample_rate=16000,
+        target_channels=1,
+        rnnoise_model="models/sh.rnnn",
+        rnnoise_mix=0.75,
+        total_processing_time=10.0,
+        transcribe_duration=8.0,
+        preprocess_duration=2.0,
+    )
+
+    # This should not raise an error
+    db.record_file_metric(record)
+
+    # Verify the data was stored correctly
+    result = db.conn.execute(
+        "SELECT rnnoise_mix FROM file_metrics WHERE audio_path = ?",
+        ("/test/audio2.mp3",),
+    ).fetchone()
+    assert result is not None
+    assert result[0] == 0.75
+
+    db.close()
+
+
+def test_schema_migration_adds_both_rnnoise_columns(tmp_path: Path) -> None:
+    """Test that migration adds both rnnoise_model and rnnoise_mix columns when both are missing."""
+    db_path = tmp_path / "test_migration_both.db"
+
+    # Create a database with very old schema (without both rnnoise columns)
+    conn = duckdb.connect(str(db_path))
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS file_metrics (
+            id INTEGER PRIMARY KEY,
+            run_id INTEGER,
+            recorded_at TIMESTAMP NOT NULL,
+            audio_path VARCHAR NOT NULL,
+            preset VARCHAR NOT NULL,
+            status VARCHAR NOT NULL,
+
+            -- Language detection
+            requested_language VARCHAR,
+            applied_language VARCHAR,
+            detected_language VARCHAR,
+            language_probability DOUBLE,
+
+            -- Timing metrics
+            audio_duration DOUBLE,
+            total_processing_time DOUBLE NOT NULL,
+            transcribe_duration DOUBLE NOT NULL,
+            preprocess_duration DOUBLE NOT NULL,
+            speed_ratio DOUBLE,
+
+            -- Preprocessing (Outcomes/Specifics)
+            preprocess_enabled BOOLEAN NOT NULL,
+            preprocess_profile VARCHAR NOT NULL,
+            target_sample_rate INTEGER NOT NULL,
+            target_channels INTEGER,
+            preprocess_snr_before DOUBLE,
+            preprocess_snr_after DOUBLE,
+            -- Both rnnoise_model and rnnoise_mix columns are MISSING (very old schema)
+
+            -- Audio inspection
+            input_channels INTEGER,
+            input_sample_rate INTEGER,
+            input_bit_depth INTEGER,
+            input_format VARCHAR,
+
+            -- Downmix/resample parameters used
+            volume_adjustment_db DOUBLE,
+            resampler VARCHAR,
+            sample_format VARCHAR,
+
+            -- Loudness normalization parameters used
+            loudnorm_preset VARCHAR,
+            loudnorm_target_i DOUBLE,
+            loudnorm_target_tp DOUBLE,
+            loudnorm_target_lra DOUBLE,
+            loudnorm_backend VARCHAR,
+
+            -- Denoise parameters used
+            denoise_method VARCHAR,
+            denoise_library VARCHAR,
+
+            -- SNR estimation
+            snr_estimation_method VARCHAR,
+
+            -- Transcription parameters used
+            beam_size INTEGER,
+            patience DOUBLE,
+            word_timestamps BOOLEAN,
+            task VARCHAR,
+            chunk_length INTEGER,
+            vad_filter BOOLEAN,
+            vad_threshold DOUBLE,
+            vad_min_speech_duration_ms INTEGER,
+            vad_max_speech_duration_s DOUBLE,
+            vad_min_silence_duration_ms INTEGER,
+            vad_speech_pad_ms INTEGER,
+            temperature VARCHAR,
+            temperature_increment_on_fallback DOUBLE,
+            best_of INTEGER,
+            compression_ratio_threshold DOUBLE,
+            logprob_threshold DOUBLE,
+            no_speech_threshold DOUBLE,
+            length_penalty DOUBLE,
+            repetition_penalty DOUBLE,
+            no_repeat_ngram_size INTEGER,
+            suppress_tokens VARCHAR,
+            condition_on_previous_text BOOLEAN,
+            initial_prompt VARCHAR,
+
+            -- Model parameters used
+            model_id VARCHAR,
+            device VARCHAR,
+            compute_type VARCHAR,
+
+            -- Output parameters
+            output_format VARCHAR,
+            float_precision INTEGER,
+
+            -- Complex/Error
+            preprocess_steps_json VARCHAR,
+            error_message VARCHAR
+        )
+    """)
+    conn.close()
+
+    # Now open with TranscriptionDatabase - should trigger migration
+    db = TranscriptionDatabase(db_path)
+
+    # Verify both columns were added
+    columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
+    column_names = {row[0] for row in columns_result}
+    assert "rnnoise_model" in column_names, "Migration should have added rnnoise_model column"
+    assert "rnnoise_mix" in column_names, "Migration should have added rnnoise_mix column"
+
+    # Verify we can insert a record with both fields
+    record = FileMetricRecord(
+        run_id=1,
+        recorded_at=datetime.now(timezone.utc),
+        audio_path="/test/audio3.mp3",
+        preset="turbo",
+        status="completed",
+        preprocess_enabled=True,
+        preprocess_profile="cpu",
+        target_sample_rate=16000,
+        target_channels=1,
+        rnnoise_model="models/sh.rnnn",
+        rnnoise_mix=0.6,
+        total_processing_time=10.0,
+        transcribe_duration=8.0,
+        preprocess_duration=2.0,
+    )
+
+    # This should not raise an error
+    db.record_file_metric(record)
+
+    # Verify both values were stored correctly
+    result = db.conn.execute(
+        "SELECT rnnoise_model, rnnoise_mix FROM file_metrics WHERE audio_path = ?",
+        ("/test/audio3.mp3",),
+    ).fetchone()
+    assert result is not None
+    assert result[0] == "models/sh.rnnn"
+    assert result[1] == 0.6
+
+    db.close()

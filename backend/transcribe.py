@@ -260,7 +260,7 @@ def _round_floats(value: Any, places: int = FLOAT_PRECISION) -> Any:
     return value
 
 
-def _segment_to_payload(segment: "Segment") -> Dict[str, Any]:
+def segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     data: Dict[str, Any] = {
         "id": getattr(segment, "id", None),
         "start": getattr(segment, "start", None),
@@ -409,7 +409,7 @@ def transcribe(
         last_progress_log = transcribe_start
 
         for segment in segments:
-            segment_payloads.append(_segment_to_payload(segment))
+            segment_payloads.append(segment_to_payload(segment))
 
             end_time = getattr(segment, "end", None)
             if end_time is not None:
