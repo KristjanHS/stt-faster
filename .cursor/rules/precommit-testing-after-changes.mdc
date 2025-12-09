@@ -1,0 +1,10 @@
+---
+description: "After code changes, run `make pre-commit` then `make unit` then `make integration` then `make e2e`"
+type: agent-select
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+- **MANDATORY**: After any Python code changes, run `make pre-commit` then `make unit` then `make integration` then `make e2e` before considering the task done.
+- On failures: Fix issues and re-run until both pass. Do not skip these validation steps.
+- Avoid using `print` (Ruff rule T201). Prefer `logging` for application and tests.

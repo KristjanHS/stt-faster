@@ -80,16 +80,16 @@ def _create_variant_transcribe_function(
         # Run transcription based on variant preset
         if variant.transcription_preset == "minimal":
             # For minimal preset, use the internal function that omits parameters
-            # Note: This doesn't collect metrics, so we'll return None for metrics
             payload = transcribe_with_minimal_params(
                 path=audio,
                 preset=preset,
                 language=language,
                 preprocess_config=preprocess_config,
                 preprocess_runner=preprocess_runner,
+                transcription_config=transcription_config,
+                transcription_overrides=variant.transcription_overrides,
+                metrics_collector=_collect,
             )
-            # For minimal preset, we don't have metrics, so return None
-            # The processor will handle this gracefully
         else:
             # Use standard transcription with full config and metrics collection
             payload = transcribe(
@@ -185,7 +185,7 @@ class TranscriptionProcessor:
 
         # If variant is provided and no custom transcribe_fn, create variant-aware transcribe function
         if variant is not None and transcribe_fn is None:
-            LOGGER.info("Using variant %d: %s", variant.number, variant.name)
+            LOGGER.debug("Using variant %d: %s", variant.number, variant.name)
             transcribe_fn = _create_variant_transcribe_function(
                 variant=variant,
                 preset=preset,
@@ -249,7 +249,7 @@ class TranscriptionProcessor:
         self.processed_folder.mkdir(exist_ok=True)
         self.failed_folder.mkdir(exist_ok=True)
 
-        LOGGER.info("Processor initialized for folder: %s", self.input_folder)
+        LOGGER.debug("Processor initialized for folder: %s", self.input_folder)
 
     def scan_folder(self) -> list[str]:
         """Scan the input folder for audio files.
@@ -265,7 +265,7 @@ class TranscriptionProcessor:
         # Convert to strings and filter out files in subdirectories
         file_paths = [str(f) for f in audio_files if f.parent.resolve() == self.input_folder.resolve()]
 
-        LOGGER.info("Found %d audio files in %s", len(file_paths), self.input_folder)
+        LOGGER.debug("Found %d audio files in %s", len(file_paths), self.input_folder)
         return file_paths
 
     def get_files_to_process(self) -> list[str]:
@@ -280,7 +280,7 @@ class TranscriptionProcessor:
             List of file paths to process
         """
         audio_files = self.scan_folder()
-        LOGGER.info("Found %d files to process", len(audio_files))
+        LOGGER.debug("Found %d files to process", len(audio_files))
         return audio_files
 
     def process_file(self, file_path: str) -> FileProcessingStats:
@@ -333,7 +333,7 @@ class TranscriptionProcessor:
             # Note: File location is source of truth, not database status
             self.db.update_status(file_path, "completed")
 
-            LOGGER.info("Successfully processed: %s", file_path)
+            LOGGER.debug("Successfully processed: %s", file_path)
             return FileProcessingStats(file_path=file_path, status="completed", metrics=metrics)
 
         except Exception as error:
@@ -390,10 +390,10 @@ class TranscriptionProcessor:
             Dictionary with file counts and per-file statistics
         """
         if not file_paths:
-            LOGGER.info("No files to process")
+            LOGGER.debug("No files to process")
             return {"succeeded": 0, "failed": 0, "file_stats": []}
 
-        LOGGER.info("Processing %d files", len(file_paths))
+        LOGGER.debug("Processing %d files", len(file_paths))
 
         succeeded = 0
         failed = 0
@@ -424,7 +424,7 @@ class TranscriptionProcessor:
         Returns:
             Dictionary with processing results
         """
-        LOGGER.info("Starting folder processing")
+        LOGGER.debug("Starting folder processing")
         run_start = time.time()
         config_snapshot = self._preprocess_config_provider()
 

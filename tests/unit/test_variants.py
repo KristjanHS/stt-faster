@@ -51,17 +51,15 @@ class TestVariantRegistry:
 
     def test_variants_1_through_9_exist(self) -> None:
         """Test that variants 1-9 exist (standard variants)."""
-        variants = get_builtin_variants()
-        numbers = {v.number for v in variants}
         for i in range(1, 10):
-            assert i in numbers, f"Variant {i} should exist"
+            variant = get_variant_by_number(i)
+            assert variant is not None, f"Variant {i} should exist"
 
-    def test_variants_10_through_16_exist(self) -> None:
-        """Test that variants 10-16 exist (custom preprocessing variants)."""
-        variants = get_builtin_variants()
-        numbers = {v.number for v in variants}
-        for i in range(10, 17):
-            assert i in numbers, f"Variant {i} should exist"
+    def test_variants_10_through_19_exist(self) -> None:
+        """Test that variants 10-19 exist (custom preprocessing variants and parameter overrides)."""
+        for i in range(10, 20):
+            variant = get_variant_by_number(i)
+            assert variant is not None, f"Variant {i} should exist"
 
     def test_variant_7_has_no_preprocessing(self) -> None:
         """Test that variant 7 has no preprocessing steps."""
@@ -188,11 +186,12 @@ class TestVariantFiltering:
     def test_filter_variants_by_number(self) -> None:
         """Test filtering variants by number."""
         variants = get_builtin_variants()
-        skip_set = {1, 2, 3, 4, 5, 6, 8, 9}
+        # get_builtin_variants() only returns active variants: 7, 17, 18, 19
+        skip_set = {17}  # Skip one active variant
         filtered = [v for v in variants if v.number not in skip_set]
 
-        # Should have variants 7, 10, 11, 12, 13, 14, 15, 16
-        expected_numbers = {7, 10, 11, 12, 13, 14, 15, 16}
+        # Should have remaining active variants: 7, 18, 19
+        expected_numbers = {7, 18, 19}
         actual_numbers = {v.number for v in filtered}
         assert actual_numbers == expected_numbers
 
@@ -209,12 +208,18 @@ class TestVariantFiltering:
     def test_all_variants_accessible_after_filtering(self) -> None:
         """Test that all variants remain accessible after filtering."""
         variants = get_builtin_variants()
-        skip_set = {1, 2, 3}
+        # get_builtin_variants() only returns active variants: 7, 17, 18, 19
+        skip_set = {17}  # Skip one active variant
         filtered = [v for v in variants if v.number not in skip_set]
 
-        # Original variants should still be accessible
-        assert len(variants) == 16  # All 16 variants should exist
-        assert len(filtered) == 13  # After skipping 3, should have 13
+        # Original variants should still be accessible via get_variant_by_number
+        assert len(variants) == 4  # 4 active variants: 7, 17, 18, 19
+        assert len(filtered) == 3  # After skipping 1, should have 3
+
+        # Verify all variants (including inactive) are still accessible by number
+        for i in range(1, 20):
+            variant = get_variant_by_number(i)
+            assert variant is not None, f"Variant {i} should be accessible by number"
 
 
 class TestVariantDataStructures:
@@ -283,13 +288,21 @@ class TestVariantPresets:
 
     def test_minimal_preset_variants(self) -> None:
         """Test that variants with minimal preset are correctly identified."""
+        # Variants 7, 10-19 should use minimal preset
+        expected_minimal = {7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
+
+        # Check that all minimal preset variants can be accessed
+        for variant_num in expected_minimal:
+            variant = get_variant_by_number(variant_num)
+            assert variant is not None, f"Variant {variant_num} should exist"
+            assert variant.transcription_preset == "minimal", f"Variant {variant_num} should have minimal preset"
+
+        # Check that active variants with minimal preset are in get_builtin_variants()
         variants = get_builtin_variants()
         minimal_variants = [v for v in variants if v.transcription_preset == "minimal"]
-
-        # Variants 7, 10-16 should use minimal preset
-        expected_minimal = {7, 10, 11, 12, 13, 14, 15, 16}
-        actual_minimal = {v.number for v in minimal_variants}
-        assert expected_minimal.issubset(actual_minimal)
+        active_minimal = {v.number for v in minimal_variants}
+        # Active minimal variants: 7, 17, 18, 19
+        assert {7, 17, 18, 19}.issubset(active_minimal)
 
 
 class TestVariantCompatibility:

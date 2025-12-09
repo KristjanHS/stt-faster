@@ -365,7 +365,7 @@ class TranscriptionDatabase:
             # Migrate existing tables: add missing columns if they don't exist
             self._migrate_schema()
 
-            LOGGER.info("DuckDB initialized at %s", self.db_path)
+            LOGGER.debug("DuckDB initialized at %s", self.db_path)
         except Exception as e:
             msg = f"Failed to initialize database at {self.db_path}: {e}"
             raise DatabaseError(msg) from e
@@ -386,13 +386,18 @@ class TranscriptionDatabase:
 
             # Add rnnoise_model column if it doesn't exist
             if "rnnoise_model" not in existing_columns:
-                LOGGER.info("Migrating schema: adding rnnoise_model column to file_metrics")
+                LOGGER.debug("Migrating schema: adding rnnoise_model column to file_metrics")
                 self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_model VARCHAR")
 
             # Add rnnoise_mix column if it doesn't exist
             if "rnnoise_mix" not in existing_columns:
-                LOGGER.info("Migrating schema: adding rnnoise_mix column to file_metrics")
+                LOGGER.debug("Migrating schema: adding rnnoise_mix column to file_metrics")
                 self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_mix DOUBLE")
+
+            # Add loudnorm_target_lra column if it doesn't exist
+            if "loudnorm_target_lra" not in existing_columns:
+                LOGGER.debug("Migrating schema: adding loudnorm_target_lra column to file_metrics")
+                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN loudnorm_target_lra DOUBLE")
         except Exception as e:
             # Log but don't fail - migration errors shouldn't break initialization
             LOGGER.warning("Schema migration encountered an issue: %s", e)

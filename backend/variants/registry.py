@@ -5,13 +5,12 @@ from __future__ import annotations
 from backend.variants.variant import PreprocessStep, Variant
 
 
-def get_builtin_variants() -> list[Variant]:
-    """Return list of all built-in variants (1-16).
+def _get_all_variants() -> list[Variant]:
+    """Return all defined variants (both active and inactive).
 
-    These match the variants currently defined in compare_transcription_variants.py.
-    All variants now use declarative preprocessing steps.
+    This is an internal function that defines all variants.
+    Use get_builtin_variants() to get only active variants.
     """
-
     return [
         # Variant 1: No preprocessing + project defaults
         Variant(
@@ -175,11 +174,54 @@ def get_builtin_variants() -> list[Variant]:
             ],
             transcription_preset="minimal",
         ),
+        # Variant 17: No preprocessing + minimal params + no_speech_threshold=0.5
+        Variant(
+            name="noprep_noparamtrans_thres1",
+            number=17,
+            description="nopre_thres1",
+            preprocess_steps=[],
+            transcription_preset="minimal",
+            transcription_overrides={"no_speech_threshold": 0.5},
+        ),
+        # Variant 18: No preprocessing + minimal params + chunk_length=20
+        Variant(
+            name="noprep_noparamtrans_chunk1",
+            number=18,
+            description="nopre_chunk1",
+            preprocess_steps=[],
+            transcription_preset="minimal",
+            transcription_overrides={"chunk_length": 20},
+        ),
+        # Variant 19: No preprocessing + minimal params + condition_on_previous_text=False
+        Variant(
+            name="noprep_noparamtrans_condprev1",
+            number=19,
+            description="nopre_condprev1",
+            preprocess_steps=[],
+            transcription_preset="minimal",
+            transcription_overrides={"condition_on_previous_text": False},
+        ),
     ]
+
+
+def get_builtin_variants() -> list[Variant]:
+    """Return list of active built-in variants.
+
+    Currently only variants 7, 17, 18, 19 are enabled.
+    All other variants are disabled but remain defined and can be accessed
+    via get_variant_by_number() or get_variant_by_name().
+    All variants now use declarative preprocessing steps.
+    """
+    all_variants = _get_all_variants()
+    # Only return active variants: 7, 17, 18, 19
+    active_variant_numbers = {7, 17, 18, 19}
+    return [v for v in all_variants if v.number in active_variant_numbers]
 
 
 def get_variant_by_name(name: str) -> Variant | None:
     """Get a variant by its name.
+
+    Searches through all variants (both active and inactive).
 
     Args:
         name: Variant name (e.g., "no_preprocessing")
@@ -187,7 +229,7 @@ def get_variant_by_name(name: str) -> Variant | None:
     Returns:
         Variant instance or None if not found
     """
-    for variant in get_builtin_variants():
+    for variant in _get_all_variants():
         if variant.name == name:
             return variant
     return None
@@ -196,13 +238,15 @@ def get_variant_by_name(name: str) -> Variant | None:
 def get_variant_by_number(number: int) -> Variant | None:
     """Get a variant by its number.
 
+    Searches through all variants (both active and inactive).
+
     Args:
-        number: Variant number (1-16)
+        number: Variant number (1-19)
 
     Returns:
         Variant instance or None if not found
     """
-    for variant in get_builtin_variants():
+    for variant in _get_all_variants():
         if variant.number == number:
             return variant
     return None
