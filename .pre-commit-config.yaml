@@ -23,7 +23,7 @@ repos:
           - .venv/bin/python
           - --project
           - pyrightconfig.json
-        files: ^backend/.*\.py$
+        files: ^(backend|scripts)/.*\.py$
 
   - repo: https://github.com/google/yamlfmt
     rev: v0.17.2

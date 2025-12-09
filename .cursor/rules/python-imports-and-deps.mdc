@@ -5,5 +5,5 @@ globs:
     - "**/*.py"
 alwaysApply: false
 ---
-- If a `ModuleNotFoundError` is encountered, first verify that the project has been installed in editable mode with `pip install -e .`. The `backend` module and other local packages are made available through this installation. For more details on the project's import strategy, refer to `docs/DEVELOPMENT.md`.
-- Prefer defining dev/test dependencies in `pyproject.toml` under `[project.optional-dependencies]`, and keep `requirements-dev.txt` as a thin wrapper pointing to extras (e.g., `-e .[test,docs,cli]`). Avoid duplicating pins between extras and requirements files.
+- If a `ModuleNotFoundError` is encountered, first verify that the project has been installed in editable mode with `uv sync` (or `uv sync --group dev --group test` for development). The `backend` module and other local packages are made available through this installation. `uv sync` automatically installs the project in editable mode. For more details on the project's import strategy, refer to `docs/DEVELOPMENT.md`.
+- Prefer defining dev/test dependencies in `pyproject.toml` under `[dependency-groups]` (uv's native format), and use `uv sync --group dev --group test` to install them. Avoid duplicating pins between dependency groups and requirements files.

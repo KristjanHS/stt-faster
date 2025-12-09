@@ -6,7 +6,8 @@
         "**/dist/**"
     ],
     "include": [
-        "backend"
+        "backend",
+        "scripts"
     ],
     "typeCheckingMode": "standard",
     "strict": [

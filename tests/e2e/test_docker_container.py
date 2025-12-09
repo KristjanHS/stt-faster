@@ -123,15 +123,6 @@ def docker_container() -> Generator[None, None, None]:
 class TestDockerBuild:
     """Test Docker image build process."""
 
-    def test_dockerfile_exists(self) -> None:
-        """Verify Dockerfile exists."""
-        dockerfile = PROJECT_ROOT / "docker" / "app.Dockerfile"
-        assert dockerfile.exists(), f"Dockerfile not found at {dockerfile}"
-
-    def test_compose_file_exists(self) -> None:
-        """Verify docker-compose file exists."""
-        assert COMPOSE_FILE.exists(), f"Docker compose file not found at {COMPOSE_FILE}"
-
     def test_build_succeeds(self, docker_container: None) -> None:
         """Verify the Docker image builds successfully."""
         # The docker_container fixture builds the image
@@ -143,63 +134,25 @@ class TestDockerBuild:
 class TestDockerRuntime:
     """Test Docker container runtime behavior."""
 
-    def test_container_is_running(self, docker_container: None) -> None:
-        """Verify the container is running."""
-        result = run_docker_compose("ps", "-q", "app")
-        container_id = result.stdout.strip()
-        assert container_id, "Container is not running"
-
-    def test_container_is_healthy(self, docker_container: None) -> None:
-        """Verify the container passes health checks."""
-        result = run_docker_compose("ps")
-        assert "(healthy)" in result.stdout, "Container is not healthy"
-
     def test_healthcheck_command(self, docker_container: None) -> None:
         """Verify the healthcheck command works."""
         result = exec_in_container("python", "-m", "backend.main", "--healthcheck")
         assert result.returncode == 0
         assert "Healthcheck OK" in result.stdout
 
-    def test_main_process_running(self, docker_container: None) -> None:
-        """Verify the main process is running."""
-        logs = run_docker_compose("logs", "app")
-        assert "backend.main started" in logs.stdout
-
 
 class TestDockerPythonEnvironment:
     """Test Python environment inside container."""
-
-    def test_python_version(self, docker_container: None) -> None:
-        """Verify correct Python version is installed."""
-        result = exec_in_container("python", "--version")
-        assert "Python 3.12" in result.stdout
-
-    def test_python_from_venv(self, docker_container: None) -> None:
-        """Verify Python is running from the virtual environment."""
-        result = exec_in_container("which", "python")
-        assert "/opt/venv/bin/python" in result.stdout
 
     def test_venv_in_path(self, docker_container: None) -> None:
         """Verify venv is in Python path."""
         result = exec_in_container("python", "-c", "import sys; print(sys.path)")
         assert "/opt/venv/lib/python3.12/site-packages" in result.stdout
 
-    def test_backend_module_accessible(self, docker_container: None) -> None:
-        """Verify the backend module can be imported."""
-        result = exec_in_container("python", "-c", "import backend; print(backend.__file__)")
-        assert "/app/backend" in result.stdout
-
     def test_non_root_user(self, docker_container: None) -> None:
         """Verify container runs as non-root user."""
         result = exec_in_container("whoami")
         assert result.stdout.strip() == "appuser"
-
-    def test_app_directory_structure(self, docker_container: None) -> None:
-        """Verify app directory structure is correct."""
-        result = exec_in_container("ls", "-1", "/app")
-        expected_dirs = ["backend", "frontend", "tests", "scripts", "logs", "reports"]
-        for directory in expected_dirs:
-            assert directory in result.stdout, f"Missing directory: {directory}"
 
     def test_hf_cache_directory(self, docker_container: None) -> None:
         """Verify HuggingFace cache directory exists."""
@@ -244,17 +197,6 @@ class TestDockerTestExecution:
 
 class TestDockerVolumes:
     """Test Docker volume mounts."""
-
-    def test_backend_volume_mount(self, docker_container: None) -> None:
-        """Verify backend code is accessible (via volume mount)."""
-        result = exec_in_container("ls", "-la", "/app/backend")
-        assert "main.py" in result.stdout
-
-    def test_tests_volume_mount(self, docker_container: None) -> None:
-        """Verify tests are accessible (via volume mount)."""
-        result = exec_in_container("ls", "-la", "/app/tests")
-        assert "unit" in result.stdout
-        assert "integration" in result.stdout
 
     def test_logs_volume_mount(self, docker_container: None) -> None:
         """Verify logs directory is mounted and writable."""

@@ -13,9 +13,10 @@ A high-level guide to testing with clear separation between unit, integration, a
 ## Core Principles
 
 1. **Test Isolation**: Each test runs independently without state leakage
-2. **Clear Boundaries**: Folder-based organization by test type with appropriate mocking
+2. **Clear Boundaries**: Folder-based organization by test type (unit/integration/e2e) - **use folders, not markers** for test type classification
 3. **pytest-Native**: Prefer pytest features and fixtures over unittest patterns
 4. **DRY Fixtures**: Shared setup in hierarchical `conftest.py` files. Never use monkeypatching in permanent tests.
+5. **Behavior Over Implementation**: Test what the code does, not how it does it. Focus on business logic and user-facing behavior.
 
 ## Test Fixtures
 
@@ -48,6 +49,8 @@ Fixtures are organized hierarchically through `conftest.py` files:
 
 ## Test Markers
 
+**Important**: Test type (unit/integration/e2e) is determined by folder location, **not markers**. Do not use `@pytest.mark.integration` or similar test-type markers.
+
 Markers indicate cross-cutting concerns (use across all test folders):
 - `@pytest.mark.slow` - Tests >30s (model downloads, processing)
 - `@pytest.mark.network` - Requires internet (HuggingFace API)
@@ -56,12 +59,13 @@ Markers indicate cross-cutting concerns (use across all test folders):
 
 ## GPU Testing
 
-GPU tests validate system setup (environment checks, not business logic):
+GPU tests validate system setup and actual GPU functionality (behavior tests):
 - NVIDIA drivers and CUDA/cuDNN libraries
 - ctranslate2 GPU device detection
 - faster-whisper model loading on GPU
+- **Actual transcription on GPU** (not just model loading)
 
-**Use for**: Server deployment validation, GPU setup troubleshooting  
+**Use for**: Server deployment validation, GPU setup troubleshooting, verifying GPU transcription works  
 **Skip when**: CPU-only CI (auto-skips), rapid development, testing transcription logic
 
 ## Best Practices
@@ -70,6 +74,21 @@ GPU tests validate system setup (environment checks, not business logic):
 2. **Fixture Scoping**: Session for expensive setup, function for fresh state
 3. **Offline Support**: Use `USE_CACHED_MODEL=false` or pre-download model
 4. **Performance**: Real models slower than mocks - choose appropriately
+5. **Behavior-Focused Testing**: Test business logic and user-facing behavior, not implementation details
+6. **Folder-Based Organization**: Use `tests/unit/`, `tests/integration/`, `tests/e2e/` folders to indicate test type - do not use test-type markers
+7. **Avoid Trivial Tests**: Don't test file existence, help text, version strings, or implementation details - test what the code does, not how
+
+## What NOT to Test
+
+These are examples of low-value tests that should be avoided:
+
+- **File existence checks** - Would fail at build/import time anyway
+- **Help text validation** - Documentation, not critical functionality
+- **Version string checks** - No behavior validation
+- **Import checks** - Would fail at runtime if broken
+- **Implementation details** - Test behavior, not specific IDs, paths, or internal structure
+- **Trivial defaults** - Test that defaults work, not every single default value
+- **Code inspection** - Don't test if strings exist in source files
 
 ---
 

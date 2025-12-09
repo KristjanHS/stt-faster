@@ -137,7 +137,10 @@ def preprocess_audio(
     else:
         LOGGER.info("SNR metrics unavailable; see warnings above for decoding issues.")
     for metric in metrics.steps:
-        LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+        lra_info = ""
+        if metric.metadata and "lra_used" in metric.metadata:
+            lra_info = f" LRA={metric.metadata['lra_used']:.1f}"
+        LOGGER.info(" - Step %s (%s): %.2fs%s", metric.name, metric.backend, metric.duration, lra_info)
 
     return PreprocessResult(
         output_path=processed_path,

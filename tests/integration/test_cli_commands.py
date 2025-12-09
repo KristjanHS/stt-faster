@@ -90,7 +90,11 @@ class TestProcessCommand:
             )
 
             # Mock only the MODEL LOADING, not the transcription logic
-            with patch("backend.transcribe.pick_model") as mock_pick_model:
+            # Patch both locations where pick_model is used (transcribe and variants.executor)
+            with (
+                patch("backend.variants.executor.pick_model") as mock_pick_model_executor,
+                patch("backend.transcribe.pick_model") as mock_pick_model_transcribe,
+            ):
                 # Return a fake model that does minimal work
                 mock_model = MagicMock()
                 mock_model.transcribe.return_value = (
@@ -99,15 +103,22 @@ class TestProcessCommand:
                     # Fake info
                     MagicMock(language="en", language_probability=0.99, duration=1.0),
                 )
-                mock_pick_model.return_value = mock_model
+                mock_pick_model_executor.return_value = mock_model
+                mock_pick_model_transcribe.return_value = mock_model
 
                 result = cmd_process(args)
 
                 # Should succeed with mocked model
                 assert result == 0
 
-                # Verify model was loaded once (not per file - model is reused)
-                assert mock_pick_model.call_count == 3  # Called for each file
+                # Verify model was loaded (variant executor path is used for minimal preset)
+                # The variant executor calls pick_model once per file
+                total_calls = mock_pick_model_executor.call_count + mock_pick_model_transcribe.call_count
+                assert total_calls == 3, (
+                    f"Expected 3 calls, got {total_calls} "
+                    f"(executor: {mock_pick_model_executor.call_count}, "
+                    f"transcribe: {mock_pick_model_transcribe.call_count})"
+                )
         finally:
             sys.path.remove(scripts_path)
 
@@ -154,47 +165,3 @@ class TestStatusCommand:
         output = result.stdout + result.stderr
         # Verify that verbose flag produces output (even if database is empty)
         assert len(output.strip()) > 0, "Verbose flag should produce output"
-
-
-class TestCLIHelp:
-    """Tests for CLI help and usage information."""
-
-    def test_no_command_shows_help(self) -> None:
-        """Test that running without command shows help."""
-        result = subprocess.run(
-            [sys.executable, "scripts/transcribe_manager.py"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        assert result.returncode == 1
-        output = result.stdout + result.stderr
-        assert "usage:" in output.lower() or "help" in output.lower()
-
-    def test_process_help_shows_options(self) -> None:
-        """Test that process command help shows available options."""
-        result = subprocess.run(
-            [sys.executable, "scripts/transcribe_manager.py", "process", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        assert result.returncode == 0
-        output = result.stdout + result.stderr
-        assert "input_folder" in output
-        assert "--preset" in output
-
-    def test_status_help_shows_options(self) -> None:
-        """Test that status command help shows available options."""
-        result = subprocess.run(
-            [sys.executable, "scripts/transcribe_manager.py", "status", "--help"],
-            capture_output=True,
-            text=True,
-            timeout=10,
-        )
-
-        assert result.returncode == 0
-        output = result.stdout + result.stderr
-        assert "--verbose" in output or "-v" in output

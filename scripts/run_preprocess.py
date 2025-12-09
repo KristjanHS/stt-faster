@@ -28,7 +28,12 @@ def main() -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(result.output_path, dest)
 
-    steps = [f"{m.name} {m.duration:.2f}s ({m.backend})" for m in result.metrics.steps]
+    steps = []
+    for m in result.metrics.steps:
+        step_str = f"{m.name} {m.duration:.2f}s ({m.backend})"
+        if m.metadata and "lra_used" in m.metadata:
+            step_str += f" LRA={m.metadata['lra_used']:.1f}"
+        steps.append(step_str)
     snr = (
         f"{result.metrics.snr_before:.2f}dB -> {result.metrics.snr_after:.2f}dB"
         if result.metrics.snr_before is not None and result.metrics.snr_after is not None
