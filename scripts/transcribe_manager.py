@@ -16,6 +16,7 @@ from pathlib import Path
 
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
+from backend.variants.registry import get_variant_by_number
 
 # Setup logging
 logging.basicConfig(
@@ -49,6 +50,15 @@ def cmd_process(args: argparse.Namespace) -> int:
     LOGGER.info("Input folder: %s", input_folder)
     LOGGER.info("Model preset: %s", args.preset)
 
+    # Get variant if specified
+    variant = None
+    if args.variant is not None:
+        variant = get_variant_by_number(args.variant)
+        if variant is None:
+            LOGGER.error("Invalid variant number: %d", args.variant)
+            return 1
+        LOGGER.info("Using variant %d: %s", variant.number, variant.name)
+
     try:
         with TranscriptionDatabase(args.db_path) as db:
             processor = TranscriptionProcessor(
@@ -57,6 +67,7 @@ def cmd_process(args: argparse.Namespace) -> int:
                 preset=args.preset,
                 language=args.language,
                 output_format=args.output_format,
+                variant=variant,
             )
             results = processor.process_folder()
 
@@ -181,6 +192,12 @@ def create_parser() -> argparse.ArgumentParser:
         default="txt",
         choices=["txt", "json", "both"],
         help="Output format for transcripts (default: txt)",
+    )
+    process_parser.add_argument(
+        "--variant",
+        type=int,
+        default=None,
+        help="Variant number to use (1-16). Variant 7 uses minimal transcription parameters without VAD filter.",
     )
 
     # Status command
