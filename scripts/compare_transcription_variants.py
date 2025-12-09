@@ -184,6 +184,151 @@ def _dynaudnorm_only(
     return StepMetrics(name="dynaudnorm_only", backend="ffmpeg", duration=duration)
 
 
+def _highlow_aform_loudnorm(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """Lightweight ffmpeg step with highpass, lowpass, aformat, and loudness normalization."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    from backend.preprocess.config import PreprocessConfig
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # Build filter graph: highpass + lowpass + aformat + loudnorm
+        filter_graph = (
+            f"highpass=f=60,"
+            f"lowpass=f=8000,"
+            f"aformat=sample_rates=16000,"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+        )
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("highlow_aform_loudnorm", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="highlow_aform_loudnorm", backend="ffmpeg", duration=duration)
+
+
+def _highlow_nosampl_loudnorm(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """Lightweight ffmpeg step with highpass, lowpass, and loudness normalization (no aformat/sampling)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    from backend.preprocess.config import PreprocessConfig
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # Build filter graph: highpass + lowpass + loudnorm (no aformat/sampling)
+        filter_graph = f"highpass=f=60,lowpass=f=8000,loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("highlow_nosampl_loudnorm", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="highlow_nosampl_loudnorm", backend="ffmpeg", duration=duration)
+
+
+def _aresampl_loudnorm_fixed(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Lightweight ffmpeg step with aresample to 16kHz and loudness normalization with fixed parameters."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        # Build filter graph: aresample to 16kHz + loudnorm with fixed parameters
+        filter_graph = "aresample=resampler=soxr:osr=16000,loudnorm=I=-23:TP=-2:LRA=11"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("aresampl_loudnorm_fixed", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="aresampl_loudnorm_fixed", backend="ffmpeg", duration=duration)
+
+
+def _aresampl_loudnorm_fixed2(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Lightweight ffmpeg step with aresample to 16kHz and loudness normalization with fixed params (I=-24, LRA=15)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        # Build filter graph: aresample to 16kHz + loudnorm with fixed parameters
+        filter_graph = "aresample=resampler=soxr:osr=16000,loudnorm=I=-24:TP=-2:LRA=15"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("aresampl_loudnorm_fixed2", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="aresampl_loudnorm_fixed2", backend="ffmpeg", duration=duration)
+
+
 def _get_variant_description(variant_name: str) -> str:
     """Get short description for a variant name.
 
@@ -204,6 +349,10 @@ def _get_variant_description(variant_name: str) -> str:
         "normonly_noparamtrans": "normonly_noparam",
         "norm_highp_noparamtrans": "norm_highp_noparam",
         "norm_dynaud_noparamtrans": "norm_dynaud_noparam",
+        "lnorm_highlow_aform_noparamtrans": "lnorm_highlow_aform_noparam",
+        "lnorm_highlow_nosampl_noparamtrans": "lnorm_highlow_nosampl_noparam",
+        "lnorm2_aresampl_noparamtrans": "lnorm2_aresampl_noparam",
+        "lnorm3_aresampl_noparamtrans": "lnorm3_aresampl_noparam",
         "onlyden_noparamtrans": "onlyden_noparam",
         "onlyden_noparamtrans_custom": "den2_noparam",
     }
@@ -560,6 +709,340 @@ def preprocess_dynaudnorm_only(
                 )
             elif cfg.output_dir:
                 _copy_stage_output(processed_path, cfg.output_dir, "01_dynaudnorm_only", original_filename)
+
+        metrics = PreprocessMetrics(total_duration=time.time() - overall_start, steps=step_metrics)
+    except Exception as exc:
+        temp_dir.cleanup()
+        raise PreprocessError(f"Preprocessing failure: {exc}") from exc
+
+    LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
+    for metric in metrics.steps:
+        LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+
+    return PreprocessResult(
+        output_path=processed_path,
+        input_info=input_info,
+        metrics=metrics,
+        profile="cpu",
+        cleanup=temp_dir.cleanup,
+    )
+
+
+def preprocess_highlow_aform_loudnorm(
+    input_path: str | Path,
+    config: PreprocessConfig | None = None,
+    *,
+    variant_number: int | None = None,
+    variant_description: str | None = None,
+    base_name: str | None = None,
+    datetime_suffix: str | None = None,
+    output_dir: Path | None = None,
+    copy_intermediate: bool = False,
+) -> PreprocessResult:
+    """Preprocess audio using highpass, lowpass, aformat, and loudness normalization (lightweight ffmpeg step)."""
+    cfg = config or PreprocessConfig.from_env()
+    source = Path(input_path)
+    input_info: AudioInfo | None = None
+
+    try:
+        input_info = inspect_audio(source)
+    except PreprocessError as exc:
+        LOGGER.warning("Skipping metadata inspection: %s", exc)
+
+    if not cfg.enabled:
+        LOGGER.info("Audio preprocessing disabled; using input as-is.")
+        return PreprocessResult(
+            output_path=source,
+            input_info=input_info,
+            metrics=PreprocessMetrics(total_duration=0.0, steps=[]),
+            profile="disabled",
+            cleanup=lambda: None,
+        )
+
+    input_channels = input_info.channels if input_info else None
+    resolved_channels = cfg.target_channels or input_channels or 1
+
+    temp_dir = TemporaryDirectory(prefix="stt-preprocess_", dir=cfg.temp_dir)
+    processed_path = Path(temp_dir.name) / "preprocessed.wav"
+    original_filename = source.stem
+
+    step_metrics: list[StepMetrics] = []
+    overall_start = time.time()
+
+    try:
+        # Run highpass, lowpass, aformat, and loudness normalization
+        step_metric = _highlow_aform_loudnorm(
+            input_path=source,
+            output_path=processed_path,
+            target_sample_rate=cfg.target_sample_rate,
+            target_channels=resolved_channels,
+            loudnorm_preset=cfg.loudnorm_preset,
+        )
+        step_metrics.append(step_metric)
+        # Save with variant number and datetime if provided
+        if copy_intermediate:
+            if variant_number is not None and variant_description and base_name and datetime_suffix and output_dir:
+                _copy_stage_output_with_variant(
+                    processed_path,
+                    output_dir,
+                    variant_number,
+                    variant_description,
+                    "01_highlow_aform_loudnorm",
+                    base_name,
+                    datetime_suffix,
+                )
+            elif cfg.output_dir:
+                _copy_stage_output(processed_path, cfg.output_dir, "01_highlow_aform_loudnorm", original_filename)
+
+        metrics = PreprocessMetrics(total_duration=time.time() - overall_start, steps=step_metrics)
+    except Exception as exc:
+        temp_dir.cleanup()
+        raise PreprocessError(f"Preprocessing failure: {exc}") from exc
+
+    LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
+    for metric in metrics.steps:
+        LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+
+    return PreprocessResult(
+        output_path=processed_path,
+        input_info=input_info,
+        metrics=metrics,
+        profile="cpu",
+        cleanup=temp_dir.cleanup,
+    )
+
+
+def preprocess_highlow_nosampl_loudnorm(
+    input_path: str | Path,
+    config: PreprocessConfig | None = None,
+    *,
+    variant_number: int | None = None,
+    variant_description: str | None = None,
+    base_name: str | None = None,
+    datetime_suffix: str | None = None,
+    output_dir: Path | None = None,
+    copy_intermediate: bool = False,
+) -> PreprocessResult:
+    """Preprocess audio using highpass, lowpass, and loudness normalization (lightweight ffmpeg step, no aformat)."""
+    cfg = config or PreprocessConfig.from_env()
+    source = Path(input_path)
+    input_info: AudioInfo | None = None
+
+    try:
+        input_info = inspect_audio(source)
+    except PreprocessError as exc:
+        LOGGER.warning("Skipping metadata inspection: %s", exc)
+
+    if not cfg.enabled:
+        LOGGER.info("Audio preprocessing disabled; using input as-is.")
+        return PreprocessResult(
+            output_path=source,
+            input_info=input_info,
+            metrics=PreprocessMetrics(total_duration=0.0, steps=[]),
+            profile="disabled",
+            cleanup=lambda: None,
+        )
+
+    input_channels = input_info.channels if input_info else None
+    resolved_channels = cfg.target_channels or input_channels or 1
+
+    temp_dir = TemporaryDirectory(prefix="stt-preprocess_", dir=cfg.temp_dir)
+    processed_path = Path(temp_dir.name) / "preprocessed.wav"
+    original_filename = source.stem
+
+    step_metrics: list[StepMetrics] = []
+    overall_start = time.time()
+
+    try:
+        # Run highpass, lowpass, and loudness normalization (no aformat/sampling)
+        step_metric = _highlow_nosampl_loudnorm(
+            input_path=source,
+            output_path=processed_path,
+            target_sample_rate=cfg.target_sample_rate,
+            target_channels=resolved_channels,
+            loudnorm_preset=cfg.loudnorm_preset,
+        )
+        step_metrics.append(step_metric)
+        # Save with variant number and datetime if provided
+        if copy_intermediate:
+            if variant_number is not None and variant_description and base_name and datetime_suffix and output_dir:
+                _copy_stage_output_with_variant(
+                    processed_path,
+                    output_dir,
+                    variant_number,
+                    variant_description,
+                    "01_highlow_nosampl_loudnorm",
+                    base_name,
+                    datetime_suffix,
+                )
+            elif cfg.output_dir:
+                _copy_stage_output(processed_path, cfg.output_dir, "01_highlow_nosampl_loudnorm", original_filename)
+
+        metrics = PreprocessMetrics(total_duration=time.time() - overall_start, steps=step_metrics)
+    except Exception as exc:
+        temp_dir.cleanup()
+        raise PreprocessError(f"Preprocessing failure: {exc}") from exc
+
+    LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
+    for metric in metrics.steps:
+        LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+
+    return PreprocessResult(
+        output_path=processed_path,
+        input_info=input_info,
+        metrics=metrics,
+        profile="cpu",
+        cleanup=temp_dir.cleanup,
+    )
+
+
+def preprocess_aresampl_loudnorm_fixed(
+    input_path: str | Path,
+    config: PreprocessConfig | None = None,
+    *,
+    variant_number: int | None = None,
+    variant_description: str | None = None,
+    base_name: str | None = None,
+    datetime_suffix: str | None = None,
+    output_dir: Path | None = None,
+    copy_intermediate: bool = False,
+) -> PreprocessResult:
+    """Preprocess audio using aresample to 16kHz and loudness normalization with fixed parameters."""
+    cfg = config or PreprocessConfig.from_env()
+    source = Path(input_path)
+    input_info: AudioInfo | None = None
+
+    try:
+        input_info = inspect_audio(source)
+    except PreprocessError as exc:
+        LOGGER.warning("Skipping metadata inspection: %s", exc)
+
+    if not cfg.enabled:
+        LOGGER.info("Audio preprocessing disabled; using input as-is.")
+        return PreprocessResult(
+            output_path=source,
+            input_info=input_info,
+            metrics=PreprocessMetrics(total_duration=0.0, steps=[]),
+            profile="disabled",
+            cleanup=lambda: None,
+        )
+
+    input_channels = input_info.channels if input_info else None
+    resolved_channels = cfg.target_channels or input_channels or 1
+
+    temp_dir = TemporaryDirectory(prefix="stt-preprocess_", dir=cfg.temp_dir)
+    processed_path = Path(temp_dir.name) / "preprocessed.wav"
+    original_filename = source.stem
+
+    step_metrics: list[StepMetrics] = []
+    overall_start = time.time()
+
+    try:
+        # Run aresample to 16kHz and loudness normalization with fixed parameters
+        step_metric = _aresampl_loudnorm_fixed(
+            input_path=source,
+            output_path=processed_path,
+            target_sample_rate=cfg.target_sample_rate,
+            target_channels=resolved_channels,
+        )
+        step_metrics.append(step_metric)
+        # Save with variant number and datetime if provided
+        if copy_intermediate:
+            if variant_number is not None and variant_description and base_name and datetime_suffix and output_dir:
+                _copy_stage_output_with_variant(
+                    processed_path,
+                    output_dir,
+                    variant_number,
+                    variant_description,
+                    "01_aresampl_loudnorm_fixed",
+                    base_name,
+                    datetime_suffix,
+                )
+            elif cfg.output_dir:
+                _copy_stage_output(processed_path, cfg.output_dir, "01_aresampl_loudnorm_fixed", original_filename)
+
+        metrics = PreprocessMetrics(total_duration=time.time() - overall_start, steps=step_metrics)
+    except Exception as exc:
+        temp_dir.cleanup()
+        raise PreprocessError(f"Preprocessing failure: {exc}") from exc
+
+    LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
+    for metric in metrics.steps:
+        LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+
+    return PreprocessResult(
+        output_path=processed_path,
+        input_info=input_info,
+        metrics=metrics,
+        profile="cpu",
+        cleanup=temp_dir.cleanup,
+    )
+
+
+def preprocess_aresampl_loudnorm_fixed2(
+    input_path: str | Path,
+    config: PreprocessConfig | None = None,
+    *,
+    variant_number: int | None = None,
+    variant_description: str | None = None,
+    base_name: str | None = None,
+    datetime_suffix: str | None = None,
+    output_dir: Path | None = None,
+    copy_intermediate: bool = False,
+) -> PreprocessResult:
+    """Preprocess audio using aresample to 16kHz and loudness normalization with fixed parameters (I=-24, LRA=15)."""
+    cfg = config or PreprocessConfig.from_env()
+    source = Path(input_path)
+    input_info: AudioInfo | None = None
+
+    try:
+        input_info = inspect_audio(source)
+    except PreprocessError as exc:
+        LOGGER.warning("Skipping metadata inspection: %s", exc)
+
+    if not cfg.enabled:
+        LOGGER.info("Audio preprocessing disabled; using input as-is.")
+        return PreprocessResult(
+            output_path=source,
+            input_info=input_info,
+            metrics=PreprocessMetrics(total_duration=0.0, steps=[]),
+            profile="disabled",
+            cleanup=lambda: None,
+        )
+
+    input_channels = input_info.channels if input_info else None
+    resolved_channels = cfg.target_channels or input_channels or 1
+
+    temp_dir = TemporaryDirectory(prefix="stt-preprocess_", dir=cfg.temp_dir)
+    processed_path = Path(temp_dir.name) / "preprocessed.wav"
+    original_filename = source.stem
+
+    step_metrics: list[StepMetrics] = []
+    overall_start = time.time()
+
+    try:
+        # Run aresample to 16kHz and loudness normalization with fixed parameters
+        step_metric = _aresampl_loudnorm_fixed2(
+            input_path=source,
+            output_path=processed_path,
+            target_sample_rate=cfg.target_sample_rate,
+            target_channels=resolved_channels,
+        )
+        step_metrics.append(step_metric)
+        # Save with variant number and datetime if provided
+        if copy_intermediate:
+            if variant_number is not None and variant_description and base_name and datetime_suffix and output_dir:
+                _copy_stage_output_with_variant(
+                    processed_path,
+                    output_dir,
+                    variant_number,
+                    variant_description,
+                    "01_aresampl_loudnorm_fixed2",
+                    base_name,
+                    datetime_suffix,
+                )
+            elif cfg.output_dir:
+                _copy_stage_output(processed_path, cfg.output_dir, "01_aresampl_loudnorm_fixed2", original_filename)
 
         metrics = PreprocessMetrics(total_duration=time.time() - overall_start, steps=step_metrics)
     except Exception as exc:
@@ -1121,6 +1604,97 @@ def run_variant(
         preprocess_runner = _dynaudnorm_runner
         # Use custom transcribe wrapper that omits parameters
         transcription_config_provider = None  # Not used with custom wrapper
+    elif variant_name == "lnorm_highlow_aform_noparamtrans":
+        # Highpass, lowpass, aformat, and loudness normalization (lightweight ffmpeg step)
+        # + minimal transcription parameters
+        preprocess_config = PreprocessConfig()  # Use defaults for loudnorm params
+
+        # Create a wrapper that passes variant info to preprocess function
+        def _highlow_aform_loudnorm_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+            base_name = output_base_path.stem if output_base_path else Path(path).stem
+            variant_desc = _get_variant_description(variant_name)
+            return preprocess_highlow_aform_loudnorm(
+                path,
+                cfg,
+                variant_number=variant_number,
+                variant_description=variant_desc,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
+
+        preprocess_runner = _highlow_aform_loudnorm_runner
+        # Use custom transcribe wrapper that omits parameters
+        transcription_config_provider = None  # Not used with custom wrapper
+    elif variant_name == "lnorm_highlow_nosampl_noparamtrans":
+        # Highpass, lowpass, and loudness normalization (lightweight ffmpeg step, no aformat)
+        # + minimal transcription parameters
+        preprocess_config = PreprocessConfig()  # Use defaults for loudnorm params
+
+        # Create a wrapper that passes variant info to preprocess function
+        def _highlow_nosampl_loudnorm_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+            base_name = output_base_path.stem if output_base_path else Path(path).stem
+            variant_desc = _get_variant_description(variant_name)
+            return preprocess_highlow_nosampl_loudnorm(
+                path,
+                cfg,
+                variant_number=variant_number,
+                variant_description=variant_desc,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
+
+        preprocess_runner = _highlow_nosampl_loudnorm_runner
+        # Use custom transcribe wrapper that omits parameters
+        transcription_config_provider = None  # Not used with custom wrapper
+    elif variant_name == "lnorm2_aresampl_noparamtrans":
+        # Aresample to 16kHz and loudness normalization with fixed parameters + minimal transcription parameters
+        preprocess_config = PreprocessConfig()  # Use defaults (loudnorm preset not used with fixed params)
+
+        # Create a wrapper that passes variant info to preprocess function
+        def _aresampl_loudnorm_fixed_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+            base_name = output_base_path.stem if output_base_path else Path(path).stem
+            variant_desc = _get_variant_description(variant_name)
+            return preprocess_aresampl_loudnorm_fixed(
+                path,
+                cfg,
+                variant_number=variant_number,
+                variant_description=variant_desc,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
+
+        preprocess_runner = _aresampl_loudnorm_fixed_runner
+        # Use custom transcribe wrapper that omits parameters
+        transcription_config_provider = None  # Not used with custom wrapper
+    elif variant_name == "lnorm3_aresampl_noparamtrans":
+        # Aresample to 16kHz and loudness normalization with fixed parameters (I=-24, LRA=15)
+        # + minimal transcription parameters
+        preprocess_config = PreprocessConfig()  # Use defaults (loudnorm preset not used with fixed params)
+
+        # Create a wrapper that passes variant info to preprocess function
+        def _aresampl_loudnorm_fixed2_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+            base_name = output_base_path.stem if output_base_path else Path(path).stem
+            variant_desc = _get_variant_description(variant_name)
+            return preprocess_aresampl_loudnorm_fixed2(
+                path,
+                cfg,
+                variant_number=variant_number,
+                variant_description=variant_desc,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
+
+        preprocess_runner = _aresampl_loudnorm_fixed2_runner
+        # Use custom transcribe wrapper that omits parameters
+        transcription_config_provider = None  # Not used with custom wrapper
     elif variant_name == "onlyden_noparamtrans":
         # Only denoise_light + minimal transcription parameters
         preprocess_config = PreprocessConfig()  # Use defaults
@@ -1468,7 +2042,23 @@ def main() -> int:
             # ("onlyden_noparamtrans", 9),  # Only denoise + minimal transcription parameters
             ("norm_highp_noparamtrans", 10),  # Loudness normalization + highpass + minimal params
             ("norm_dynaud_noparamtrans", 11),  # Dynamic audio normalization + minimal params
-            # ("onlyden_noparamtrans_custom", 12),  # Variant 9a: Only denoise with custom params + minimal params
+            (
+                "lnorm_highlow_aform_noparamtrans",
+                12,
+            ),  # Highpass + lowpass + aformat + loudness normalization + minimal params
+            (
+                "lnorm_highlow_nosampl_noparamtrans",
+                13,
+            ),  # Highpass + lowpass + loudness normalization (no aformat) + minimal params
+            (
+                "lnorm2_aresampl_noparamtrans",
+                14,
+            ),  # Aresample to 16kHz + loudness normalization (fixed params) + minimal params
+            (
+                "lnorm3_aresampl_noparamtrans",
+                15,
+            ),  # Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
+            # ("onlyden_noparamtrans_custom", 16),  # Variant 9a: Only denoise with custom params + minimal params
         ]
         summary_variants = variants
 
