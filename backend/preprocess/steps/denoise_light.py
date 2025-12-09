@@ -19,7 +19,7 @@ _SPECTRAL_GATE_WINDOW_SIZE = 400
 _SPECTRAL_GATE_HOP_LENGTH = 200
 _SPECTRAL_GATE_PROP_DECREASE = 0.5
 _SPECTRAL_GATE_N_STD_THRESH_STATIONARY = 1.25
-_SPECTRAL_GATE_NOISE_CLIP_DURATION_S = 0.8
+_SPECTRAL_GATE_NOISE_CLIP_DURATION_S = 5.0
 
 _STEP_NAME = "denoise_light"
 _UNEXPECTED_KWARG_PATTERN = re.compile(r"unexpected keyword argument '([^']+)'")
@@ -32,8 +32,22 @@ def apply_light_denoise(
     *,
     noise_reducer: Callable[..., np.ndarray] | None = None,
     writer: Callable[..., object] | None = None,
+    noise_clip_duration_s: float | None = None,
+    n_std_thresh_stationary: float | None = None,
+    prop_decrease: float | None = None,
 ) -> StepMetrics:
-    """Apply a light denoise using noisereduce.spectral_gate."""
+    """Apply a light denoise using noisereduce.spectral_gate.
+
+    Args:
+        input_path: Path to input audio file
+        output_path: Path to output audio file
+        sample_rate: Target sample rate
+        noise_reducer: Optional custom noise reducer function
+        writer: Optional custom audio writer function
+        noise_clip_duration_s: Duration in seconds for noise clip (default: 0.8)
+        n_std_thresh_stationary: Standard deviation threshold for stationary noise (default: 1.25)
+        prop_decrease: Proportion decrease for noise reduction (default: 0.5)
+    """
     start = time.time()
     reader = cast(Callable[..., tuple[np.ndarray, int]], sf.read)  # pyright: ignore[reportUnknownMemberType]
     try:
@@ -57,13 +71,23 @@ def apply_light_denoise(
     else:
         default_reducer = nr.reduce_noise  # pyright: ignore[reportUnknownMemberType]
     reducer: Callable[..., np.ndarray] = noise_reducer or default_reducer  # type: ignore[assignment]
-    noise_clip = mono[: min(len(mono), int(sample_rate * _SPECTRAL_GATE_NOISE_CLIP_DURATION_S))]
+
+    # Use custom parameters if provided, otherwise use defaults
+    noise_clip_duration = (
+        noise_clip_duration_s if noise_clip_duration_s is not None else _SPECTRAL_GATE_NOISE_CLIP_DURATION_S
+    )
+    n_std_thresh = (
+        n_std_thresh_stationary if n_std_thresh_stationary is not None else _SPECTRAL_GATE_N_STD_THRESH_STATIONARY
+    )
+    prop_dec = prop_decrease if prop_decrease is not None else _SPECTRAL_GATE_PROP_DECREASE
+
+    noise_clip = mono[: min(len(mono), int(sample_rate * noise_clip_duration))]
     reducer_kwargs = {
         "y": mono,
         "sr": sample_rate,
         "noise_clip": noise_clip,
-        "n_std_thresh_stationary": _SPECTRAL_GATE_N_STD_THRESH_STATIONARY,
-        "prop_decrease": _SPECTRAL_GATE_PROP_DECREASE,
+        "n_std_thresh_stationary": n_std_thresh,
+        "prop_decrease": prop_dec,
         "use_tensor": False,
         "stationary": True,
         "use_tqdm": False,

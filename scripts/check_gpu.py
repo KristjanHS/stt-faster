@@ -75,8 +75,8 @@ def check_ctranslate2() -> bool:
 
         # Check for CUDA support
         try:
-            cuda_available = ctranslate2.cuda.is_cuda_available()
-            cuda_device_count = ctranslate2.get_cuda_device_count()
+            cuda_available = ctranslate2.cuda.is_cuda_available()  # type: ignore[attr-defined]
+            cuda_device_count = ctranslate2.get_cuda_device_count()  # type: ignore[attr-defined]
 
             if cuda_available:
                 logger.info(f"✓ ctranslate2 CUDA support: Available ({cuda_device_count} devices)")
@@ -97,7 +97,7 @@ def check_faster_whisper() -> bool:
     try:
         import faster_whisper
 
-        logger.info(f"✓ faster-whisper version: {faster_whisper.__version__}")
+        logger.info(f"✓ faster-whisper version: {faster_whisper.__version__}")  # type: ignore[attr-defined]
         return True
     except ImportError:
         logger.error("✗ faster-whisper not installed")
