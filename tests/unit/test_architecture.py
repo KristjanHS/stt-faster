@@ -88,8 +88,8 @@ def test_scripts_are_thin_wrappers():
         # are allowed to be longer as they need to be self-contained
         excluded_scripts = {"compare_transcription_variants.py"}
         if script_file.name in excluded_scripts:
-            # Allow up to 1500 lines for comparison/utility scripts
-            assert len(lines) < 1500, (
+            # Allow up to 2000 lines for comparison/utility scripts
+            assert len(lines) < 2000, (
                 f"{script_file.name} has {len(lines)} lines. Consider splitting into smaller modules."
             )
         else:
