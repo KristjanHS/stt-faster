@@ -11,12 +11,86 @@ from typing import Any, Callable
 
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.orchestrator import PreprocessResult
-from backend.transcribe import pick_model, segment_to_payload
+from backend.transcribe import (
+    maybe_log_progress,
+    pick_model,
+    segment_to_payload,
+)
 from backend.variants.preprocess_steps import create_preprocess_runner
 from backend.variants.transcription_presets import get_transcription_config
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
+
+
+def create_variant_preprocess_runner(
+    variant: Variant,
+    preprocess_config: PreprocessConfig,
+    *,
+    base_name: str | None = None,
+    datetime_suffix: str | None = None,
+    output_dir: Path | None = None,
+    copy_intermediate: bool = False,
+) -> Callable[[str, PreprocessConfig], PreprocessResult]:
+    """Create a preprocessing runner function for a variant.
+
+    Args:
+        variant: Variant definition
+        preprocess_config: PreprocessConfig to use
+        base_name: Optional base name for intermediate file naming
+        datetime_suffix: Optional datetime suffix for intermediate file naming
+        output_dir: Optional output directory for intermediate files
+        copy_intermediate: Whether to copy intermediate files to output_dir
+
+    Returns:
+        A function that takes (path: str, config: PreprocessConfig) -> PreprocessResult
+    """
+    if variant.custom_preprocess_runner:
+        # Use custom preprocessing runner (for variants 10-16)
+        def _custom_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+            # Custom runners accept additional keyword arguments
+            return variant.custom_preprocess_runner(  # type: ignore[call-arg, misc]
+                path,
+                cfg,
+                variant_number=variant.number,
+                variant_description=variant.description,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
+
+        return _custom_runner
+    else:
+        # Use standard step-based preprocessing
+        return create_preprocess_runner(
+            variant.preprocess_steps,
+            preprocess_config,
+            variant_number=variant.number,
+            variant_description=variant.description,
+            base_name=base_name,
+            datetime_suffix=datetime_suffix,
+            output_dir=output_dir,
+            copy_intermediate=copy_intermediate,
+        )
+
+
+def create_variant_transcribe_config(variant: Variant) -> Any:  # TranscriptionConfig
+    """Create transcription config for a variant.
+
+    Args:
+        variant: Variant definition
+
+    Returns:
+        TranscriptionConfig instance
+    """
+    transcription_config = get_transcription_config(variant.transcription_preset)
+    # Apply any overrides
+    if variant.transcription_overrides:
+        for key, value in variant.transcription_overrides.items():
+            if hasattr(transcription_config, key):
+                setattr(transcription_config, key, value)
+    return transcription_config
 
 
 def execute_variant(
@@ -67,47 +141,22 @@ def execute_variant(
 
         # Create preprocessing runner from variant steps or use custom runner
         base_name = output_base_path.stem if output_base_path else Path(audio_path).stem
-        if variant.custom_preprocess_runner:
-            # Use custom preprocessing runner (for variants 10-15)
-            def _custom_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
-                # Custom runners accept additional keyword arguments
-                return variant.custom_preprocess_runner(  # type: ignore[call-arg, misc]
-                    path,
-                    cfg,
-                    variant_number=variant.number,
-                    variant_description=variant.description,
-                    base_name=base_name,
-                    datetime_suffix=datetime_suffix,
-                    output_dir=output_dir,
-                    copy_intermediate=copy_intermediate,
-                )
-
-            preprocess_runner = _custom_runner
-        else:
-            # Use standard step-based preprocessing
-            preprocess_runner = create_preprocess_runner(
-                variant.preprocess_steps,
-                preprocess_config,
-                variant_number=variant.number,
-                variant_description=variant.description,
-                base_name=base_name,
-                datetime_suffix=datetime_suffix,
-                output_dir=output_dir,
-                copy_intermediate=copy_intermediate,
-            )
+        preprocess_runner = create_variant_preprocess_runner(
+            variant,
+            preprocess_config,
+            base_name=base_name,
+            datetime_suffix=datetime_suffix,
+            output_dir=output_dir,
+            copy_intermediate=copy_intermediate,
+        )
 
         # Get transcription config based on preset
-        transcription_config = get_transcription_config(variant.transcription_preset)
-        # Apply any overrides
-        if variant.transcription_overrides:
-            for key, value in variant.transcription_overrides.items():
-                if hasattr(transcription_config, key):
-                    setattr(transcription_config, key, value)
+        transcription_config = create_variant_transcribe_config(variant)
 
         # Run transcription
         if variant.transcription_preset == "minimal":
             # Use minimal params transcription (omits parameters)
-            result = _transcribe_with_minimal_params(
+            result = transcribe_with_minimal_params(
                 path=audio_path,
                 preset=preset,
                 language=language,
@@ -197,7 +246,7 @@ def _transcribe_with_config(
     )
 
 
-def _transcribe_with_minimal_params(
+def transcribe_with_minimal_params(
     path: str,
     preset: str,
     language: str | None,
@@ -210,6 +259,9 @@ def _transcribe_with_minimal_params(
     """
     overall_start = time.time()
     preprocess_result = preprocess_runner(path, preprocess_config)
+    duration_hint = preprocess_result.input_info.duration if preprocess_result.input_info else None
+    if duration_hint:
+        LOGGER.info("🎧 Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     model = pick_model(preset)
 
@@ -233,10 +285,31 @@ def _transcribe_with_minimal_params(
         # Let faster-whisper use its internal defaults for these
     )
 
+    # Get total audio duration from info if available, fallback to duration_hint
+    total_audio_duration = getattr(info, "duration", None) or duration_hint
+    if total_audio_duration and not duration_hint:
+        LOGGER.info("🎧 Input duration: %.1f minutes", total_audio_duration / 60)
+
     # Process segments the same way as the main transcribe function
     segment_payloads: list[dict[str, Any]] = []
+    audio_processed = 0.0
+    last_progress_log = transcribe_start
+
     for segment in segments:
         segment_payloads.append(segment_to_payload(segment))
+
+        # Track progress for logging
+        end_time = getattr(segment, "end", None)
+        if end_time is not None:
+            audio_processed = max(audio_processed, float(end_time))
+
+        # Log progress every minute (same as main transcribe function)
+        last_progress_log = maybe_log_progress(
+            processed_seconds=audio_processed,
+            total_seconds=total_audio_duration,
+            start_time=transcribe_start,
+            last_log_time=last_progress_log,
+        )
 
     transcribe_time = time.time() - transcribe_start
 

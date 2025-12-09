@@ -276,7 +276,7 @@ def segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     return _round_floats(cleaned)
 
 
-def _maybe_log_progress(
+def maybe_log_progress(
     processed_seconds: float,
     total_seconds: float | None,
     start_time: float,
@@ -415,7 +415,7 @@ def transcribe(
             if end_time is not None:
                 audio_processed = max(audio_processed, float(end_time))
 
-            last_progress_log = _maybe_log_progress(
+            last_progress_log = maybe_log_progress(
                 processed_seconds=audio_processed,
                 total_seconds=total_audio_duration,
                 start_time=transcribe_start,

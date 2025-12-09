@@ -47,6 +47,376 @@ def _simple_resample(
     return StepMetrics(name="simple_resample", backend="ffmpeg", duration=duration)
 
 
+def _loudnorm_only(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """Lightweight ffmpeg step that only does resampling and loudness normalization (no highpass, no RNNoise)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # Build lightweight filter graph: only resample + loudnorm (no highpass, no RNNoise)
+        filter_graph = (
+            f"aresample=resampler=soxr:osr={target_sample_rate},loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+        )
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("loudnorm_only", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="loudnorm_only", backend="ffmpeg", duration=duration)
+
+
+def _loudnorm_with_highpass(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """Lightweight ffmpeg step with highpass filter, resampling, and loudness normalization (no RNNoise)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # Build lightweight filter graph: highpass + resample + loudnorm (no RNNoise)
+        filter_graph = (
+            f"highpass=f=60,"
+            f"aresample=resampler=soxr:osr={target_sample_rate},"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+        )
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("loudnorm_with_highpass", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="loudnorm_with_highpass", backend="ffmpeg", duration=duration)
+
+
+def _dynaudnorm_only(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Lightweight ffmpeg step that only does resampling and dynamic audio normalization (no highpass, no RNNoise)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        # Build lightweight filter graph: only resample + dynaudnorm (no highpass, no RNNoise)
+        filter_graph = f"aresample=resampler=soxr:osr={target_sample_rate},dynaudnorm"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("dynaudnorm_only", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="dynaudnorm_only", backend="ffmpeg", duration=duration)
+
+
+def _highlow_aform_loudnorm(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """Lightweight ffmpeg step with highpass, lowpass, aformat, and loudness normalization."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    from backend.preprocess.config import PreprocessConfig
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # Build filter graph: highpass + lowpass + aformat + loudnorm
+        filter_graph = (
+            f"highpass=f=60,"
+            f"lowpass=f=8000,"
+            f"aformat=sample_rates=16000,"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+        )
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("highlow_aform_loudnorm", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="highlow_aform_loudnorm", backend="ffmpeg", duration=duration)
+
+
+def _highlow_nosampl_loudnorm(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """Lightweight ffmpeg step with highpass, lowpass, and loudness normalization (no aformat/sampling)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    from backend.preprocess.config import PreprocessConfig
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # Build filter graph: highpass + lowpass + loudnorm (no aformat/sampling)
+        filter_graph = f"highpass=f=60,lowpass=f=8000,loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("highlow_nosampl_loudnorm", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="highlow_nosampl_loudnorm", backend="ffmpeg", duration=duration)
+
+
+def _aresampl_loudnorm_fixed(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Lightweight ffmpeg step with aresample to 16kHz and loudness normalization with fixed parameters."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        # Build filter graph: aresample to 16kHz + loudnorm with fixed parameters
+        filter_graph = "aresample=resampler=soxr:osr=16000,loudnorm=I=-23:TP=-2:LRA=11"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("aresampl_loudnorm_fixed", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="aresampl_loudnorm_fixed", backend="ffmpeg", duration=duration)
+
+
+def _aresampl_loudnorm_fixed2(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Lightweight ffmpeg step with aresample to 16kHz and loudness normalization with fixed params (I=-24, LRA=15)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        # Build filter graph: aresample to 16kHz + loudnorm with fixed parameters
+        filter_graph = "aresample=resampler=soxr:osr=16000,loudnorm=I=-24:TP=-2:LRA=15"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=filter_graph,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except Exception as exc:
+        raise StepExecutionError("aresampl_loudnorm_fixed2", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="aresampl_loudnorm_fixed2", backend="ffmpeg", duration=duration)
+
+
+def _loudnorm_2pass_linear(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """2-pass loudnorm in linear mode: first pass measures I/LRA/TP, second pass applies file-wide gain.
+
+    First pass: measure I/LRA/TP/threshold.
+    Second pass: set linear=true and reuse measured_I/LRA/TP/threshold.
+    This becomes a simple, file-wide gain change instead of frame-by-frame AGC.
+    """
+    import json
+
+    import ffmpeg  # type: ignore[import-untyped]
+
+    from backend.preprocess.config import PreprocessConfig
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # First pass: measure I/LRA/TP/threshold
+        # Use loudnorm with print_format=json to get measurements
+        first_pass_filter = (
+            f"aresample=resampler=soxr:osr={target_sample_rate},"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json"
+        )
+
+        # Run first pass to null output (we only need the JSON stats)
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            "null",
+            ac=target_channels,
+            af=first_pass_filter,
+            ar=target_sample_rate,
+            f="null",
+        )
+        # Capture stderr which contains the JSON output
+        # Note: quiet=True suppresses normal output but JSON from loudnorm should still appear in stderr
+        _, stderr = ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+        # Parse JSON from stderr
+        # The JSON output is typically at the end of stderr, after other messages
+        # ffmpeg.run returns bytes for stderr when capture_stderr=True
+        stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr  # type: ignore[reportUnnecessaryIsInstance]
+        # Find JSON block (usually between { and })
+        # Look for the last complete JSON object in stderr
+        json_start = stderr_str.rfind("{")
+        if json_start == -1:
+            # If no JSON found, try without quiet mode to see what's happening
+            LOGGER.warning("First pass stderr (first 500 chars): %s", stderr_str[:500])
+            raise StepExecutionError("loudnorm_2pass_linear", "Could not find JSON output in first pass stderr")
+
+        # Find matching closing brace
+        brace_count = 0
+        json_end = json_start
+        for i in range(json_start, len(stderr_str)):
+            if stderr_str[i] == "{":
+                brace_count += 1
+            elif stderr_str[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+
+        if brace_count != 0:
+            LOGGER.warning("First pass stderr (first 500 chars): %s", stderr_str[:500])
+            raise StepExecutionError(
+                "loudnorm_2pass_linear", "Could not find complete JSON object in first pass stderr"
+            )
+
+        json_str = stderr_str[json_start:json_end]
+        measurements = json.loads(json_str)
+
+        # Extract measured values
+        measured_i = measurements.get("input_i", target_i)
+        measured_lra = measurements.get("input_lra", target_lra)
+        measured_tp = measurements.get("input_tp", target_tp)
+        measured_thresh = measurements.get("input_thresh", -70.0)
+
+        # Second pass: apply linear mode with measured values
+        # linear=true makes it a simple file-wide gain change
+        second_pass_filter = (
+            f"aresample=resampler=soxr:osr={target_sample_rate},"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:"
+            f"measured_I={measured_i}:measured_LRA={measured_lra}:"
+            f"measured_TP={measured_tp}:measured_thresh={measured_thresh}:linear=true"
+        )
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=second_pass_filter,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except json.JSONDecodeError as exc:
+        raise StepExecutionError("loudnorm_2pass_linear", f"Failed to parse JSON from first pass: {exc}") from exc
+    except Exception as exc:
+        raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="loudnorm_2pass_linear", backend="ffmpeg", duration=duration)
+
+
 def create_preprocess_runner(
     steps: list[Any],  # list[PreprocessStep] but avoiding circular import
     base_config: PreprocessConfig,
@@ -202,6 +572,243 @@ def create_preprocess_runner(
                         _copy_intermediate_file(
                             denoised_path,
                             stage_name,
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "denoise_custom":
+                    # Denoise step with custom parameters
+                    denoised_path = Path(temp_dir.name) / f"denoise_custom_{step_index}.wav"
+                    # Extract custom parameters from step config
+                    noise_clip_duration_s = step.config.get("noise_clip_duration_s", 5.0) if step.config else 5.0
+                    n_std_thresh_stationary = step.config.get("n_std_thresh_stationary", 0.75) if step.config else 0.75
+                    prop_decrease = step.config.get("prop_decrease", 0.25) if step.config else 0.25
+                    step_metric = apply_light_denoise(
+                        input_path=current_path,
+                        output_path=denoised_path,
+                        sample_rate=merged_config.target_sample_rate,
+                        noise_clip_duration_s=noise_clip_duration_s,
+                        n_std_thresh_stationary=n_std_thresh_stationary,
+                        prop_decrease=prop_decrease,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = denoised_path
+
+                    if copy_intermediate:
+                        stage_name = "01_denoise_custom" if step_index == 0 else "02_denoise_custom"
+                        _copy_intermediate_file(
+                            denoised_path,
+                            stage_name,
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "loudnorm_only":
+                    # Lightweight loudnorm step (resample + loudnorm only)
+                    intermediate_path = Path(temp_dir.name) / f"loudnorm_only_{step_index}.wav"
+                    step_metric = _loudnorm_only(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        loudnorm_preset=merged_config.loudnorm_preset,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_loudnorm_only",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "loudnorm_highpass":
+                    # Lightweight loudnorm step with highpass filter
+                    intermediate_path = Path(temp_dir.name) / f"loudnorm_highpass_{step_index}.wav"
+                    step_metric = _loudnorm_with_highpass(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        loudnorm_preset=merged_config.loudnorm_preset,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_loudnorm_highpass",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "dynaudnorm":
+                    # Dynamic audio normalization step
+                    intermediate_path = Path(temp_dir.name) / f"dynaudnorm_{step_index}.wav"
+                    step_metric = _dynaudnorm_only(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_dynaudnorm",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "highlow_aform_loudnorm":
+                    # Highpass + lowpass + aformat + loudnorm step
+                    intermediate_path = Path(temp_dir.name) / f"highlow_aform_loudnorm_{step_index}.wav"
+                    step_metric = _highlow_aform_loudnorm(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        loudnorm_preset=merged_config.loudnorm_preset,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_highlow_aform_loudnorm",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "highlow_nosampl_loudnorm":
+                    # Highpass + lowpass + loudnorm (no aformat) step
+                    intermediate_path = Path(temp_dir.name) / f"highlow_nosampl_loudnorm_{step_index}.wav"
+                    step_metric = _highlow_nosampl_loudnorm(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        loudnorm_preset=merged_config.loudnorm_preset,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_highlow_nosampl_loudnorm",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "aresampl_loudnorm_fixed":
+                    # Aresample to 16kHz + loudnorm with fixed parameters step
+                    intermediate_path = Path(temp_dir.name) / f"aresampl_loudnorm_fixed_{step_index}.wav"
+                    step_metric = _aresampl_loudnorm_fixed(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_aresampl_loudnorm_fixed",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "aresampl_loudnorm_fixed2":
+                    # Aresample to 16kHz + loudnorm with fixed params (I=-24, LRA=15) step
+                    intermediate_path = Path(temp_dir.name) / f"aresampl_loudnorm_fixed2_{step_index}.wav"
+                    step_metric = _aresampl_loudnorm_fixed2(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_aresampl_loudnorm_fixed2",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "loudnorm_2pass_linear":
+                    # 2-pass loudnorm in linear mode step
+                    intermediate_path = Path(temp_dir.name) / f"loudnorm_2pass_linear_{step_index}.wav"
+                    step_metric = _loudnorm_2pass_linear(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        loudnorm_preset=merged_config.loudnorm_preset,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_loudnorm_2pass_linear",
                             variant_number,
                             variant_description,
                             base_name,

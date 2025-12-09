@@ -13,13 +13,32 @@ class PreprocessStep:
     Args:
         name: Human-readable name for the step
         enabled: Whether this step should be executed
-        step_type: Type of preprocessing step ("ffmpeg", "denoise", "resample")
+        step_type: Type of preprocessing step (
+            "ffmpeg", "denoise", "resample", "loudnorm_only",
+            "loudnorm_highpass", "dynaudnorm", "denoise_custom",
+            "highlow_aform_loudnorm", "highlow_nosampl_loudnorm",
+            "aresampl_loudnorm_fixed", "aresampl_loudnorm_fixed2",
+            "loudnorm_2pass_linear"
+        )
         config: Optional configuration dictionary for step-specific parameters
     """
 
     name: str
     enabled: bool
-    step_type: Literal["ffmpeg", "denoise", "resample"]
+    step_type: Literal[
+        "ffmpeg",
+        "denoise",
+        "resample",
+        "loudnorm_only",
+        "loudnorm_highpass",
+        "dynaudnorm",
+        "denoise_custom",
+        "highlow_aform_loudnorm",
+        "highlow_nosampl_loudnorm",
+        "aresampl_loudnorm_fixed",
+        "aresampl_loudnorm_fixed2",
+        "loudnorm_2pass_linear",
+    ]
     config: dict[str, Any] | None = None
 
 

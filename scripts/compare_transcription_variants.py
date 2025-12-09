@@ -184,6 +184,119 @@ def _dynaudnorm_only(
     return StepMetrics(name="dynaudnorm_only", backend="ffmpeg", duration=duration)
 
 
+def _loudnorm_2pass_linear(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    loudnorm_preset: str = "default",
+) -> StepMetrics:
+    """2-pass loudnorm in linear mode: first pass measures I/LRA/TP, second pass applies file-wide gain.
+
+    First pass: measure I/LRA/TP/threshold.
+    Second pass: set linear=true and reuse measured_I/LRA/TP/threshold.
+    This becomes a simple, file-wide gain change instead of frame-by-frame AGC.
+    """
+    import json
+
+    import ffmpeg  # type: ignore[import-untyped]
+
+    from backend.preprocess.config import PreprocessConfig
+
+    start = time.time()
+    try:
+        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        target_i = preset_config["I"]
+        target_tp = preset_config.get("TP", -2.0)
+        target_lra = preset_config["LRA"]
+
+        # First pass: measure I/LRA/TP/threshold
+        # Use loudnorm with print_format=json to get measurements
+        first_pass_filter = (
+            f"aresample=resampler=soxr:osr={target_sample_rate},"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:print_format=json"
+        )
+
+        # Run first pass to null output (we only need the JSON stats)
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            "null",
+            ac=target_channels,
+            af=first_pass_filter,
+            ar=target_sample_rate,
+            f="null",
+        )
+        # Capture stderr which contains the JSON output
+        # Note: quiet=True suppresses normal output but JSON from loudnorm should still appear in stderr
+        _, stderr = ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+        # Parse JSON from stderr
+        # The JSON output is typically at the end of stderr, after other messages
+        stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr
+        # Find JSON block (usually between { and })
+        # Look for the last complete JSON object in stderr
+        json_start = stderr_str.rfind("{")
+        if json_start == -1:
+            # If no JSON found, try without quiet mode to see what's happening
+            LOGGER.warning("First pass stderr (first 500 chars): %s", stderr_str[:500])
+            raise StepExecutionError("loudnorm_2pass_linear", "Could not find JSON output in first pass stderr")
+
+        # Find matching closing brace
+        brace_count = 0
+        json_end = json_start
+        for i in range(json_start, len(stderr_str)):
+            if stderr_str[i] == "{":
+                brace_count += 1
+            elif stderr_str[i] == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    json_end = i + 1
+                    break
+
+        if brace_count != 0:
+            LOGGER.warning("First pass stderr (first 500 chars): %s", stderr_str[:500])
+            raise StepExecutionError(
+                "loudnorm_2pass_linear", "Could not find complete JSON object in first pass stderr"
+            )
+
+        json_str = stderr_str[json_start:json_end]
+        measurements = json.loads(json_str)
+
+        # Extract measured values
+        measured_i = measurements.get("input_i", target_i)
+        measured_lra = measurements.get("input_lra", target_lra)
+        measured_tp = measurements.get("input_tp", target_tp)
+        measured_thresh = measurements.get("input_thresh", -70.0)
+
+        # Second pass: apply linear mode with measured values
+        # linear=true makes it a simple file-wide gain change
+        second_pass_filter = (
+            f"aresample=resampler=soxr:osr={target_sample_rate},"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}:"
+            f"measured_I={measured_i}:measured_LRA={measured_lra}:"
+            f"measured_TP={measured_tp}:measured_thresh={measured_thresh}:linear=true"
+        )
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            af=second_pass_filter,
+            ar=target_sample_rate,
+            sample_fmt="s16",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except json.JSONDecodeError as exc:
+        raise StepExecutionError("loudnorm_2pass_linear", f"Failed to parse JSON from first pass: {exc}") from exc
+    except Exception as exc:
+        raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name="loudnorm_2pass_linear", backend="ffmpeg", duration=duration)
+
+
 def _highlow_aform_loudnorm(
     input_path: Path,
     output_path: Path,
@@ -355,6 +468,7 @@ def _get_variant_description(variant_name: str) -> str:
         "lnorm3_aresampl_noparamtrans": "lnorm3_aresampl_noparam",
         "onlyden_noparamtrans": "onlyden_noparam",
         "onlyden_noparamtrans_custom": "den2_noparam",
+        "loudnorm_2pass_linear_noparamtrans": "lnorm2p_linear_noparam",
     }
     return descriptions.get(variant_name, variant_name)
 
@@ -1062,6 +1176,95 @@ def preprocess_aresampl_loudnorm_fixed2(
     )
 
 
+def preprocess_loudnorm_2pass_linear(
+    input_path: str | Path,
+    config: PreprocessConfig | None = None,
+    *,
+    variant_number: int | None = None,
+    variant_description: str | None = None,
+    base_name: str | None = None,
+    datetime_suffix: str | None = None,
+    output_dir: Path | None = None,
+    copy_intermediate: bool = False,
+) -> PreprocessResult:
+    """Preprocess audio using 2-pass loudnorm in linear mode (file-wide gain change).
+
+    First pass: measure I/LRA/TP/threshold.
+    Second pass: set linear=true and reuse measured_I/LRA/TP/threshold.
+    This becomes a simple, file-wide gain change instead of frame-by-frame AGC.
+    """
+    cfg = config or PreprocessConfig.from_env()
+    source = Path(input_path)
+    input_info: AudioInfo | None = None
+
+    try:
+        input_info = inspect_audio(source)
+    except PreprocessError as exc:
+        LOGGER.warning("Skipping metadata inspection: %s", exc)
+
+    if not cfg.enabled:
+        LOGGER.info("Audio preprocessing disabled; using input as-is.")
+        return PreprocessResult(
+            output_path=source,
+            input_info=input_info,
+            metrics=PreprocessMetrics(total_duration=0.0, steps=[]),
+            profile="disabled",
+            cleanup=lambda: None,
+        )
+
+    input_channels = input_info.channels if input_info else None
+    resolved_channels = cfg.target_channels or input_channels or 1
+
+    temp_dir = TemporaryDirectory(prefix="stt-preprocess_", dir=cfg.temp_dir)
+    processed_path = Path(temp_dir.name) / "preprocessed.wav"
+    original_filename = source.stem
+
+    step_metrics: list[StepMetrics] = []
+    overall_start = time.time()
+
+    try:
+        # Run 2-pass loudnorm in linear mode
+        step_metric = _loudnorm_2pass_linear(
+            input_path=source,
+            output_path=processed_path,
+            target_sample_rate=cfg.target_sample_rate,
+            target_channels=resolved_channels,
+            loudnorm_preset=cfg.loudnorm_preset,
+        )
+        step_metrics.append(step_metric)
+        # Save with variant number and datetime if provided
+        if copy_intermediate:
+            if variant_number is not None and variant_description and base_name and datetime_suffix and output_dir:
+                _copy_stage_output_with_variant(
+                    processed_path,
+                    output_dir,
+                    variant_number,
+                    variant_description,
+                    "01_loudnorm_2pass_linear",
+                    base_name,
+                    datetime_suffix,
+                )
+            elif cfg.output_dir:
+                _copy_stage_output(processed_path, cfg.output_dir, "01_loudnorm_2pass_linear", original_filename)
+
+        metrics = PreprocessMetrics(total_duration=time.time() - overall_start, steps=step_metrics)
+    except Exception as exc:
+        temp_dir.cleanup()
+        raise PreprocessError(f"Preprocessing failure: {exc}") from exc
+
+    LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
+    for metric in metrics.steps:
+        LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+
+    return PreprocessResult(
+        output_path=processed_path,
+        input_info=input_info,
+        metrics=metrics,
+        profile="cpu",
+        cleanup=temp_dir.cleanup,
+    )
+
+
 def preprocess_only_denoise(
     input_path: str | Path,
     config: PreprocessConfig | None = None,
@@ -1742,6 +1945,28 @@ def run_variant(
         preprocess_runner = _denoise_custom_runner
         # Use custom transcribe wrapper that omits parameters
         transcription_config_provider = None  # Not used with custom wrapper
+    elif variant_name == "loudnorm_2pass_linear_noparamtrans":
+        # 2-pass loudnorm in linear mode (file-wide gain change) + minimal transcription parameters
+        preprocess_config = PreprocessConfig()  # Use defaults for loudnorm params
+
+        # Create a wrapper that passes variant info to preprocess function
+        def _loudnorm_2pass_linear_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+            base_name = output_base_path.stem if output_base_path else Path(path).stem
+            variant_desc = _get_variant_description(variant_name)
+            return preprocess_loudnorm_2pass_linear(
+                path,
+                cfg,
+                variant_number=variant_number,
+                variant_description=variant_desc,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
+
+        preprocess_runner = _loudnorm_2pass_linear_runner
+        # Use custom transcribe wrapper that omits parameters
+        transcription_config_provider = None  # Not used with custom wrapper
     else:
         raise ValueError(f"Unknown variant: {variant_name}")
 
@@ -2072,6 +2297,10 @@ def main() -> int:
                 15,
             ),  # Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
             # ("onlyden_noparamtrans_custom", 16),  # Variant 9a: Only denoise with custom params + minimal params
+            (
+                "loudnorm_2pass_linear_noparamtrans",
+                16,
+            ),  # 2-pass loudnorm in linear mode (file-wide gain) + minimal params
         ]
         # Filter out skipped variants
         if args.skip_variants:

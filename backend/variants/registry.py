@@ -5,49 +5,12 @@ from __future__ import annotations
 from backend.variants.variant import PreprocessStep, Variant
 
 
-def _get_custom_preprocess_functions():
-    """Import custom preprocessing functions from compare_transcription_variants script.
-
-    These are used for variants 10-15 that require custom preprocessing logic.
-    Uses importlib to safely import from the script file.
-    """
-    import importlib.util
-    from pathlib import Path
-
-    # Get the scripts directory
-    scripts_dir = Path(__file__).parent.parent.parent / "scripts"
-    script_path = scripts_dir / "compare_transcription_variants.py"
-
-    if not script_path.exists():
-        raise ImportError(f"Could not find compare_transcription_variants.py at {script_path}")
-
-    # Use importlib to load the module from the file path
-    spec = importlib.util.spec_from_file_location("compare_transcription_variants", script_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Could not load spec from {script_path}")
-
-    module = importlib.util.module_from_spec(spec)
-    # Execute the module (this will define all the functions)
-    spec.loader.exec_module(module)
-
-    return {
-        "loudnorm_with_highpass": module.preprocess_loudnorm_with_highpass,
-        "dynaudnorm_only": module.preprocess_dynaudnorm_only,
-        "highlow_aform_loudnorm": module.preprocess_highlow_aform_loudnorm,
-        "highlow_nosampl_loudnorm": module.preprocess_highlow_nosampl_loudnorm,
-        "aresampl_loudnorm_fixed": module.preprocess_aresampl_loudnorm_fixed,
-        "aresampl_loudnorm_fixed2": module.preprocess_aresampl_loudnorm_fixed2,
-    }
-
-
 def get_builtin_variants() -> list[Variant]:
-    """Return list of all built-in variants (1-15).
+    """Return list of all built-in variants (1-16).
 
     These match the variants currently defined in compare_transcription_variants.py.
-    Variants 10-15 use custom preprocessing functions.
+    All variants now use declarative preprocessing steps.
     """
-    # Get custom preprocessing functions for variants 10-15
-    custom_funcs = _get_custom_preprocess_functions()
 
     return [
         # Variant 1: No preprocessing + project defaults
@@ -142,54 +105,70 @@ def get_builtin_variants() -> list[Variant]:
             name="norm_highp_noparamtrans",
             number=10,
             description="norm_highp_noparam",
-            preprocess_steps=[],
+            preprocess_steps=[
+                PreprocessStep(name="loudnorm_highpass", enabled=True, step_type="loudnorm_highpass"),
+            ],
             transcription_preset="minimal",
-            custom_preprocess_runner=custom_funcs["loudnorm_with_highpass"],
         ),
         # Variant 11: Dynamic audio normalization + minimal params
         Variant(
             name="norm_dynaud_noparamtrans",
             number=11,
             description="norm_dynaud_noparam",
-            preprocess_steps=[],
+            preprocess_steps=[
+                PreprocessStep(name="dynaudnorm", enabled=True, step_type="dynaudnorm"),
+            ],
             transcription_preset="minimal",
-            custom_preprocess_runner=custom_funcs["dynaudnorm_only"],
         ),
         # Variant 12: Highpass + lowpass + aformat + loudness normalization + minimal params
         Variant(
             name="lnorm_highlow_aform_noparamtrans",
             number=12,
             description="lnorm_highlow_aform_noparam",
-            preprocess_steps=[],
+            preprocess_steps=[
+                PreprocessStep(name="highlow_aform_loudnorm", enabled=True, step_type="highlow_aform_loudnorm"),
+            ],
             transcription_preset="minimal",
-            custom_preprocess_runner=custom_funcs["highlow_aform_loudnorm"],
         ),
         # Variant 13: Highpass + lowpass + loudness normalization (no aformat) + minimal params
         Variant(
             name="lnorm_highlow_nosampl_noparamtrans",
             number=13,
             description="lnorm_highlow_nosampl_noparam",
-            preprocess_steps=[],
+            preprocess_steps=[
+                PreprocessStep(name="highlow_nosampl_loudnorm", enabled=True, step_type="highlow_nosampl_loudnorm"),
+            ],
             transcription_preset="minimal",
-            custom_preprocess_runner=custom_funcs["highlow_nosampl_loudnorm"],
         ),
         # Variant 14: Aresample to 16kHz + loudness normalization (fixed params) + minimal params
         Variant(
             name="lnorm2_aresampl_noparamtrans",
             number=14,
             description="lnorm2_aresampl_noparam",
-            preprocess_steps=[],
+            preprocess_steps=[
+                PreprocessStep(name="aresampl_loudnorm_fixed", enabled=True, step_type="aresampl_loudnorm_fixed"),
+            ],
             transcription_preset="minimal",
-            custom_preprocess_runner=custom_funcs["aresampl_loudnorm_fixed"],
         ),
         # Variant 15: Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
         Variant(
             name="lnorm3_aresampl_noparamtrans",
             number=15,
             description="lnorm3_aresampl_noparam",
-            preprocess_steps=[],
+            preprocess_steps=[
+                PreprocessStep(name="aresampl_loudnorm_fixed2", enabled=True, step_type="aresampl_loudnorm_fixed2"),
+            ],
             transcription_preset="minimal",
-            custom_preprocess_runner=custom_funcs["aresampl_loudnorm_fixed2"],
+        ),
+        # Variant 16: 2-pass loudnorm in linear mode (file-wide gain change) + minimal params
+        Variant(
+            name="loudnorm_2pass_linear_noparamtrans",
+            number=16,
+            description="lnorm2p_linear_noparam",
+            preprocess_steps=[
+                PreprocessStep(name="loudnorm_2pass_linear", enabled=True, step_type="loudnorm_2pass_linear"),
+            ],
+            transcription_preset="minimal",
         ),
     ]
 
@@ -213,7 +192,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     """Get a variant by its number.
 
     Args:
-        number: Variant number (1-15)
+        number: Variant number (1-16)
 
     Returns:
         Variant instance or None if not found

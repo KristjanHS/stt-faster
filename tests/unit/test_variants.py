@@ -56,11 +56,11 @@ class TestVariantRegistry:
         for i in range(1, 10):
             assert i in numbers, f"Variant {i} should exist"
 
-    def test_variants_10_through_15_exist(self) -> None:
-        """Test that variants 10-15 exist (custom preprocessing variants)."""
+    def test_variants_10_through_16_exist(self) -> None:
+        """Test that variants 10-16 exist (custom preprocessing variants)."""
         variants = get_builtin_variants()
         numbers = {v.number for v in variants}
-        for i in range(10, 16):
+        for i in range(10, 17):
             assert i in numbers, f"Variant {i} should exist"
 
     def test_variant_7_has_no_preprocessing(self) -> None:
@@ -71,13 +71,21 @@ class TestVariantRegistry:
         assert len(variant.preprocess_steps) == 0
         assert variant.transcription_preset == "minimal"
 
-    def test_variants_10_15_have_custom_runners(self) -> None:
-        """Test that variants 10-15 have custom preprocessing runners."""
-        for i in range(10, 16):
+    def test_variants_12_16_have_declarative_steps(self) -> None:
+        """Test that variants 12-16 use declarative steps instead of custom runners."""
+        for i in range(12, 17):
             variant = get_variant_by_number(i)
             assert variant is not None, f"Variant {i} should exist"
-            assert variant.custom_preprocess_runner is not None, f"Variant {i} should have custom runner"
-            assert callable(variant.custom_preprocess_runner)
+            assert variant.custom_preprocess_runner is None, f"Variant {i} should not have custom runner"
+            assert len(variant.preprocess_steps) > 0, f"Variant {i} should have declarative steps"
+
+    def test_variants_10_11_have_declarative_steps(self) -> None:
+        """Test that variants 10-11 use declarative steps instead of custom runners."""
+        for i in range(10, 12):
+            variant = get_variant_by_number(i)
+            assert variant is not None, f"Variant {i} should exist"
+            assert variant.custom_preprocess_runner is None, f"Variant {i} should not have custom runner"
+            assert len(variant.preprocess_steps) > 0, f"Variant {i} should have declarative steps"
 
     def test_get_variant_by_number(self) -> None:
         """Test getting variant by number."""
@@ -104,13 +112,27 @@ class TestVariantRegistry:
     def test_variant_preprocess_steps_structure(self) -> None:
         """Test that preprocess steps have correct structure for standard variants."""
         variants = get_builtin_variants()
+        valid_step_types = (
+            "ffmpeg",
+            "denoise",
+            "resample",
+            "loudnorm_only",
+            "loudnorm_highpass",
+            "dynaudnorm",
+            "denoise_custom",
+            "highlow_aform_loudnorm",
+            "highlow_nosampl_loudnorm",
+            "aresampl_loudnorm_fixed",
+            "aresampl_loudnorm_fixed2",
+            "loudnorm_2pass_linear",
+        )
         for variant in variants:
             # Only check variants without custom runners
             if variant.custom_preprocess_runner is None:
                 for step in variant.preprocess_steps:
                     assert isinstance(step, PreprocessStep)
                     assert step.name
-                    assert step.step_type in ("ffmpeg", "denoise", "resample")
+                    assert step.step_type in valid_step_types, f"Invalid step_type: {step.step_type}"
                     assert isinstance(step.enabled, bool)
 
 
@@ -169,8 +191,8 @@ class TestVariantFiltering:
         skip_set = {1, 2, 3, 4, 5, 6, 8, 9}
         filtered = [v for v in variants if v.number not in skip_set]
 
-        # Should have variants 7, 10, 11, 12, 13, 14, 15
-        expected_numbers = {7, 10, 11, 12, 13, 14, 15}
+        # Should have variants 7, 10, 11, 12, 13, 14, 15, 16
+        expected_numbers = {7, 10, 11, 12, 13, 14, 15, 16}
         actual_numbers = {v.number for v in filtered}
         assert actual_numbers == expected_numbers
 
@@ -191,8 +213,8 @@ class TestVariantFiltering:
         filtered = [v for v in variants if v.number not in skip_set]
 
         # Original variants should still be accessible
-        assert len(variants) == 15  # All 15 variants should exist
-        assert len(filtered) == 12  # After skipping 3, should have 12
+        assert len(variants) == 16  # All 16 variants should exist
+        assert len(filtered) == 13  # After skipping 3, should have 13
 
 
 class TestVariantDataStructures:
@@ -264,8 +286,8 @@ class TestVariantPresets:
         variants = get_builtin_variants()
         minimal_variants = [v for v in variants if v.transcription_preset == "minimal"]
 
-        # Variants 7, 10-15 should use minimal preset
-        expected_minimal = {7, 10, 11, 12, 13, 14, 15}
+        # Variants 7, 10-16 should use minimal preset
+        expected_minimal = {7, 10, 11, 12, 13, 14, 15, 16}
         actual_minimal = {v.number for v in minimal_variants}
         assert expected_minimal.issubset(actual_minimal)
 
@@ -309,6 +331,7 @@ class TestVariantCompatibility:
             13: "lnorm_highlow_nosampl_noparamtrans",
             14: "lnorm2_aresampl_noparamtrans",
             15: "lnorm3_aresampl_noparamtrans",
+            16: "loudnorm_2pass_linear_noparamtrans",
         }
 
         for number, expected_name in expected_mappings.items():
