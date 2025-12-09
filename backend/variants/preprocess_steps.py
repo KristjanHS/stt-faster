@@ -9,6 +9,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable
 
+from rich.console import Console
+
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import PreprocessError, StepExecutionError
 from backend.preprocess.io import AudioInfo, inspect_audio
@@ -18,6 +20,7 @@ from backend.preprocess.steps.denoise_light import apply_light_denoise
 from backend.preprocess.steps.ffmpeg_pipeline import run_ffmpeg_pipeline
 
 LOGGER = logging.getLogger(__name__)
+console = Console()
 
 
 def _simple_resample(
@@ -416,18 +419,18 @@ def _loudnorm_2pass_linear(
         # 3.1 Measured LRA: from JSON, then fall back to target_lra, then 0.0
         measured_lra_float = _to_float(measured_lra_raw, _to_float(target_lra, 0.0))
 
-        # 3.2 Special case: if loudnorm reports LRA == 0, use a safe default (30)
+        # 3.2 Special case: if loudnorm reports LRA == 0, use a safe default
         if measured_lra_float == 0.0:
-            measured_lra_float = 30.0
+            measured_lra_float = 15.0
 
-        # 3.3 Clamp measured LRA to valid range [24, 30]
-        measured_lra = max(24.0, min(measured_lra_float, 30.0))
+        # 3.3 Clamp measured LRA to valid range
+        measured_lra = max(11.0, min(measured_lra_float, 15.0))
 
         # 3.4 Target LRA for second pass:
         #     - at least measured_lra (required for linear mode)
-        #     - within [24, 30]
+        #     - within [measured_lra, MY MAX]
         target_lra_float = _to_float(target_lra, measured_lra)
-        target_lra_clamped = max(measured_lra, min(target_lra_float, 30.0))
+        target_lra_clamped = max(measured_lra, min(target_lra_float, 15.0))
 
         # ----- 4. Second pass: apply linear loudnorm with measured stats -----
         second_pass_filter = (
@@ -530,7 +533,7 @@ def create_preprocess_runner(
         )
 
         if not merged_config.enabled:
-            LOGGER.info("Audio preprocessing disabled; using input as-is.")
+            LOGGER.debug("Audio preprocessing disabled; using input as-is.")
             return PreprocessResult(
                 output_path=source,
                 input_info=input_info,
@@ -892,12 +895,19 @@ def create_preprocess_runner(
             temp_dir.cleanup()
             raise PreprocessError(f"Preprocessing failure: {exc}") from exc
 
-        LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
+        # Display preprocessing summary with Rich
+        step_details: list[str] = []
         for metric in metrics.steps:
             lra_info = ""
             if metric.metadata and "lra_used" in metric.metadata:
                 lra_info = f" LRA={metric.metadata['lra_used']:.1f}"
-            LOGGER.info(" - Step %s (%s): %.2fs%s", metric.name, metric.backend, metric.duration, lra_info)
+            step_details.append(f"  └─ {metric.name} ({metric.backend}): {metric.duration:.2f}s{lra_info}")
+            LOGGER.debug("Preprocessing step %s (%s): %.2fs%s", metric.name, metric.backend, metric.duration, lra_info)
+
+        console.print(f"[cyan]⏳ Pre-processing completed in[/cyan] {metrics.total_duration:.2f}s")
+        for detail in step_details:
+            console.print(detail)
+        LOGGER.debug("Pre-processing completed in %.2fs", metrics.total_duration)
 
         return PreprocessResult(
             output_path=processed_path,
