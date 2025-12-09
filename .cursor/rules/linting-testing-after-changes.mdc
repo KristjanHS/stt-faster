@@ -1,0 +1,9 @@
+---
+description: "After code changes, use make targets: make pre-commit | make unit | make integration and make e2e"
+type: agent-select
+globs:
+  - "**/*.py"
+alwaysApply: true
+---
+- Avoid using `print` (Ruff rule T201). Prefer `logging` for application and tests.
+- Automatically run the make targets to validate your code changes

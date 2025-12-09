@@ -35,7 +35,7 @@ def _simple_resample(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             ar=target_sample_rate,
             acodec="pcm_s16le",
         )
@@ -73,7 +73,7 @@ def _loudnorm_only(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -114,7 +114,7 @@ def _loudnorm_with_highpass(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -145,7 +145,7 @@ def _dynaudnorm_only(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -189,7 +189,7 @@ def _highlow_aform_loudnorm(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -228,7 +228,7 @@ def _highlow_nosampl_loudnorm(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -259,7 +259,7 @@ def _aresampl_loudnorm_fixed(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -290,7 +290,7 @@ def _aresampl_loudnorm_fixed2(
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
-            ac=target_channels,
+            ac=1,  # Force mono for Whisper/faster-whisper
             af=filter_graph,
             ar=target_sample_rate,
             sample_fmt="s16",
@@ -301,6 +301,14 @@ def _aresampl_loudnorm_fixed2(
 
     duration = time.time() - start
     return StepMetrics(name="aresampl_loudnorm_fixed2", backend="ffmpeg", duration=duration)
+
+
+def _to_float(value: Any, default: float) -> float:
+    """Best-effort float conversion with a safe default."""
+    try:
+        return default if value is None else float(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _loudnorm_2pass_linear(
@@ -314,21 +322,10 @@ def _loudnorm_2pass_linear(
     target_tp: float | None = None,
     target_lra: float | None = None,
 ) -> StepMetrics:
-    """2-pass loudnorm in linear mode: first pass measures I/LRA/TP, second pass applies file-wide gain.
+    """2-pass loudnorm in linear mode: measure, then apply file-wide gain.
 
-    First pass: measure I/LRA/TP/threshold.
-    Second pass: set linear=true and reuse measured_I/LRA/TP/threshold.
-    This becomes a simple, file-wide gain change instead of frame-by-frame AGC.
-
-    Args:
-        input_path: Input audio file path
-        output_path: Output audio file path
-        target_sample_rate: Target sample rate in Hz
-        target_channels: Target number of channels
-        loudnorm_preset: Preset name (used if custom values not provided)
-        target_i: Optional custom integrated loudness target (LUFS)
-        target_tp: Optional custom true peak target (dB)
-        target_lra: Optional custom loudness range target (LU)
+    First pass: measure I/LRA/TP/threshold via loudnorm=print_format=json.
+    Second pass: reuse measured_* with linear=true to avoid dynamic AGC.
     """
     import json
 
@@ -337,85 +334,109 @@ def _loudnorm_2pass_linear(
     from backend.preprocess.config import PreprocessConfig
 
     start = time.time()
-    try:
-        # Use custom values if provided, otherwise use preset
-        if target_i is None or target_tp is None or target_lra is None:
-            preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-            target_i = target_i if target_i is not None else preset_config["I"]
-            target_tp = target_tp if target_tp is not None else preset_config.get("TP", -2.0)
-            target_lra = target_lra if target_lra is not None else preset_config["LRA"]
 
-        # First pass: measure I/LRA/TP/threshold
-        # Use loudnorm with print_format=json to get measurements (no target values needed for measurement)
+    try:
+        # ----- 0. Resolve target loudnorm parameters from preset / overrides -----
+        if target_i is None or target_tp is None or target_lra is None:
+            preset = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+            if target_i is None:
+                target_i = float(preset["I"])
+            if target_tp is None:
+                target_tp = float(preset.get("TP", -2.0))
+            if target_lra is None:
+                target_lra = float(preset["LRA"])
+
+        # Sanity: mypy/pyright hinting
+        assert target_i is not None  # nosec B101
+        assert target_tp is not None  # nosec B101
+        assert target_lra is not None  # nosec B101
+
+        # ----- 1. First pass: measure loudness stats (no actual output) -----
         first_pass_filter = f"aresample=resampler=soxr:osr={target_sample_rate},loudnorm=print_format=json"
 
-        # Run first pass to null output (we only need the JSON stats)
-        # Force mono (ac=1) for Whisper/faster-whisper compatibility
         stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
         stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             "null",
-            ac=1,  # Force mono for Whisper/faster-whisper
             af=first_pass_filter,
-            ar=target_sample_rate,
             f="null",
         )
-        # Capture stderr which contains the JSON output
-        # Note: quiet=True suppresses normal output but JSON from loudnorm should still appear in stderr
-        _, stderr = ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        _, stderr = ffmpeg.run(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            overwrite_output=True,
+            quiet=True,
+            capture_stdout=True,
+            capture_stderr=True,
+        )
 
-        # Parse JSON from stderr
-        # The JSON output is typically at the end of stderr, after other messages
-        # ffmpeg.run returns bytes for stderr when capture_stderr=True
+        # ----- 2. Extract JSON from stderr -----
         stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr  # type: ignore[reportUnnecessaryIsInstance]
-        # Find JSON block (usually between { and })
-        # Look for the last complete JSON object in stderr
         json_start = stderr_str.rfind("{")
         if json_start == -1:
-            # If no JSON found, try without quiet mode to see what's happening
-            LOGGER.warning("First pass stderr (first 500 chars): %s", stderr_str[:500])
-            raise StepExecutionError("loudnorm_2pass_linear", "Could not find JSON output in first pass stderr")
+            LOGGER.warning(
+                "First pass stderr (first 500 chars): %s",
+                stderr_str[:500],
+            )
+            raise StepExecutionError(
+                "loudnorm_2pass_linear",
+                "Could not find JSON output in first pass stderr",
+            )
 
-        # Find matching closing brace
         brace_count = 0
         json_end = json_start
-        for i in range(json_start, len(stderr_str)):
-            if stderr_str[i] == "{":
+        for i, ch in enumerate(stderr_str[json_start:], start=json_start):
+            if ch == "{":
                 brace_count += 1
-            elif stderr_str[i] == "}":
+            elif ch == "}":
                 brace_count -= 1
                 if brace_count == 0:
                     json_end = i + 1
                     break
 
         if brace_count != 0:
-            LOGGER.warning("First pass stderr (first 500 chars): %s", stderr_str[:500])
+            LOGGER.warning(
+                "First pass stderr (first 500 chars): %s",
+                stderr_str[:500],
+            )
             raise StepExecutionError(
-                "loudnorm_2pass_linear", "Could not find complete JSON object in first pass stderr"
+                "loudnorm_2pass_linear",
+                "Could not find complete JSON object in first pass stderr",
             )
 
-        json_str = stderr_str[json_start:json_end]
-        measurements = json.loads(json_str)
+        measurements = json.loads(stderr_str[json_start:json_end])
 
-        # Extract measured values
         measured_i = measurements.get("input_i", target_i)
-        measured_lra = measurements.get("input_lra", target_lra)
+        measured_lra_raw = measurements.get("input_lra", target_lra)
         measured_tp = measurements.get("input_tp", target_tp)
         measured_thresh = measurements.get("input_thresh", -70.0)
-        measured_offset = measurements.get("target_offset", None)
+        measured_offset = measurements.get("target_offset")
 
-        # Second pass: apply linear mode with measured values
-        # linear=true makes it a simple file-wide gain change
-        # offset ensures precise target IL and predictable behavior
-        # Use measured LRA to ensure target LRA ≥ measured LRA (required for linear mode)
-        # This avoids extra compression and ensures linear=true stays in effect
+        # ----- 3. LRA handling (simplified) -----
+
+        # 3.1 Measured LRA: from JSON, then fall back to target_lra, then 0.0
+        measured_lra_float = _to_float(measured_lra_raw, _to_float(target_lra, 0.0))
+
+        # 3.2 Special case: if loudnorm reports LRA == 0, use a safe default (30)
+        if measured_lra_float == 0.0:
+            measured_lra_float = 30.0
+
+        # 3.3 Clamp measured LRA to valid range [24, 30]
+        measured_lra = max(24.0, min(measured_lra_float, 30.0))
+
+        # 3.4 Target LRA for second pass:
+        #     - at least measured_lra (required for linear mode)
+        #     - within [24, 30]
+        target_lra_float = _to_float(target_lra, measured_lra)
+        target_lra_clamped = max(measured_lra, min(target_lra_float, 30.0))
+
+        # ----- 4. Second pass: apply linear loudnorm with measured stats -----
         second_pass_filter = (
             f"aresample=resampler=soxr:osr={target_sample_rate},"
-            f"loudnorm=I={target_i}:TP={target_tp}:LRA={measured_lra}:"
+            f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra_clamped}:"
             f"measured_I={measured_i}:measured_LRA={measured_lra}:"
-            f"measured_TP={measured_tp}:measured_thresh={measured_thresh}:linear=true"
+            f"measured_TP={measured_tp}:measured_thresh={measured_thresh}:"
+            "linear=true"
         )
-        # Add offset if available from first pass
         if measured_offset is not None:
             second_pass_filter += f":offset={measured_offset}"
 
@@ -428,14 +449,28 @@ def _loudnorm_2pass_linear(
             ar=target_sample_rate,
             sample_fmt="s16",
         )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        ffmpeg.run(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            overwrite_output=True,
+            quiet=True,
+            capture_stderr=True,
+        )
+
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode("utf-8") if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg failed: {stderr}") from exc
     except json.JSONDecodeError as exc:
         raise StepExecutionError("loudnorm_2pass_linear", f"Failed to parse JSON from first pass: {exc}") from exc
     except Exception as exc:
         raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg error: {exc}") from exc
 
     duration = time.time() - start
-    return StepMetrics(name="loudnorm_2pass_linear", backend="ffmpeg", duration=duration)
+    return StepMetrics(
+        name="loudnorm_2pass_linear",
+        backend="ffmpeg",
+        duration=duration,
+        metadata={"lra_used": target_lra_clamped},
+    )
 
 
 def create_preprocess_runner(
@@ -859,7 +894,10 @@ def create_preprocess_runner(
 
         LOGGER.info("Pre-processing completed in %.2fs", metrics.total_duration)
         for metric in metrics.steps:
-            LOGGER.info(" - Step %s (%s): %.2fs", metric.name, metric.backend, metric.duration)
+            lra_info = ""
+            if metric.metadata and "lra_used" in metric.metadata:
+                lra_info = f" LRA={metric.metadata['lra_used']:.1f}"
+            LOGGER.info(" - Step %s (%s): %.2fs%s", metric.name, metric.backend, metric.duration, lra_info)
 
         return PreprocessResult(
             output_path=processed_path,

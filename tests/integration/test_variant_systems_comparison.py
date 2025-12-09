@@ -46,16 +46,16 @@ class TestVariantSystemsComparison:
         return tmp_path / "new_system"
 
     def test_variant_7_outputs_match(self, test_audio_file: Path, output_dir_old: Path, output_dir_new: Path) -> None:
-        """Test that variant 7 produces identical outputs in both systems.
+        """Test that variant 7 produces consistent outputs.
 
         Variant 7 (noprep_noparamtrans) is the simplest variant and should
-        produce identical results in both systems. This test validates that
-        the new system produces the same transcription results as the legacy system.
+        produce consistent results across multiple runs. This test validates that
+        the variant system produces reproducible transcription results.
         """
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run old system (legacy, no --use-new-variants flag) with variant 7 only
+        # Run variant 7 in first output directory
         result_old = subprocess.run(
             [
                 sys.executable,
@@ -76,6 +76,7 @@ class TestVariantSystemsComparison:
                 "13",
                 "14",
                 "15",
+                "16",
                 "--output-dir",
                 str(output_dir_old),
             ],
@@ -84,16 +85,15 @@ class TestVariantSystemsComparison:
             timeout=300,
         )
 
-        # Verify old system ran successfully
-        assert result_old.returncode == 0, f"Old system failed: {result_old.stderr}\n{result_old.stdout}"
+        # Verify first run succeeded
+        assert result_old.returncode == 0, f"First run failed: {result_old.stderr}\n{result_old.stdout}"
 
-        # Run new system with variant 7 only
+        # Run variant 7 in second output directory
         result_new = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
-                "--use-new-variants",
                 "--skip-variants",
                 "1",
                 "2",
@@ -109,6 +109,7 @@ class TestVariantSystemsComparison:
                 "13",
                 "14",
                 "15",
+                "16",
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -117,15 +118,15 @@ class TestVariantSystemsComparison:
             timeout=300,
         )
 
-        # Verify new system ran successfully
-        assert result_new.returncode == 0, f"New system failed: {result_new.stderr}\n{result_new.stdout}"
+        # Verify second run succeeded
+        assert result_new.returncode == 0, f"Second run failed: {result_new.stderr}\n{result_new.stdout}"
 
-        # Load results from both systems
+        # Load results from both runs
         old_json_files = list(output_dir_old.glob("**/*_comparison_*.json"))
         new_json_files = list(output_dir_new.glob("**/*_comparison_*.json"))
 
-        assert len(old_json_files) > 0, "Old system should create comparison JSON files"
-        assert len(new_json_files) > 0, "New system should create comparison JSON files"
+        assert len(old_json_files) > 0, "First run should create comparison JSON files"
+        assert len(new_json_files) > 0, "Second run should create comparison JSON files"
 
         with old_json_files[0].open() as f:
             old_results = json.load(f)
@@ -133,26 +134,24 @@ class TestVariantSystemsComparison:
             new_results = json.load(f)
 
         # Verify structure matches expected format
-        assert isinstance(old_results, list), "Old results should be a list"
-        assert isinstance(new_results, list), "New results should be a list"
-        assert len(old_results) == 1, "Should have exactly one variant result from old system"
-        assert len(new_results) == 1, "Should have exactly one variant result from new system"
+        assert isinstance(old_results, list), "First run results should be a list"
+        assert isinstance(new_results, list), "Second run results should be a list"
+        assert len(old_results) == 1, "Should have exactly one variant result from first run"
+        assert len(new_results) == 1, "Should have exactly one variant result from second run"
 
         old_result = old_results[0]
         new_result = new_results[0]
 
         # Verify both are variant 7
-        assert old_result["variant_number"] == 7, "Old system should be variant 7"
-        assert new_result["variant_number"] == 7, "New system should be variant 7"
-        assert old_result["variant"] == "noprep_noparamtrans", "Old system should be noprep_noparamtrans"
-        assert new_result["variant"] == "noprep_noparamtrans", "New system should be noprep_noparamtrans"
+        assert old_result["variant_number"] == 7, "First run should be variant 7"
+        assert new_result["variant_number"] == 7, "Second run should be variant 7"
+        assert old_result["variant"] == "noprep_noparamtrans", "First run should be noprep_noparamtrans"
+        assert new_result["variant"] == "noprep_noparamtrans", "Second run should be noprep_noparamtrans"
 
         # Verify both succeeded
-        assert old_result["status"] == "success", (
-            f"Old system should succeed, got: {old_result.get('error', 'unknown')}"
-        )
+        assert old_result["status"] == "success", f"First run should succeed, got: {old_result.get('error', 'unknown')}"
         assert new_result["status"] == "success", (
-            f"New system should succeed, got: {new_result.get('error', 'unknown')}"
+            f"Second run should succeed, got: {new_result.get('error', 'unknown')}"
         )
 
         # Compare transcription results
@@ -163,7 +162,7 @@ class TestVariantSystemsComparison:
         old_text = old_transcription.get("text", "")
         new_text = new_transcription.get("text", "")
         assert old_text == new_text, (
-            f"Transcription text should match.\nOld: {old_text[:100]}...\nNew: {new_text[:100]}..."
+            f"Transcription text should match.\nFirst: {old_text[:100]}...\nSecond: {new_text[:100]}..."
         )
 
         # Compare segments (allow for minor timing differences, but text should match)
@@ -171,41 +170,40 @@ class TestVariantSystemsComparison:
         new_segments = new_transcription.get("segments", [])
 
         assert len(old_segments) == len(new_segments), (
-            f"Segment count should match. Old: {len(old_segments)}, New: {len(new_segments)}"
+            f"Segment count should match. First: {len(old_segments)}, Second: {len(new_segments)}"
         )
 
         for i, (old_seg, new_seg) in enumerate(zip(old_segments, new_segments)):
             old_seg_text = old_seg.get("text", "")
             new_seg_text = new_seg.get("text", "")
             assert old_seg_text == new_seg_text, (
-                f"Segment {i} text should match.\nOld: {old_seg_text}\nNew: {new_seg_text}"
+                f"Segment {i} text should match.\nFirst: {old_seg_text}\nSecond: {new_seg_text}"
             )
 
         # Compare language detection
         old_lang = old_transcription.get("language")
         new_lang = new_transcription.get("language")
-        assert old_lang == new_lang, f"Language should match. Old: {old_lang}, New: {new_lang}"
+        assert old_lang == new_lang, f"Language should match. First: {old_lang}, Second: {new_lang}"
 
         # Compare duration (should be very close, allow small floating point differences)
         old_duration = old_transcription.get("duration")
         new_duration = new_transcription.get("duration")
         if old_duration is not None and new_duration is not None:
             assert abs(old_duration - new_duration) < 0.01, (
-                f"Duration should be very close. Old: {old_duration}, New: {new_duration}"
+                f"Duration should be very close. First: {old_duration}, Second: {new_duration}"
             )
 
     def test_all_active_variants_execute_successfully(self, test_audio_file: Path, output_dir_new: Path) -> None:
-        """Test that all active variants (7, 10-15) execute successfully in new system."""
+        """Test that all active variants (7, 10-16) execute successfully."""
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run new system with active variants only (skip 1-6, 8, 9)
+        # Run with active variants only (skip 1-6, 8, 9)
         result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
-                "--use-new-variants",
                 "--skip-variants",
                 "1",
                 "2",
@@ -224,22 +222,22 @@ class TestVariantSystemsComparison:
         )
 
         # Verify system ran successfully
-        assert result.returncode == 0, f"New system failed: {result.stderr}\n{result.stdout}"
+        assert result.returncode == 0, f"System failed: {result.stderr}\n{result.stdout}"
 
         # Verify output files were created
         json_files = list(output_dir_new.glob("**/*_comparison_*.json"))
-        assert len(json_files) > 0, "New system should create comparison JSON files"
+        assert len(json_files) > 0, "System should create comparison JSON files"
 
         # Load and verify results
         with json_files[0].open() as f:
             results = json.load(f)
 
-        # Should have 7 variants: 7, 10, 11, 12, 13, 14, 15
-        assert len(results) == 7, f"Should have 7 variant results, got {len(results)}"
+        # Should have 8 variants: 7, 10, 11, 12, 13, 14, 15, 16
+        assert len(results) == 8, f"Should have 8 variant results, got {len(results)}"
 
         # Verify all variants succeeded
         variant_numbers = {r["variant_number"] for r in results}
-        expected_numbers = {7, 10, 11, 12, 13, 14, 15}
+        expected_numbers = {7, 10, 11, 12, 13, 14, 15, 16}
         assert variant_numbers == expected_numbers, f"Expected variants {expected_numbers}, got {variant_numbers}"
 
         # Verify all have success status
@@ -260,7 +258,6 @@ class TestVariantSystemsComparison:
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
-                "--use-new-variants",
                 "--skip-variants",
                 "1",
                 "2",
@@ -276,6 +273,7 @@ class TestVariantSystemsComparison:
                 "13",
                 "14",
                 "15",
+                "16",
                 "--output-dir",
                 str(output_dir_new),
             ],
