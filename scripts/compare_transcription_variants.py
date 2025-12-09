@@ -1882,6 +1882,13 @@ def main() -> int:
         action="store_true",
         help="Use new variant system (default: False, uses legacy system)",
     )
+    parser.add_argument(
+        "--skip-variants",
+        type=int,
+        nargs="+",
+        default=[],
+        help="Variant numbers to skip (e.g., --skip-variants 1 2 3)",
+    )
 
     args = parser.parse_args()
 
@@ -1978,6 +1985,12 @@ def main() -> int:
         from backend.variants import execute_variant, get_builtin_variants
 
         builtin_variants = get_builtin_variants()
+        # Filter out skipped variants
+        if args.skip_variants:
+            skip_set = set(args.skip_variants)
+            builtin_variants = [v for v in builtin_variants if v.number not in skip_set]
+            if skip_set:
+                LOGGER.info("Skipping variants: %s", sorted(skip_set))
         summary_variants = [(v.name, v.number) for v in builtin_variants]
         for variant in builtin_variants:
             result = execute_variant(
@@ -2060,6 +2073,12 @@ def main() -> int:
             ),  # Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
             # ("onlyden_noparamtrans_custom", 16),  # Variant 9a: Only denoise with custom params + minimal params
         ]
+        # Filter out skipped variants
+        if args.skip_variants:
+            skip_set = set(args.skip_variants)
+            variants = [(name, num) for name, num in variants if num not in skip_set]
+            if skip_set:
+                LOGGER.info("Skipping variants: %s", sorted(skip_set))
         summary_variants = variants
 
         for variant_name, variant_number in variants:

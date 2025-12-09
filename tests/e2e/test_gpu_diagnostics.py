@@ -23,7 +23,10 @@ LOGGER = logging.getLogger(__name__)
 
 @pytest.fixture(scope="session")
 def require_gpu_environment() -> dict[str, str]:
-    """Validate GPU prerequisites once; fail fast on missing pieces."""
+    """Validate GPU prerequisites once; fail fast on missing pieces.
+
+    Logs diagnostic information for debugging GPU issues.
+    """
     info: dict[str, str] = {}
 
     try:
@@ -35,18 +38,21 @@ def require_gpu_environment() -> dict[str, str]:
             timeout=10,
         )
         info["nvidia_smi"] = result.stdout.strip()
+        LOGGER.info("GPU Diagnostics - NVIDIA Driver / GPUs:\n%s", info["nvidia_smi"])
     except (FileNotFoundError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         pytest.fail(f"nvidia-smi unavailable or failing: {exc}")
 
     try:
         ctypes.CDLL("libcudart.so")
         info["cuda_runtime"] = "available"
+        LOGGER.info("GPU Diagnostics - CUDA Runtime: available")
     except OSError as exc:
         pytest.fail(f"CUDA runtime (libcudart.so) not available: {exc}")
 
     try:
         ctypes.CDLL("libcudnn.so")
         info["cudnn"] = "available"
+        LOGGER.info("GPU Diagnostics - cuDNN: available")
     except OSError as exc:
         pytest.fail(f"cuDNN (libcudnn.so) not available: {exc}")
 
@@ -58,6 +64,7 @@ def require_gpu_environment() -> dict[str, str]:
         if device_count <= 0:
             pytest.fail(f"ctranslate2 reports no CUDA devices (count={device_count})")
         info["ctranslate2_cuda_devices"] = str(device_count)
+        LOGGER.info("GPU Diagnostics - ctranslate2: %s (CUDA devices: %s)", info["ctranslate2_version"], device_count)
     except ImportError as exc:
         pytest.fail(f"ctranslate2 not installed: {exc}")
     except (AttributeError, RuntimeError) as exc:
@@ -67,6 +74,7 @@ def require_gpu_environment() -> dict[str, str]:
         import faster_whisper  # type: ignore
 
         info["faster_whisper_version"] = getattr(faster_whisper, "__version__", "unknown")
+        LOGGER.info("GPU Diagnostics - faster-whisper: %s", info["faster_whisper_version"])
     except ImportError as exc:
         pytest.fail(f"faster-whisper not installed: {exc}")
 
@@ -110,27 +118,34 @@ def test_ctranslate2_sees_cuda_devices(require_gpu_environment: dict[str, str]) 
 
 
 def test_faster_whisper_on_gpu(tiny_gpu_model: "WhisperModel") -> None:
-    """Ensure faster-whisper can load a model on GPU."""
-    assert tiny_gpu_model is not None
+    """Test that faster-whisper performs actual transcription on GPU (behavior test)."""
+    # Test behavior: model must load and be usable
+    assert tiny_gpu_model is not None, "Model failed to load"
 
+    # Test behavior: verify GPU is actually used
+    # Check that model has device information indicating GPU usage
+    model_device = getattr(tiny_gpu_model.model, "device", None)
+    if model_device:
+        assert "cuda" in str(model_device).lower() or "gpu" in str(model_device).lower(), (
+            f"Model not using GPU device, got: {model_device}"
+        )
 
-def test_gpu_diagnostics_summary(require_gpu_environment: dict[str, str], capsys: pytest.CaptureFixture[str]) -> None:
-    """Print GPU diagnostics for debugging (still a hard-requirement test)."""
-    lines = [
-        "\n" + "=" * 60,
-        "GPU ENVIRONMENT DIAGNOSTIC INFORMATION",
-        "=" * 60,
-    ]
-    lines.append("\n✓ NVIDIA Driver / GPUs:")
-    lines.extend(f"  {line}" for line in require_gpu_environment["nvidia_smi"].split("\n") if line.strip())
+    # Test behavior: perform actual transcription to verify GPU functionality
+    import numpy as np
 
-    lines.append("\n✓ CUDA Runtime: available")
-    lines.append("✓ cuDNN: available")
-    lines.append(f"\n✓ ctranslate2: {require_gpu_environment['ctranslate2_version']}")
-    lines.append(f"  CUDA devices: {require_gpu_environment['ctranslate2_cuda_devices']}")
-    lines.append(f"\n✓ faster-whisper: {require_gpu_environment['faster_whisper_version']}")
-    lines.append("=" * 60 + "\n")
+    # Create a minimal test audio (1 second of silence at 16kHz)
+    sample_rate = 16000
+    duration = 1.0
+    audio_samples = np.zeros(int(sample_rate * duration), dtype=np.float32)
 
-    output = "\n".join(lines)
-    capsys.readouterr()  # clear prior output
-    print(output)  # noqa: T201 - diagnostic output
+    # Transcribe using GPU model
+    segments, info = tiny_gpu_model.transcribe(audio_samples, beam_size=1)
+
+    # Verify transcription produces results (even if empty for silence)
+    assert info is not None, "Transcription info should be returned"
+    assert info.language is not None, "Language detection should work"
+
+    # Verify segments are iterable (behavior contract)
+    segment_list = list(segments)
+    # For silence, we might get empty segments, which is valid behavior
+    LOGGER.info("GPU transcription test completed: language=%s, segments=%d", info.language, len(segment_list))

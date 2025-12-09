@@ -145,20 +145,36 @@ class TestGetEstonianModelPath:
 class TestPickModel:
     """Tests for pick_model function."""
 
-    def test_et_large_preset_success(self) -> None:
-        """Test et-large preset with successful GPU initialization."""
-        resolver = RecordingResolver("/tmp/model/ct2")
+    @pytest.mark.parametrize(
+        "preset,expected_model_id,expected_cache_path",
+        [
+            ("et-large", "TalTechNLP/whisper-large-v3-turbo-et-verbatim", "/tmp/model/ct2"),
+            ("turbo", "Systran/faster-distil-whisper-large-v3", "/tmp/model/turbo"),
+            ("distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/distil"),
+            ("large8gb", "Systran/faster-whisper-large-v3", "/tmp/model/large-v3"),
+        ],
+    )
+    def test_preset_loads_correct_model(self, preset: str, expected_model_id: str, expected_cache_path: str) -> None:
+        """Test that presets resolve to correct model IDs and load successfully (behavior test)."""
+        resolver = RecordingResolver(expected_cache_path)
         factory = RecordingModelFactory(return_value="model")
         loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
-        result = pick_model("et-large", resolver=resolver, loader=loader)
+        # Test behavior: preset should resolve to correct model and load
+        result = pick_model(preset, resolver=resolver, loader=loader)
 
-        assert result == "model"
-        assert resolver.calls and resolver.calls[0].model_id == "TalTechNLP/whisper-large-v3-turbo-et-verbatim"
-        assert factory.calls == [("/tmp/model/ct2", "cuda", "float16")]
+        # Verify model was loaded (behavior contract)
+        assert result == "model", f"Preset {preset} should load a model"
+        # Verify correct model ID was resolved (behavior contract)
+        assert resolver.calls, f"Preset {preset} should call resolver"
+        assert resolver.calls[0].model_id == expected_model_id, f"Preset {preset} should resolve to {expected_model_id}"
+        # Verify model factory was called with correct path (behavior contract)
+        assert factory.calls == [(expected_cache_path, "cuda", "float16")], (
+            f"Preset {preset} should load from {expected_cache_path}"
+        )
 
     def test_et_large_fallback_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Test et-large preset falls back to CPU when GPU fails."""
+        """Test et-large preset falls back to CPU when GPU fails (fallback behavior)."""
         resolver = RecordingResolver("/tmp/model/ct2")
         factory = RecordingModelFactory(side_effects=[RuntimeError("CUDA not available"), "cpu_model"])
         loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
@@ -166,104 +182,70 @@ class TestPickModel:
         with caplog.at_level(logging.WARNING):
             result = pick_model("et-large", resolver=resolver, loader=loader)
 
-        assert result == "cpu_model"
-        assert factory.calls[0] == ("/tmp/model/ct2", "cuda", "float16")
-        assert factory.calls[1] == ("/tmp/model/ct2", "cpu", "int8")
-        assert "GPU initialization failed" in caplog.text
+        # Test behavior: should fallback to CPU and succeed
+        assert result == "cpu_model", "Should fallback to CPU when GPU fails"
+        assert factory.calls[0] == ("/tmp/model/ct2", "cuda", "float16"), "Should try GPU first"
+        assert factory.calls[1] == ("/tmp/model/ct2", "cpu", "int8"), "Should fallback to CPU"
+        assert "GPU initialization failed" in caplog.text, "Should log GPU failure"
 
     def test_et_large_fails_on_both_gpu_and_cpu(self) -> None:
-        """Test that ModelLoadError is raised when both GPU and CPU fail."""
+        """Test that ModelLoadError is raised when both GPU and CPU fail (error behavior)."""
         resolver = RecordingResolver("/tmp/model/ct2")
         factory = RecordingModelFactory(
             side_effects=[RuntimeError("CUDA not available"), RuntimeError("CPU also failed")]
         )
         loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
 
+        # Test behavior: should raise error when both devices fail
         with pytest.raises(ModelLoadError, match="Failed to load model .* on both GPU and CPU"):
             pick_model("et-large", resolver=resolver, loader=loader)
 
-    def test_turbo_preset(self) -> None:
-        """Test turbo preset initialization."""
-        resolver = RecordingResolver("/tmp/model/turbo")
-        factory = RecordingModelFactory(return_value="model")
-        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
-
-        result = pick_model("turbo", resolver=resolver, loader=loader)
-
-        assert result == "model"
-        assert resolver.calls and resolver.calls[0].model_id == "Systran/faster-distil-whisper-large-v3"
-        assert factory.calls == [("/tmp/model/turbo", "cuda", "float16")]
-
-    def test_distil_preset(self) -> None:
-        """Test distil preset initialization."""
-        resolver = RecordingResolver("/tmp/model/distil")
-        factory = RecordingModelFactory(return_value="model")
-        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
-
-        result = pick_model("distil", resolver=resolver, loader=loader)
-
-        assert result == "model"
-        assert resolver.calls and resolver.calls[0].model_id == "Systran/faster-distil-whisper-large-v3"
-        assert factory.calls == [("/tmp/model/distil", "cuda", "float16")]
-
-    def test_large8gb_preset(self) -> None:
-        """Test large8gb preset initialization."""
-        resolver = RecordingResolver("/tmp/model/large-v3")
-        factory = RecordingModelFactory(return_value="model")
-        loader = ModelLoader(device_selector=FixedDeviceSelector("cuda", "float16"), model_factory=factory)
-
-        result = pick_model("large8gb", resolver=resolver, loader=loader)
-
-        assert result == "model"
-        assert resolver.calls and resolver.calls[0].model_id == "Systran/faster-whisper-large-v3"
-        assert factory.calls == [("/tmp/model/large-v3", "cuda", "float16")]
-
-    def test_fallback_preset(self) -> None:
-        """Test that unknown presets raise KeyError."""
+    def test_unknown_preset_raises_keyerror(self) -> None:
+        """Test that unknown presets raise KeyError (error behavior)."""
+        # Test behavior: invalid preset should raise clear error
         with pytest.raises(KeyError, match="Unknown preset 'unknown'"):
             pick_model("unknown")
 
 
 class TestRoundFloats:
-    """Tests for _round_floats function."""
+    """Tests for _round_floats function contract: floats rounded, structure preserved."""
 
-    def test_round_single_float(self) -> None:
-        """Test rounding a single float value."""
-        result = _round_floats(3.14159265359, places=3)
-        assert result == 3.142
+    @pytest.mark.parametrize(
+        "input_data,expected_output,places",
+        [
+            # Single float
+            (3.14159265359, 3.142, 3),
+            # Dictionary with floats
+            ({"start": 1.23456, "end": 2.34567, "text": "hello"}, {"start": 1.235, "end": 2.346, "text": "hello"}, 3),
+            # List with floats
+            ([1.11111, 2.22222, 3.33333], [1.11, 2.22, 3.33], 2),
+            # Nested structure (real-world use case)
+            (
+                {
+                    "segments": [
+                        {"start": 1.23456, "end": 2.34567},
+                        {"start": 3.45678, "end": 4.56789},
+                    ],
+                    "duration": 10.123456,
+                },
+                {
+                    "segments": [
+                        {"start": 1.235, "end": 2.346},
+                        {"start": 3.457, "end": 4.568},
+                    ],
+                    "duration": 10.123,
+                },
+                3,
+            ),
+        ],
+    )
+    def test_rounds_floats_preserves_structure(self, input_data: Any, expected_output: Any, places: int) -> None:
+        """Test contract: floats are rounded, data structure is preserved."""
+        result = _round_floats(input_data, places=places)
+        assert result == expected_output, f"Structure should be preserved, floats rounded to {places} places"
 
-    def test_round_float_in_dict(self) -> None:
-        """Test rounding floats in a dictionary."""
-        data = {"start": 1.23456, "end": 2.34567, "text": "hello"}
-        result = _round_floats(data, places=3)
-        assert result == {"start": 1.235, "end": 2.346, "text": "hello"}
-
-    def test_round_floats_in_list(self) -> None:
-        """Test rounding floats in a list."""
-        data = [1.11111, 2.22222, 3.33333]
-        result = _round_floats(data, places=2)
-        assert result == [1.11, 2.22, 3.33]
-
-    def test_round_nested_structure(self) -> None:
-        """Test rounding floats in nested dict/list structure."""
-        data = {
-            "segments": [
-                {"start": 1.23456, "end": 2.34567},
-                {"start": 3.45678, "end": 4.56789},
-            ],
-            "duration": 10.123456,
-        }
-        result = _round_floats(data, places=3)
-        assert result == {
-            "segments": [
-                {"start": 1.235, "end": 2.346},
-                {"start": 3.457, "end": 4.568},
-            ],
-            "duration": 10.123,
-        }
-
-    def test_preserve_non_float_types(self) -> None:
-        """Test that non-float types are preserved unchanged."""
+    def test_preserves_non_float_types(self) -> None:
+        """Test contract: non-float types are preserved unchanged."""
         data = {
             "int": 42,
             "str": "text",
@@ -272,16 +254,15 @@ class TestRoundFloats:
             "float": 1.23456,
         }
         result = _round_floats(data, places=2)
-        assert result == {
-            "int": 42,
-            "str": "text",
-            "bool": True,
-            "none": None,
-            "float": 1.23,
-        }
+        # Test behavior: non-float types unchanged, float rounded
+        assert result["int"] == 42
+        assert result["str"] == "text"
+        assert result["bool"] is True
+        assert result["none"] is None
+        assert result["float"] == 1.23
 
-    def test_empty_structures(self) -> None:
-        """Test handling of empty structures."""
+    def test_handles_empty_structures(self) -> None:
+        """Test contract: empty structures are preserved."""
         assert _round_floats({}) == {}
         assert _round_floats([]) == []
         assert _round_floats("") == ""

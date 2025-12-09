@@ -65,18 +65,36 @@ def execute_variant(
         else:
             preprocess_config.output_dir = None
 
-        # Create preprocessing runner from variant steps
+        # Create preprocessing runner from variant steps or use custom runner
         base_name = output_base_path.stem if output_base_path else Path(audio_path).stem
-        preprocess_runner = create_preprocess_runner(
-            variant.preprocess_steps,
-            preprocess_config,
-            variant_number=variant.number,
-            variant_description=variant.description,
-            base_name=base_name,
-            datetime_suffix=datetime_suffix,
-            output_dir=output_dir,
-            copy_intermediate=copy_intermediate,
-        )
+        if variant.custom_preprocess_runner:
+            # Use custom preprocessing runner (for variants 10-15)
+            def _custom_runner(path: str, cfg: PreprocessConfig) -> PreprocessResult:
+                # Custom runners accept additional keyword arguments
+                return variant.custom_preprocess_runner(  # type: ignore[call-arg, misc]
+                    path,
+                    cfg,
+                    variant_number=variant.number,
+                    variant_description=variant.description,
+                    base_name=base_name,
+                    datetime_suffix=datetime_suffix,
+                    output_dir=output_dir,
+                    copy_intermediate=copy_intermediate,
+                )
+
+            preprocess_runner = _custom_runner
+        else:
+            # Use standard step-based preprocessing
+            preprocess_runner = create_preprocess_runner(
+                variant.preprocess_steps,
+                preprocess_config,
+                variant_number=variant.number,
+                variant_description=variant.description,
+                base_name=base_name,
+                datetime_suffix=datetime_suffix,
+                output_dir=output_dir,
+                copy_intermediate=copy_intermediate,
+            )
 
         # Get transcription config based on preset
         transcription_config = get_transcription_config(variant.transcription_preset)

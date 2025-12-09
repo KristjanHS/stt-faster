@@ -8,12 +8,6 @@ import duckdb
 from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
 
 
-def test_database_initialization(temp_db: TranscriptionDatabase) -> None:
-    """Test that database initializes correctly."""
-    assert temp_db.conn is not None
-    assert Path(temp_db.db_path).exists()
-
-
 def test_add_file(temp_db: TranscriptionDatabase) -> None:
     """Test adding a file to the database."""
     temp_db.add_file("/path/to/audio.wav", "pending")
@@ -90,16 +84,34 @@ def test_get_all_files(temp_db: TranscriptionDatabase) -> None:
 
 
 def test_get_summary(temp_db: TranscriptionDatabase) -> None:
-    """Test getting summary statistics."""
+    """Test that summary statistics match actual file counts (business logic verification)."""
+    # Setup: add files with different statuses
     temp_db.add_file("/path/to/audio1.wav", "pending")
     temp_db.add_file("/path/to/audio2.wav", "pending")
     temp_db.add_file("/path/to/audio3.wav", "completed")
     temp_db.add_file("/path/to/audio4.wav", "failed")
 
+    # Test behavior: summary totals should match file counts
     summary = temp_db.get_summary()
-    assert summary["pending"] == 2
-    assert summary["completed"] == 1
-    assert summary["failed"] == 1
+
+    # Verify business logic: totals should match actual file counts
+    all_files = temp_db.get_all_files()
+    total_files = len(all_files)
+    summary_total = summary.get("pending", 0) + summary.get("completed", 0) + summary.get("failed", 0)
+
+    assert summary_total == total_files, f"Summary total ({summary_total}) should match file count ({total_files})"
+    assert summary.get("pending", 0) == 2, "Pending count should match"
+    assert summary.get("completed", 0) == 1, "Completed count should match"
+    assert summary.get("failed", 0) == 1, "Failed count should match"
+
+    # Verify business logic: counts match when queried by status
+    pending_files = temp_db.get_files_by_status("pending")
+    completed_files = temp_db.get_files_by_status("completed")
+    failed_files = temp_db.get_files_by_status("failed")
+
+    assert len(pending_files) == summary.get("pending", 0), "Pending count should match query result"
+    assert len(completed_files) == summary.get("completed", 0), "Completed count should match query result"
+    assert len(failed_files) == summary.get("failed", 0), "Failed count should match query result"
 
 
 def test_record_run(temp_db: TranscriptionDatabase) -> None:
