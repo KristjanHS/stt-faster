@@ -470,7 +470,28 @@ class TranscriptionProcessor:
             device = sample_metric.device
             compute_type = sample_metric.compute_type
             beam_size = sample_metric.beam_size
+            patience = sample_metric.patience
             word_timestamps = sample_metric.word_timestamps
+            task = sample_metric.task
+            chunk_length = sample_metric.chunk_length
+            vad_filter = sample_metric.vad_filter
+            vad_threshold = sample_metric.vad_threshold
+            vad_min_speech_duration_ms = sample_metric.vad_min_speech_duration_ms
+            vad_max_speech_duration_s = sample_metric.vad_max_speech_duration_s
+            vad_min_silence_duration_ms = sample_metric.vad_min_silence_duration_ms
+            vad_speech_pad_ms = sample_metric.vad_speech_pad_ms
+            temperature = sample_metric.temperature
+            temperature_increment_on_fallback = sample_metric.temperature_increment_on_fallback
+            best_of = sample_metric.best_of
+            compression_ratio_threshold = sample_metric.compression_ratio_threshold
+            logprob_threshold = sample_metric.logprob_threshold
+            no_speech_threshold = sample_metric.no_speech_threshold
+            length_penalty = sample_metric.length_penalty
+            repetition_penalty = sample_metric.repetition_penalty
+            no_repeat_ngram_size = sample_metric.no_repeat_ngram_size
+            suppress_tokens = sample_metric.suppress_tokens
+            condition_on_previous_text = sample_metric.condition_on_previous_text
+            initial_prompt = sample_metric.initial_prompt
         else:
             # Fallback to config if no files processed successfully
             preprocess_profile = config_snapshot.profile
@@ -481,9 +502,35 @@ class TranscriptionProcessor:
             device = None
             compute_type = None
             beam_size = None
+            patience = None
             word_timestamps = None
+            task = None
+            chunk_length = None
+            vad_filter = None
+            vad_threshold = None
+            vad_min_speech_duration_ms = None
+            vad_max_speech_duration_s = None
+            vad_min_silence_duration_ms = None
+            vad_speech_pad_ms = None
+            temperature = None
+            temperature_increment_on_fallback = None
+            best_of = None
+            compression_ratio_threshold = None
+            logprob_threshold = None
+            no_speech_threshold = None
+            length_penalty = None
+            repetition_penalty = None
+            no_repeat_ngram_size = None
+            suppress_tokens = None
+            condition_on_previous_text = None
+            initial_prompt = None
 
         # Create RunRecord
+        # Convert temperature to JSON string if it's a list
+        temperature_str = None
+        if temperature is not None:
+            temperature_str = json.dumps(temperature) if isinstance(temperature, list) else str(temperature)
+
         run_record = RunRecord(
             recorded_at=datetime.now(timezone.utc),
             input_folder=str(self.input_folder),
@@ -498,7 +545,28 @@ class TranscriptionProcessor:
             device=device,
             compute_type=compute_type,
             beam_size=beam_size,
+            patience=patience,
             word_timestamps=word_timestamps,
+            task=task,
+            chunk_length=chunk_length,
+            vad_filter=vad_filter,
+            vad_threshold=vad_threshold,
+            vad_min_speech_duration_ms=vad_min_speech_duration_ms,
+            vad_max_speech_duration_s=vad_max_speech_duration_s,
+            vad_min_silence_duration_ms=vad_min_silence_duration_ms,
+            vad_speech_pad_ms=vad_speech_pad_ms,
+            temperature=temperature_str,
+            temperature_increment_on_fallback=temperature_increment_on_fallback,
+            best_of=best_of,
+            compression_ratio_threshold=compression_ratio_threshold,
+            logprob_threshold=logprob_threshold,
+            no_speech_threshold=no_speech_threshold,
+            length_penalty=length_penalty,
+            repetition_penalty=repetition_penalty,
+            no_repeat_ngram_size=no_repeat_ngram_size,
+            suppress_tokens=suppress_tokens,
+            condition_on_previous_text=condition_on_previous_text,
+            initial_prompt=initial_prompt,
             files_found=results.get("files_found", 0),
             succeeded=results.get("succeeded", 0),
             failed=results.get("failed", 0),

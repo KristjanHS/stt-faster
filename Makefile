@@ -6,7 +6,7 @@
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
-.PHONY: unit integration e2e
+.PHONY: unit integration e2e verify-variants
 # Audio
 .PHONY: preprocess-audio
 # Docker
@@ -50,6 +50,7 @@ help:
 	@echo "  unit         - Run unit tests (local) and write reports"
 	@echo "  integration  - Run integration tests (uv preferred)"
 	@echo "  e2e          - Run e2e tests (sequential, Docker-based) and write reports"
+	@echo "  verify-variants - Verify transcription parameters for all enabled variants"
 	@echo ""
 	@echo "  -- Audio --"
 	@echo "  preprocess-audio  - Run preprocessing on tests/test.mp3 (AUDIO=..., OUT=... to override)"
@@ -191,6 +192,16 @@ e2e:
 	else \
 		uv run -m pytest tests/e2e --maxfail=1 -vv --html reports/e2e.html --self-contained-html ${PYTEST_ARGS}; \
 	fi
+
+# Verify variant transcription parameters
+verify-variants:
+	@echo "Verifying transcription parameters for all enabled variants..."
+	@if [ -x .venv/bin/python ]; then \
+		.venv/bin/python scripts/variant_checks/verify_all_variants.py; \
+	else \
+		uv run python scripts/variant_checks/verify_all_variants.py; \
+	fi
+	@echo "Variant verification completed."
 
 preprocess-audio:
 	@set -euo pipefail; \

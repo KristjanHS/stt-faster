@@ -286,16 +286,24 @@ def transcribe_with_minimal_params(
         LOGGER.debug("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     model = pick_model(preset)
+    LOGGER.info("✅ Model loaded, ready for transcription")
 
     # Auto-detect language based on preset if not explicitly provided
     applied_language = language
     if applied_language is None:
         applied_language = "et" if preset.startswith("et-") else None
 
+    # Log language configuration
+    if applied_language:
+        LOGGER.info("🌐 Language: %s (forced)", applied_language)
+    else:
+        LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
+
     # Call model.transcribe with only essential parameters
     # Omit: patience, chunk_length, vad_threshold, vad_parameters,
     # temperature, no_speech_threshold, no_repeat_ngram_size
     # But include any overrides from transcription_overrides
+    LOGGER.info("🔄 Starting transcription...")
     transcribe_start = time.time()
     transcribe_kwargs: dict[str, Any] = {
         "beam_size": 5,  # Keep beam_size as it's commonly used
