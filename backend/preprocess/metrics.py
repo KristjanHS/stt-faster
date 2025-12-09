@@ -5,7 +5,7 @@ import math
 import subprocess  # nosec B404 - ffmpeg invocation with fixed arguments
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import numpy as np
 from numpy.typing import NDArray
@@ -19,6 +19,7 @@ class StepMetrics:
     name: str
     backend: str
     duration: float
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
