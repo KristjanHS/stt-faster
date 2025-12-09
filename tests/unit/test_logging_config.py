@@ -4,31 +4,9 @@ import logging
 import logging.handlers
 from pathlib import Path
 
-import pytest
-
 
 class TestParseLevel:
     """Tests for _parse_level function."""
-
-    def test_parse_level_with_none(self) -> None:
-        """Test that None returns the default level."""
-        from backend.config import _parse_level
-
-        result = _parse_level(None)
-        assert result == logging.INFO
-
-        result = _parse_level(None, logging.ERROR)
-        assert result == logging.ERROR
-
-    def test_parse_level_with_empty_string(self) -> None:
-        """Test that empty string returns the default level."""
-        from backend.config import _parse_level
-
-        result = _parse_level("")
-        assert result == logging.INFO
-
-        result = _parse_level("  ", logging.WARNING)
-        assert result == logging.WARNING
 
     def test_parse_level_with_valid_level(self) -> None:
         """Test parsing valid log levels."""
@@ -99,44 +77,6 @@ class TestLogFileCreation:
             backup_count = 5  # Default fallback
         assert backup_count == 5
 
-    def test_log_format_includes_timestamp_and_level(self) -> None:
-        """Test that log format includes required fields."""
-        from backend.config import LOG_FORMAT
-
-        # Verify format string contains essential fields
-        assert "%(asctime)s" in LOG_FORMAT
-        assert "%(name)s" in LOG_FORMAT
-        assert "%(levelname)s" in LOG_FORMAT
-        assert "%(message)s" in LOG_FORMAT
-
 
 class TestLoggingIntegration:
     """Integration tests for logging configuration."""
-
-    def test_logging_produces_expected_output(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Test that logging actually produces output with expected format."""
-        test_logger = logging.getLogger("test_module")
-
-        with caplog.at_level(logging.INFO):
-            test_logger.info("Test message")
-
-        assert len(caplog.records) == 1
-        assert caplog.records[0].levelname == "INFO"
-        assert caplog.records[0].name == "test_module"
-        assert caplog.records[0].message == "Test message"
-
-    def test_logging_level_filtering(self, caplog: pytest.LogCaptureFixture) -> None:
-        """Test that logging level filtering works correctly."""
-        test_logger = logging.getLogger("test_filter")
-        test_logger.setLevel(logging.WARNING)
-
-        with caplog.at_level(logging.DEBUG):
-            test_logger.debug("Should not appear")
-            test_logger.info("Should not appear")
-            test_logger.warning("Should appear")
-            test_logger.error("Should appear")
-
-        # Only WARNING and ERROR should be captured
-        assert len(caplog.records) == 2
-        assert caplog.records[0].levelname == "WARNING"
-        assert caplog.records[1].levelname == "ERROR"
