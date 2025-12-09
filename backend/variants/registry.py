@@ -174,16 +174,16 @@ def _get_all_variants() -> list[Variant]:
             ],
             transcription_preset="minimal",
         ),
-        # Variant 17: No preprocessing + minimal params + no_speech_threshold=0.5
+        # Variant 17: No preprocessing + minimal params + no_speech_threshold
         Variant(
             name="noprep_noparamtrans_thres1",
             number=17,
             description="nopre_thres1",
             preprocess_steps=[],
             transcription_preset="minimal",
-            transcription_overrides={"no_speech_threshold": 0.5},
+            transcription_overrides={"no_speech_threshold": 0.6},
         ),
-        # Variant 18: No preprocessing + minimal params + chunk_length=20
+        # Variant 18: No preprocessing + minimal params + chunk_length
         Variant(
             name="noprep_noparamtrans_chunk1",
             number=18,
@@ -192,7 +192,7 @@ def _get_all_variants() -> list[Variant]:
             transcription_preset="minimal",
             transcription_overrides={"chunk_length": 20},
         ),
-        # Variant 19: No preprocessing + minimal params + condition_on_previous_text=False
+        # Variant 19: No preprocessing + minimal params + condition_on_previous_text
         Variant(
             name="noprep_noparamtrans_condprev1",
             number=19,
