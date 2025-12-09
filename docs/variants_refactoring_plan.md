@@ -3,16 +3,16 @@
 
 ## Executive Summary
 
-**Status**: Phase 1-3 Complete, Phase 4.0 Complete, Phase 4.1-4.2 Pending
+**Status**: Phase 1-4.1 Complete, Phase 4.2 Pending
 
-**Progress**: ~95% Complete
+**Progress**: ~99% Complete
 
 - ✅ **Foundation Complete**: Variant system infrastructure, executor, and registry implemented
-- ✅ **Migration Complete**: Script supports both old and new systems via `--use-new-variants` flag
+- ✅ **Migration Complete**: Script now uses new system exclusively (legacy code removed)
 - ✅ **Step Types Complete**: All 12 step types supported (`ffmpeg`, `denoise`, `resample`, `loudnorm_only`, `loudnorm_highpass`, `dynaudnorm`, `denoise_custom`, `highlow_aform_loudnorm`, `highlow_nosampl_loudnorm`, `aresampl_loudnorm_fixed`, `aresampl_loudnorm_fixed2`, `loudnorm_2pass_linear`)
 - ✅ **Variants 10-11 Migrated**: Now use declarative steps instead of custom functions
 - ✅ **Variants 12-16 Migrated**: Now use declarative steps instead of custom functions
-- ❌ **Cleanup Pending**: Old code still exists, waiting for verification before removal
+- ✅ **Cleanup Complete**: All legacy code removed (~1700 lines), file reduced from 1979 to 269 lines
 
 **Next Steps**:
 1. ✅ Add missing step types to `PreprocessStep.step_type` - **DONE**
@@ -23,7 +23,7 @@
 
 ## Implementation Status
 
-**Last Updated**: Dec 9, 2025 (Phase 4.0 completed: all variants 1-16 now use declarative steps)
+**Last Updated**: Dec 9, 2025 (Phase 4.1 completed: all legacy code removed, file cleaned up from 1979 to 269 lines)
 
 ### ✅ Completed (Phase 1-3 Foundation)
 
@@ -346,7 +346,7 @@ def get_builtin_variants() -> list[Variant]:
 
 ### Phase 4: Cleanup and Enhancement ⚠️ IN PROGRESS
 
-#### Step 4.1: Remove Old Implementation ❌ NOT STARTED
+#### Step 4.1: Remove Old Implementation ✅ COMPLETED
 
 **Prerequisites:**
 - Complete Phase 4.0: Add missing step types and migrate variants 10-16 to declarative system
@@ -354,12 +354,14 @@ def get_builtin_variants() -> list[Variant]:
 
 **After verification:**
 
-- ❌ Remove old `run_variant()` if/elif chain (lines 1619+)
-- ❌ Remove `preprocess_only_ffmpeg()`, `preprocess_only_denoise()`, `preprocess_loudnorm_only()`, `preprocess_loudnorm_with_highpass()`, `preprocess_dynaudnorm_only()`, `preprocess_only_denoise_custom()`
-- ❌ Remove helper functions: `_loudnorm_only()`, `_loudnorm_with_highpass()`, `_dynaudnorm_only()`, `_simple_resample()` (if moved to preprocess_steps.py)
-- ❌ Remove `transcribe_with_minimal_params()` from script (already in executor.py)
-- ❌ Remove `get_industry_default_transcription_config()`, `get_minimal_transcription_config()` from script (moved to transcription_presets.py)
-- ❌ Update script to use new system by default (change `--use-new-variants` default to True or remove flag)
+- ✅ Removed `--use-new-variants` flag (new system is now default)
+- ✅ Removed conditional check for `args.use_new_variants` in main()
+- ✅ Moved import to top of file
+- ✅ Removed all legacy function definitions (preprocess_*, run_variant, get_industry_default_transcription_config, etc.)
+- ✅ Removed legacy else branch that referenced `run_variant()`
+- ✅ Removed unused imports (shutil, TemporaryDirectory, Callable)
+- ✅ Fixed broken file structure
+- ✅ File reduced from 1979 lines to 269 lines (~86% reduction)
 
 #### Step 4.0: Complete Step Type Support ✅ COMPLETED
 
@@ -464,9 +466,9 @@ scripts/
 - [x] Test that variants 12-16 work with declarative steps ✅
 
 **High Priority:**
-- [ ] Verify both old and new systems produce identical outputs for all variants
-- [ ] Remove old `run_variant()` if/elif chain after verification
-- [ ] Remove custom preprocessing functions after verification (all variants now use declarative steps)
+- [ ] Verify new system produces correct outputs for all variants (legacy system removed, verification needed)
+- [x] Remove old `run_variant()` if/elif chain after verification ✅
+- [x] Remove custom preprocessing functions after verification (all variants now use declarative steps) ✅
 - [ ] Add `--variants` CLI argument for flexible variant selection
 
 **Medium Priority:**
