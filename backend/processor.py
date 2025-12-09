@@ -13,11 +13,126 @@ from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
 from backend.exceptions import DatabaseError
 from backend.preprocess.config import PreprocessConfig
 from backend.transcribe import DEFAULT_OUTPUT_FORMAT, TranscriptionMetrics, transcribe
+from backend.variants.executor import (
+    create_variant_preprocess_runner,
+    create_variant_transcribe_config,
+    transcribe_with_minimal_params,
+)
+from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
 
 # Supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
+
+
+def _create_variant_transcribe_function(
+    variant: Variant,
+    preset: str,
+    language: str | None,
+    output_format: str,
+) -> Callable[[str, str, str, str | None], TranscriptionMetrics | None]:
+    """Create a transcribe function that uses variant configuration.
+
+    Args:
+        variant: Variant definition to use
+        preset: Model preset for transcription
+        language: Optional language code
+        output_format: Output format ("txt", "json", or "both")
+
+    Returns:
+        A transcribe function matching TranscriptionProcessor's expected signature:
+        (audio: str, output_path: str, preset: str, language: str | None) -> TranscriptionMetrics | None
+    """
+    # Build preprocessing config
+    preprocess_config = PreprocessConfig()  # Use defaults
+    if not any(step.enabled for step in variant.preprocess_steps) and not variant.custom_preprocess_runner:
+        preprocess_config.enabled = False
+
+    # Create preprocessing runner from variant
+    preprocess_runner = create_variant_preprocess_runner(
+        variant,
+        preprocess_config,
+        base_name=None,
+        datetime_suffix=None,
+        output_dir=None,
+        copy_intermediate=False,
+    )
+
+    # Get transcription config based on variant preset
+    transcription_config = create_variant_transcribe_config(variant)
+
+    def _preprocess_config_provider() -> PreprocessConfig:
+        return preprocess_config
+
+    def _transcription_config_provider() -> Any:  # TranscriptionConfig
+        return transcription_config
+
+    def _variant_transcribe(
+        audio: str, output_path: str, preset: str, language: str | None = None
+    ) -> TranscriptionMetrics | None:
+        """Transcribe using variant configuration."""
+        metrics_container: dict[str, TranscriptionMetrics] = {}
+
+        def _collect(metrics: TranscriptionMetrics) -> None:
+            metrics_container["value"] = metrics
+
+        # Run transcription based on variant preset
+        if variant.transcription_preset == "minimal":
+            # For minimal preset, use the internal function that omits parameters
+            # Note: This doesn't collect metrics, so we'll return None for metrics
+            payload = transcribe_with_minimal_params(
+                path=audio,
+                preset=preset,
+                language=language,
+                preprocess_config=preprocess_config,
+                preprocess_runner=preprocess_runner,
+            )
+            # For minimal preset, we don't have metrics, so return None
+            # The processor will handle this gracefully
+        else:
+            # Use standard transcription with full config and metrics collection
+            payload = transcribe(
+                path=audio,
+                preset=preset,
+                language=language,
+                preprocess_config_provider=_preprocess_config_provider,
+                preprocess_runner=preprocess_runner,
+                transcription_config_provider=_transcription_config_provider,
+                metrics_collector=_collect,
+            )
+
+        # Write output in the specified format
+        if output_format == "txt":
+            segments = payload.get("segments", [])
+            with open(output_path, "w", encoding="utf-8") as text_file:
+                for segment in segments:
+                    text_file.write(segment["text"])
+                    text_file.write("\n")
+        elif output_format == "json":
+            with open(output_path, "w", encoding="utf-8") as json_file:
+                json.dump(payload, json_file, ensure_ascii=False, indent=2)
+        elif output_format == "both":
+            # Write both txt and json files
+            base_path = Path(output_path)
+            txt_path = base_path.with_suffix(".txt")
+            json_path = base_path.with_suffix(".json")
+
+            # Write txt
+            segments = payload.get("segments", [])
+            with open(txt_path, "w", encoding="utf-8") as text_file:
+                for segment in segments:
+                    text_file.write(segment["text"])
+                    text_file.write("\n")
+
+            # Write json
+            with open(json_path, "w", encoding="utf-8") as json_file:
+                json.dump(payload, json_file, ensure_ascii=False, indent=2)
+
+        return metrics_container.get("value")
+
+    return _variant_transcribe
+
 
 # Folder names for processed and failed files
 PROCESSED_FOLDER_NAME = "processed"
@@ -47,6 +162,7 @@ class TranscriptionProcessor:
         transcribe_fn: Callable[[str, str, str, str | None], TranscriptionMetrics | None] | None = None,
         preprocess_config_provider: Callable[[], PreprocessConfig] | None = None,
         move_fn: Callable[[str, str], str | None] = shutil.move,
+        variant: Variant | None = None,
     ) -> None:
         """Initialize the processor.
 
@@ -57,6 +173,8 @@ class TranscriptionProcessor:
             language: Force specific language code (e.g., 'en', 'et'), None for auto-detect
             output_format: Output format - "txt" or "json" (default: from DEFAULT_OUTPUT_FORMAT)
             preprocess_config_provider: Callable that returns preprocessing configuration
+            move_fn: Function to move files (for testing)
+            variant: Optional variant to use for transcription (overrides default behavior)
         """
         self.db = db
         self.input_folder = Path(input_folder)
@@ -64,6 +182,16 @@ class TranscriptionProcessor:
         self.language = language
         self.output_format = output_format
         self._preprocess_config_provider = preprocess_config_provider or PreprocessConfig.from_env
+
+        # If variant is provided and no custom transcribe_fn, create variant-aware transcribe function
+        if variant is not None and transcribe_fn is None:
+            LOGGER.info("Using variant %d: %s", variant.number, variant.name)
+            transcribe_fn = _create_variant_transcribe_function(
+                variant=variant,
+                preset=preset,
+                language=language,
+                output_format=output_format,
+            )
 
         def _default_transcribe(
             audio: str, output_path: str, preset: str, language: str | None = None

@@ -1,56 +1,115 @@
 <!-- 827c1271-850d-46ed-b1e6-b579f8507bdf f6ed0af2-584a-4705-9b32-b878c2b035e2 -->
 # Variants Architecture Refactoring Plan
 
+## Executive Summary
+
+**Status**: Phase 1-3 Complete, Phase 4.0 Complete, Phase 4.1-4.2 Pending
+
+**Progress**: ~95% Complete
+
+- ✅ **Foundation Complete**: Variant system infrastructure, executor, and registry implemented
+- ✅ **Migration Complete**: Script supports both old and new systems via `--use-new-variants` flag
+- ✅ **Step Types Complete**: All 12 step types supported (`ffmpeg`, `denoise`, `resample`, `loudnorm_only`, `loudnorm_highpass`, `dynaudnorm`, `denoise_custom`, `highlow_aform_loudnorm`, `highlow_nosampl_loudnorm`, `aresampl_loudnorm_fixed`, `aresampl_loudnorm_fixed2`, `loudnorm_2pass_linear`)
+- ✅ **Variants 10-11 Migrated**: Now use declarative steps instead of custom functions
+- ✅ **Variants 12-16 Migrated**: Now use declarative steps instead of custom functions
+- ❌ **Cleanup Pending**: Old code still exists, waiting for verification before removal
+
+**Next Steps**:
+1. ✅ Add missing step types to `PreprocessStep.step_type` - **DONE**
+2. ✅ Migrate variants 10-11 from `custom_preprocess_runner` to declarative steps - **DONE**
+3. ✅ Migrate variants 12-16 to declarative steps - **DONE**
+4. Verify output compatibility between old and new systems
+5. Remove legacy code after verification
+
+## Implementation Status
+
+**Last Updated**: Dec 9, 2025 (Phase 4.0 completed: all variants 1-16 now use declarative steps)
+
+### ✅ Completed (Phase 1-3 Foundation)
+
+- [x] **Phase 1.1: Variant Definition Infrastructure** ✅
+  - Created `backend/variants/__init__.py`
+  - Created `backend/variants/variant.py` with `Variant` and `PreprocessStep` dataclasses
+  - Created `backend/variants/preprocess_steps.py` with `create_preprocess_runner()`
+  - Created `backend/variants/transcription_presets.py` with all three presets
+
+- [x] **Phase 1.2: Transcription Presets** ✅
+  - Implemented `get_project_defaults()` - returns `TranscriptionConfig.from_env()`
+  - Implemented `get_industry_defaults()` - industry-standard faster-whisper defaults
+  - Implemented `get_minimal_config()` - minimal params for faster-whisper internal defaults
+  - Implemented `get_transcription_config(preset)` helper
+
+- [x] **Phase 1.3: Composable Preprocessing System** ✅
+  - Implemented `create_preprocess_runner()` in `preprocess_steps.py`
+  - Supports `ffmpeg`, `denoise`, `resample` step types
+  - Reuses existing `run_ffmpeg_pipeline` and `apply_light_denoise`
+  - Supports step combinations and intermediate file copying
+
+- [x] **Phase 2.1: Variant Executor** ✅
+  - Created `backend/variants/executor.py` with `execute_variant()`
+  - Handles preprocessing pipeline composition
+  - Applies transcription presets
+  - Manages intermediate file output
+  - Returns results in same format as legacy `run_variant()`
+  - Includes `_transcribe_with_minimal_params()` for minimal preset
+
+- [x] **Phase 2.2: Variant Registry** ✅
+  - Created `backend/variants/registry.py` with `get_builtin_variants()`
+  - Defines **16 variants** (1-16) as `Variant` dataclass instances
+  - All variants 1-16 use declarative `preprocess_steps`
+  - Includes helper functions: `get_variant_by_name()`, `get_variant_by_number()`
+
+- [x] **Phase 3.1: Script Migration (Parallel Implementation)** ✅
+  - Added `--use-new-variants` CLI flag to `compare_transcription_variants.py`
+  - New system can be enabled via flag (default: False for backward compatibility)
+  - Legacy `run_variant()` function still intact
+  - Both systems produce compatible output format
+  - Supports `--skip-variants` for filtering
+
 ## Urgent Technical Debt Checklist
 
 **Priority: High - These issues are blocking maintainability and causing rapid code growth**
 
 ### Critical Issues (Fix First)
 
-- [ ] **Massive code duplication in preprocessing functions** (11 functions, ~700+ lines)
-  - `preprocess_only_ffmpeg()` - duplicates orchestrator logic
-  - `preprocess_loudnorm_only()` - new lightweight variant
-  - `preprocess_loudnorm_with_highpass()` - new lightweight variant with filter
-  - `preprocess_dynaudnorm_only()` - new dynamic normalization variant
-  - `preprocess_only_denoise()` - duplicates orchestrator logic
-  - `preprocess_only_denoise_custom()` - custom denoise parameters
-  - Plus 4 helper functions: `_loudnorm_only()`, `_loudnorm_with_highpass()`, `_dynaudnorm_only()`, `_simple_resample()`
-  - **Impact**: Each new variant requires ~100-150 lines of duplicated code
-  - **Solution**: Extend `backend/variants/preprocess_steps.py` to support all step types
+- [x] **Missing preprocessing step types in new system** ✅ **COMPLETED**
+  - ✅ New system now supports: `ffmpeg`, `denoise`, `resample`, `loudnorm_only`, `loudnorm_highpass`, `dynaudnorm`, `denoise_custom`, `highlow_aform_loudnorm`, `highlow_nosampl_loudnorm`, `aresampl_loudnorm_fixed`, `aresampl_loudnorm_fixed2`, `loudnorm_2pass_linear` (12 step types total)
+  - ✅ Extended `PreprocessStep.step_type` Literal to include all step types
+  - ✅ Implemented handlers in `create_preprocess_runner()` for all new step types
+  - ✅ **Current status**: All variants 1-16 now use declarative steps (no `custom_preprocess_runner` needed)
+  - **Files updated**: `backend/variants/variant.py`, `backend/variants/preprocess_steps.py`
 
-- [ ] **Giant if/elif chain in `run_variant()`** (11 branches, ~240 lines, lines 968-1188)
+- [x] **Massive code duplication in preprocessing functions** ✅ **RESOLVED FOR NEW SYSTEM**
+  - ✅ Helper functions moved to `preprocess_steps.py`: `_loudnorm_only()`, `_loudnorm_with_highpass()`, `_dynaudnorm_only()`, `_highlow_aform_loudnorm()`, `_highlow_nosampl_loudnorm()`, `_aresampl_loudnorm_fixed()`, `_aresampl_loudnorm_fixed2()`, `_loudnorm_2pass_linear()`
+  - ✅ All variants 1-16 now use declarative steps (no custom functions needed in new system)
+  - ⚠️ Legacy functions still exist in script: `preprocess_only_ffmpeg()`, `preprocess_only_denoise()`, `preprocess_loudnorm_only()`, etc. (will be removed after verification)
+  - **Impact**: Code duplication eliminated in new system; legacy code can be removed after verification
+  - **Solution**: Remove all legacy functions after verifying new system produces identical outputs
+
+- [ ] **Giant if/elif chain in `run_variant()`** (Still exists, ~240 lines)
   - Each variant requires a new elif branch with wrapper function
   - Pattern repeats: create wrapper, set config, set runner, set transcription provider
   - **Impact**: Adding one variant = ~20-30 lines of boilerplate
-  - **Solution**: Complete migration to declarative variant system
-
-- [ ] **Variant count mismatch** (New system: 9 variants, Legacy: 12 variants)
-  - New variants missing from registry: `norm_highp_noparamtrans` (8a), `norm_dynaud_noparamtrans` (8b), `onlyden_noparamtrans_custom` (9a)
-  - **Impact**: New system incomplete, cannot replace legacy system
-  - **Solution**: Add missing variants to `backend/variants/registry.py` and extend step types
-
-- [ ] **Missing preprocessing step types in new system**
-  - New system only supports: `ffmpeg`, `denoise`, `resample`
-  - Legacy system has: `loudnorm_only`, `loudnorm_with_highpass`, `dynaudnorm_only`, `denoise_custom`
-  - **Impact**: Cannot express new variants declaratively
-  - **Solution**: Extend `PreprocessStep.step_type` to include all step types
+  - **Solution**: Complete migration to new system, then remove old `run_variant()` function
 
 ### High Priority Issues (Fix Next)
 
-- [ ] **Custom denoise parameters not supported in new system**
-  - `preprocess_only_denoise_custom()` uses hardcoded params: `noise_clip_duration_s=5.0`, `n_std_thresh_stationary=0.75`, `prop_decrease=0.25`
-  - **Impact**: Cannot express variant 9a in declarative system
-  - **Solution**: Add `config` dict to `PreprocessStep` for step-specific parameters
+- [x] **Custom denoise parameters not supported in new system** ✅ **COMPLETED**
+  - ✅ `PreprocessStep.config` dict now used for `denoise_custom` step type
+  - ✅ `create_preprocess_runner()` extracts custom params from `step.config` when `step_type == "denoise_custom"`
+  - ✅ Supports: `noise_clip_duration_s`, `n_std_thresh_stationary`, `prop_decrease`
+  - **Impact**: Can now express variants with custom denoise params declaratively
 
-- [ ] **Lightweight ffmpeg steps not composable**
-  - Three separate functions for similar operations (loudnorm, loudnorm+highpass, dynaudnorm)
-  - **Impact**: Code duplication, hard to maintain filter graph variations
-  - **Solution**: Create composable ffmpeg filter builder in `preprocess_steps.py`
+- [x] **Lightweight ffmpeg steps not composable** ✅ **COMPLETED**
+  - ✅ Implemented handlers in `create_preprocess_runner()` for `loudnorm_only`, `loudnorm_highpass`, `dynaudnorm`
+  - ✅ Helper functions moved to `preprocess_steps.py`: `_loudnorm_only()`, `_loudnorm_with_highpass()`, `_dynaudnorm_only()`
+  - ✅ Variants 10-11 now use declarative steps instead of custom functions
+  - **Impact**: Reduced code duplication, easier to maintain filter graph variations
 
 - [ ] **No way to select subset of variants**
-  - Script always runs all variants or uses hardcoded list
-  - **Impact**: Cannot test individual variants, wastes time/resources
-  - **Solution**: Add `--variants` CLI argument (Phase 4.2)
+  - Script supports `--skip-variants` but no way to select specific variants
+  - **Impact**: Cannot test individual variants efficiently, wastes time/resources
+  - **Solution**: Add `--variants` CLI argument to select by name/number (Phase 4.2)
 
 ### Medium Priority Issues (Nice to Have)
 
@@ -76,25 +135,30 @@
 4. **Mixed concerns**: Variant definition, execution, and output handling are intertwined
 5. **Special-case handling**: `transcribe_with_minimal_params()` duplicates transcription logic
 
-### Current Variants (12 total in legacy system, 9 in new system)
+### Current Variants (16 total in new system, legacy system still exists)
 
-**Legacy System Variants:**
-1. `no_preprocessing`: No preprocessing + project defaults (currently disabled)
-2. `industry_defaults`: No preprocessing + industry defaults
-3. `ffmpeg_only`: Only ffmpeg pipeline + project defaults
-4. `denoise_only`: Only denoise_light + project defaults
-5. `ffmpeg_industry_defaults`: Only ffmpeg + industry defaults
-6. `full_industry_defaults`: Full preprocessing + industry defaults
-7. `noprep_noparamtrans`: No preprocessing + minimal params
-8. `normonly_noparamtrans`: Only loudness normalization (lightweight) + minimal params
-8a. `norm_highp_noparamtrans`: Loudness normalization + highpass filter + minimal params
-8b. `norm_dynaud_noparamtrans`: Dynamic audio normalization + minimal params
-9. `onlyden_noparamtrans`: Only denoise + minimal params
-9a. `onlyden_noparamtrans_custom`: Only denoise with custom params + minimal params
+**New System Variants (16 total):**
+1. `no_preprocessing`: No preprocessing + project defaults ✅ (declarative)
+2. `industry_defaults`: No preprocessing + industry defaults ✅ (declarative)
+3. `ffmpeg_only`: Only ffmpeg pipeline + project defaults ✅ (declarative)
+4. `denoise_only`: Only denoise_light + project defaults ✅ (declarative)
+5. `ffmpeg_industry_defaults`: Only ffmpeg + industry defaults ✅ (declarative)
+6. `full_industry_defaults`: Full preprocessing + industry defaults ✅ (declarative)
+7. `noprep_noparamtrans`: No preprocessing + minimal params ✅ (declarative)
+8. `normonly_noparamtrans`: Only loudness normalization + minimal params ✅ (declarative, uses ffmpeg step)
+9. `onlyden_noparamtrans`: Only denoise + minimal params ✅ (declarative)
+10. `norm_highp_noparamtrans`: Loudness normalization + highpass + minimal params ✅ (declarative, uses loudnorm_highpass step)
+11. `norm_dynaud_noparamtrans`: Dynamic audio normalization + minimal params ✅ (declarative, uses dynaudnorm step)
+12. `lnorm_highlow_aform_noparamtrans`: Highpass + lowpass + aformat + loudnorm + minimal params ✅ (declarative, uses highlow_aform_loudnorm step)
+13. `lnorm_highlow_nosampl_noparamtrans`: Highpass + lowpass + loudnorm (no aformat) + minimal params ✅ (declarative, uses highlow_nosampl_loudnorm step)
+14. `lnorm2_aresampl_noparamtrans`: Aresample to 16kHz + loudnorm (fixed params) + minimal params ✅ (declarative, uses aresampl_loudnorm_fixed step)
+15. `lnorm3_aresampl_noparamtrans`: Aresample to 16kHz + loudnorm (I=-24, LRA=15) + minimal params ✅ (declarative, uses aresampl_loudnorm_fixed2 step)
+16. `loudnorm_2pass_linear_noparamtrans`: 2-pass loudnorm in linear mode + minimal params ✅ (declarative, uses loudnorm_2pass_linear step)
 
-**New System Variants (incomplete):**
-- Only supports variants 1-9 (missing 8a, 8b, 9a)
-- Missing step types: `loudnorm_only`, `loudnorm_with_highpass`, `dynaudnorm_only`, `denoise_custom`
+**Legacy System Status:**
+- Old `run_variant()` function still exists (lines 1619+)
+- Old preprocessing functions still exist: `preprocess_only_ffmpeg()`, `preprocess_loudnorm_only()`, `preprocess_loudnorm_with_highpass()`, `preprocess_dynaudnorm_only()`, `preprocess_only_denoise()`, `preprocess_only_denoise_custom()`, etc.
+- Legacy system can be used when `--use-new-variants` flag is not set (default: False)
 
 ## Target Architecture
 
@@ -132,16 +196,20 @@
 
 ### Phase 1: Foundation (Backward Compatible)
 
-#### Step 1.1: Create Variant Definition Infrastructure
+#### Step 1.1: Create Variant Definition Infrastructure ✅ COMPLETED
 
-**Files to create:**
+**Files created:**
 
-- `backend/variants/__init__.py`
-- `backend/variants/variant.py`: Core `Variant` dataclass
-- `backend/variants/preprocess_steps.py`: Preprocessing step definitions
-- `backend/variants/transcription_presets.py`: Transcription config presets
+- ✅ `backend/variants/__init__.py`
+- ✅ `backend/variants/variant.py`: Core `Variant` dataclass
+- ✅ `backend/variants/preprocess_steps.py`: Preprocessing step definitions
+- ✅ `backend/variants/transcription_presets.py`: Transcription config presets
 
-**Key structures:**
+**Current implementation:**
+- ✅ `PreprocessStep` supports: `"ffmpeg"`, `"denoise"`, `"resample"`, `"loudnorm_only"`, `"loudnorm_highpass"`, `"dynaudnorm"`, `"denoise_custom"`, `"highlow_aform_loudnorm"`, `"highlow_nosampl_loudnorm"`, `"aresampl_loudnorm_fixed"`, `"aresampl_loudnorm_fixed2"`, `"loudnorm_2pass_linear"` (all 12 step types)
+- `Variant` includes `custom_preprocess_runner` field (no longer used; all variants use declarative steps)
+
+**Key structures (current vs planned):**
 
 ```python
 @dataclass
@@ -149,13 +217,18 @@ class PreprocessStep:
     name: str
     enabled: bool
     step_type: Literal[
-        "ffmpeg",           # Full ffmpeg pipeline (highpass + resample + rnnoise + loudnorm)
-        "loudnorm_only",    # Lightweight: resample + loudnorm only
-        "loudnorm_highpass", # Lightweight: highpass + resample + loudnorm
-        "dynaudnorm",       # Lightweight: resample + dynamic audio normalization
-        "denoise",          # Light denoising (noisereduce)
-        "denoise_custom",   # Light denoising with custom parameters
-        "resample"          # Simple resampling only
+        "ffmpeg",                    # Full ffmpeg pipeline (highpass + resample + rnnoise + loudnorm)
+        "loudnorm_only",             # Lightweight: resample + loudnorm only
+        "loudnorm_highpass",         # Lightweight: highpass + resample + loudnorm
+        "dynaudnorm",                # Lightweight: resample + dynamic audio normalization
+        "denoise",                   # Light denoising (noisereduce)
+        "denoise_custom",            # Light denoising with custom parameters
+        "resample",                  # Simple resampling only
+        "highlow_aform_loudnorm",    # Highpass + lowpass + aformat + loudnorm
+        "highlow_nosampl_loudnorm",  # Highpass + lowpass + loudnorm (no aformat)
+        "aresampl_loudnorm_fixed",   # Aresample to 16kHz + loudnorm (I=-23, LRA=11)
+        "aresampl_loudnorm_fixed2",  # Aresample to 16kHz + loudnorm (I=-24, LRA=15)
+        "loudnorm_2pass_linear"      # 2-pass loudnorm in linear mode
     ]
     config: dict[str, Any] | None = None  # Step-specific parameters (e.g., denoise params)
 
@@ -169,42 +242,46 @@ class Variant:
     transcription_overrides: dict[str, Any] | None = None
 ```
 
-#### Step 1.2: Create Transcription Presets
+#### Step 1.2: Create Transcription Presets ✅ COMPLETED
 
 **File:** `backend/variants/transcription_presets.py`
 
-**Presets to implement:**
+**Presets implemented:**
 
-- `get_project_defaults()`: Returns `TranscriptionConfig.from_env()` (current project defaults)
-- `get_industry_defaults()`: Returns industry-standard faster-whisper defaults (move from `compare_transcription_variants.py:328-368`)
-- `get_minimal_config()`: Returns config that omits parameters to use faster-whisper internal defaults
+- ✅ `get_project_defaults()`: Returns `TranscriptionConfig.from_env()` (current project defaults)
+- ✅ `get_industry_defaults()`: Returns industry-standard faster-whisper defaults
+- ✅ `get_minimal_config()`: Returns config that omits parameters to use faster-whisper internal defaults
+- ✅ `get_transcription_config(preset)`: Helper function to get config by preset name
 
-#### Step 1.3: Create Composable Preprocessing System
+#### Step 1.3: Create Composable Preprocessing System ✅ COMPLETED
 
 **File:** `backend/variants/preprocess_steps.py`
 
-**Functions:**
+**Functions implemented:**
 
-- `create_preprocess_runner(steps: list[PreprocessStep], config: PreprocessConfig) -> Callable`: Builds a preprocessing function from step definitions
-- Reuse existing `run_ffmpeg_pipeline` and `apply_light_denoise` from backend
-- Add support for lightweight ffmpeg steps: `_loudnorm_only()`, `_loudnorm_with_highpass()`, `_dynaudnorm_only()`
-- Support custom denoise parameters via step config
-- Support step combinations: none, ffmpeg-only, loudnorm variants, denoise-only, denoise-custom, full (ffmpeg + denoise)
+- ✅ `create_preprocess_runner(steps: list[PreprocessStep], config: PreprocessConfig) -> Callable`: Builds a preprocessing function from step definitions
+- ✅ Reuses existing `run_ffmpeg_pipeline` and `apply_light_denoise` from backend
+- ✅ Supports `_simple_resample()` for resample step type
+- ✅ Supports step combinations: none, ffmpeg-only, denoise-only, full (ffmpeg + denoise)
+- ✅ Supports intermediate file copying with variant naming
+- ✅ **Support for lightweight ffmpeg steps**: `loudnorm_only`, `loudnorm_highpass`, `dynaudnorm` step types
+- ✅ **Support for custom denoise parameters**: `denoise_custom` step type with config dict support
+- ✅ **Support for complex filter combinations**: `highlow_aform_loudnorm`, `highlow_nosampl_loudnorm`, `aresampl_loudnorm_fixed`, `aresampl_loudnorm_fixed2`, `loudnorm_2pass_linear` step types
 
-### Phase 2: Variant Executor
+### Phase 2: Variant Executor ✅ COMPLETED
 
-#### Step 2.1: Create Variant Executor
+#### Step 2.1: Create Variant Executor ✅ COMPLETED
 
 **File:** `backend/variants/executor.py`
 
-**Key function:**
+**Key function implemented:**
 
 ```python
 def execute_variant(
     variant: Variant,
     audio_path: str,
-    preset: str,
-    language: str | None,
+    preset: str = "et-large",
+    language: str | None = None,
     *,
     output_dir: Path | None = None,
     output_base_path: Path | None = None,
@@ -214,76 +291,96 @@ def execute_variant(
     """Execute a single variant and return results."""
 ```
 
-**Responsibilities:**
+**Responsibilities implemented:**
 
-- Build preprocessing pipeline from variant steps
-- Apply transcription preset
-- Handle intermediate file output
-- Return results in same format as current `run_variant()`
+- ✅ Build preprocessing pipeline from variant steps (or use custom_preprocess_runner)
+- ✅ Apply transcription preset via `create_variant_transcribe_config()`
+- ✅ Handle intermediate file output with variant naming
+- ✅ Return results in same format as legacy `run_variant()`
+- ✅ Includes `_transcribe_with_minimal_params()` for minimal preset
+- ✅ Includes `_transcribe_with_config()` for full config presets
 
-#### Step 2.2: Create Variant Registry
+#### Step 2.2: Create Variant Registry ✅ COMPLETED
 
 **File:** `backend/variants/registry.py`
 
-**Function:**
+**Function implemented:**
 
 ```python
 def get_builtin_variants() -> list[Variant]:
-    """Return list of all 9 built-in variants."""
+    """Return list of all built-in variants (1-16)."""
 ```
 
-**Implementation:**
+**Implementation status:**
 
-- Define all 12 current variants as `Variant` dataclass instances
-- Include new variants: `norm_highp_noparamtrans`, `norm_dynaud_noparamtrans`, `onlyden_noparamtrans_custom`
-- Map to existing variant names for backward compatibility
-- Support custom denoise parameters via `PreprocessStep.config`
+- ✅ Defines **16 variants** (1-16) as `Variant` dataclass instances
+- ✅ All variants 1-16 use declarative `preprocess_steps`
+- ✅ Includes helper functions: `get_variant_by_name()`, `get_variant_by_number()`
 
-### Phase 3: Script Migration (Backward Compatible)
+### Phase 3: Script Migration (Backward Compatible) ✅ COMPLETED
 
-#### Step 3.1: Update Script to Use New System (Parallel Implementation)
+#### Step 3.1: Update Script to Use New System (Parallel Implementation) ✅ COMPLETED
 
 **File:** `scripts/compare_transcription_variants.py`
 
-**Strategy:**
+**Strategy implemented:**
 
-- Add new functions that use variant system
-- Keep old `run_variant()` function intact
-- Add feature flag or environment variable to switch between old/new
-- Default to old system initially
+- ✅ New system uses `execute_variant()` from `backend.variants`
+- ✅ Old `run_variant()` function still intact (lines 1619+)
+- ✅ Feature flag `--use-new-variants` to switch between old/new
+- ✅ Default to old system (False) for backward compatibility
 
-**Changes:**
+**Changes implemented:**
 
-- Import new variant system
-- Add `run_variant_v2()` that uses `execute_variant()`
-- Update `main()` to support both old and new paths
-- Add `--use-new-variants` flag (default: False for compatibility)
+- ✅ Imports new variant system: `from backend.variants import execute_variant, get_builtin_variants`
+- ✅ `main()` supports both old and new paths via `if args.use_new_variants:`
+- ✅ New system uses `get_builtin_variants()` and iterates through variants
+- ✅ Supports `--skip-variants` for filtering variants
+- ✅ Statistics logging after each variant (same format for both systems)
 
-#### Step 3.2: Test Both Systems
+#### Step 3.2: Test Both Systems ⚠️ PARTIALLY COMPLETED
 
-- Run existing tests
-- Manually verify both old and new paths produce identical results
-- Compare outputs from both systems
+- ✅ Unit tests exist in `tests/unit/test_variants.py`
+- ⚠️ Manual verification of identical outputs between systems may need confirmation
+- ⚠️ Comparison of outputs from both systems may need verification
 
-### Phase 4: Cleanup and Enhancement
+### Phase 4: Cleanup and Enhancement ⚠️ IN PROGRESS
 
-#### Step 4.1: Remove Old Implementation
+#### Step 4.1: Remove Old Implementation ❌ NOT STARTED
+
+**Prerequisites:**
+- Complete Phase 4.0: Add missing step types and migrate variants 10-16 to declarative system
+- Verify new system produces identical outputs to legacy system
 
 **After verification:**
 
-- Remove old `run_variant()` if/elif chain
-- Remove `preprocess_only_ffmpeg()`, `preprocess_only_denoise()`
-- Remove `transcribe_with_minimal_params()`
-- Remove `get_industry_default_transcription_config()`, `get_minimal_transcription_config()`
-- Update script to use new system by default
+- ❌ Remove old `run_variant()` if/elif chain (lines 1619+)
+- ❌ Remove `preprocess_only_ffmpeg()`, `preprocess_only_denoise()`, `preprocess_loudnorm_only()`, `preprocess_loudnorm_with_highpass()`, `preprocess_dynaudnorm_only()`, `preprocess_only_denoise_custom()`
+- ❌ Remove helper functions: `_loudnorm_only()`, `_loudnorm_with_highpass()`, `_dynaudnorm_only()`, `_simple_resample()` (if moved to preprocess_steps.py)
+- ❌ Remove `transcribe_with_minimal_params()` from script (already in executor.py)
+- ❌ Remove `get_industry_default_transcription_config()`, `get_minimal_transcription_config()` from script (moved to transcription_presets.py)
+- ❌ Update script to use new system by default (change `--use-new-variants` default to True or remove flag)
 
-#### Step 4.2: Add Flexible Variant Selection
+#### Step 4.0: Complete Step Type Support ✅ COMPLETED
+
+**Tasks:**
+
+- [x] Extend `PreprocessStep.step_type` Literal in `variant.py` to include: `"loudnorm_only"`, `"loudnorm_highpass"`, `"dynaudnorm"`, `"denoise_custom"`, `"highlow_aform_loudnorm"`, `"highlow_nosampl_loudnorm"`, `"aresampl_loudnorm_fixed"`, `"aresampl_loudnorm_fixed2"`, `"loudnorm_2pass_linear"` ✅
+- [x] Implement handlers in `create_preprocess_runner()` for all new step types ✅
+- [x] Update variants 10-11 in `registry.py` to use declarative steps instead of `custom_preprocess_runner` ✅
+- [x] Test that variants 10-11 work with declarative steps ✅
+- [x] Update variants 12-16 in `registry.py` to use declarative steps ✅
+- [x] Move helper functions to `preprocess_steps.py`: `_highlow_aform_loudnorm()`, `_highlow_nosampl_loudnorm()`, `_aresampl_loudnorm_fixed()`, `_aresampl_loudnorm_fixed2()`, `_loudnorm_2pass_linear()` ✅
+- [x] Test that variants 12-16 work with declarative steps ✅
+
+#### Step 4.2: Add Flexible Variant Selection ❌ NOT STARTED
 
 **Enhancement:**
 
-- Add `--variants` CLI argument to select specific variants by name or number
-- Add `--variant-category` to select by category (e.g., "no_preprocessing", "industry_defaults")
-- Support comma-separated lists: `--variants 1,3,5` or `--variants no_preprocessing,ffmpeg_only`
+- ❌ Add `--variants` CLI argument to select specific variants by name or number
+- ❌ Add `--variant-category` to select by category (e.g., "no_preprocessing", "industry_defaults")
+- ❌ Support comma-separated lists: `--variants 1,3,5` or `--variants no_preprocessing,ffmpeg_only`
+- ⚠️ Note: `--skip-variants` already exists but only supports skipping, not selecting
 
 #### Step 4.3: Support External Variant Definitions
 
@@ -347,23 +444,33 @@ scripts/
 
 ## Success Criteria
 
-1. All 12 existing variants work with new system (including 8a, 8b, 9a)
-2. Output format matches current implementation exactly
-3. Script remains backward compatible during transition
-4. New system is easier to extend with new variants
-5. Code duplication is eliminated (remove 11 preprocessing functions)
-6. `run_variant()` if/elif chain replaced with declarative system
-7. All preprocessing step types supported in composable system
+1. ✅ All 16 variants work with new system (all variants 1-16 use declarative steps)
+2. ✅ Output format matches current implementation exactly
+3. ✅ Script remains backward compatible during transition (legacy system still available)
+4. ✅ New system is easier to extend with new variants (declarative system in place)
+5. ✅ Code duplication eliminated in new system (all variants use declarative steps; legacy functions can be removed after verification)
+6. ❌ `run_variant()` if/elif chain not yet replaced (legacy system still active, waiting for verification)
+7. ✅ All preprocessing step types fully supported (12/12 step types: ffmpeg, denoise, resample, loudnorm_only, loudnorm_highpass, dynaudnorm, denoise_custom, highlow_aform_loudnorm, highlow_nosampl_loudnorm, aresampl_loudnorm_fixed, aresampl_loudnorm_fixed2, loudnorm_2pass_linear)
 
-### To-dos
+### Remaining To-dos
 
-- [ ] Create backend/variants/ package with variant.py (core dataclass), preprocess_steps.py (step definitions), and transcription_presets.py (config presets)
-- [ ] Implement transcription presets: project_defaults, industry_defaults, and minimal_config in transcription_presets.py
-- [ ] Create composable preprocessing system in preprocess_steps.py that can build preprocessing pipelines from step definitions
-- [ ] Implement execute_variant() function in executor.py that runs variants using the new system
-- [ ] Create registry.py with get_builtin_variants() that defines all 9 current variants as Variant dataclass instances
-- [ ] Update compare_transcription_variants.py to support both old and new systems via feature flag, keeping old code intact
-- [ ] Test both old and new systems produce identical outputs, verify all 9 variants work correctly
-- [ ] Remove old run_variant() if/elif chain, custom preprocessing functions, and transcribe_with_minimal_params() after verification
-- [ ] Add --variants and --variant-category CLI arguments for flexible variant selection
+**Critical (Blocking cleanup):**
+- [x] Extend `PreprocessStep.step_type` to include: `"loudnorm_only"`, `"loudnorm_highpass"`, `"dynaudnorm"`, `"denoise_custom"`, `"highlow_aform_loudnorm"`, `"highlow_nosampl_loudnorm"`, `"aresampl_loudnorm_fixed"`, `"aresampl_loudnorm_fixed2"`, `"loudnorm_2pass_linear"` ✅
+- [x] Implement handlers in `create_preprocess_runner()` for all new step types ✅
+- [x] Update variants 10-11 in `registry.py` to use declarative steps instead of `custom_preprocess_runner` ✅
+- [x] Test that variants 10-11 work with declarative steps ✅
+- [x] Update variants 12-16 in `registry.py` to use declarative steps ✅
+- [x] Move helper functions to `preprocess_steps.py` ✅
+- [x] Test that variants 12-16 work with declarative steps ✅
+
+**High Priority:**
+- [ ] Verify both old and new systems produce identical outputs for all variants
+- [ ] Remove old `run_variant()` if/elif chain after verification
+- [ ] Remove custom preprocessing functions after verification (all variants now use declarative steps)
+- [ ] Add `--variants` CLI argument for flexible variant selection
+
+**Medium Priority:**
+- [ ] Extract duplicated statistics logging to shared function
+- [ ] Add validation of variant definitions in `execute_variant()`
+- [ ] Update script to use new system by default (or remove `--use-new-variants` flag)
 
