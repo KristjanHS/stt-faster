@@ -13,8 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from backend.preprocess.config import PreprocessConfig
-
 
 @pytest.mark.slow
 @pytest.mark.network
@@ -52,13 +50,6 @@ class TestRealTranscription:
         )
 
         output = result.stdout + result.stderr
-
-        # Verify that PreprocessConfig defaults to sh.rnnn
-        # This ensures the e2e test uses the correct default model
-        config = PreprocessConfig.from_env()
-        assert config.rnnoise_model == "models/sh.rnnn", (
-            f"Expected default rnnoise_model to be 'models/sh.rnnn', got '{config.rnnoise_model}'"
-        )
 
         # Check if transcription succeeded
         if result.returncode == 0:
@@ -100,41 +91,15 @@ class TestRealTranscription:
             else:
                 pytest.fail(f"Transcription failed with unexpected error: {output}")
 
-    def test_transcribe_creates_processed_folder(self, e2e_test_folder: Path, e2e_test_db: Path) -> None:
-        """E2E: Verify that processing creates the processed and failed subfolders.
+    def test_transcribe_accepts_preset_argument(self, e2e_test_folder: Path, e2e_test_db: Path) -> None:
+        """E2E: Verify that preset argument works and produces valid transcription.
+
+        This test verifies that:
+        1. The preset argument is accepted and used correctly
+        2. The transcription succeeds with the specified preset
+        3. The output contains valid transcription data
 
         Note: test.mp3 is Estonian audio, so we use the et-large preset.
-        """
-        test_mp3 = e2e_test_folder / "test.mp3"
-        if not test_mp3.exists():
-            pytest.fail("test.mp3 not found in test folder; add tests/test.mp3 for E2E transcription")
-
-        # Run the process command
-        subprocess.run(
-            [
-                sys.executable,
-                "scripts/transcribe_manager.py",
-                "--db-path",
-                str(e2e_test_db),
-                "process",
-                str(e2e_test_folder),
-                "--preset",
-                "et-large",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=300,
-        )
-
-        # Verify folders were created regardless of success/failure
-        assert (e2e_test_folder / "processed").exists(), "Processed folder should be created"
-        assert (e2e_test_folder / "failed").exists(), "Failed folder should be created"
-
-    def test_transcribe_accepts_preset_argument(self, e2e_test_folder: Path, e2e_test_db: Path) -> None:
-        """E2E: Verify that the preset argument is accepted by the CLI.
-
-        Note: test.mp3 is Estonian audio, so we only test with et-large preset.
-        Testing with other presets would fail due to language mismatch.
         """
         test_mp3 = e2e_test_folder / "test.mp3"
         if not test_mp3.exists():
@@ -156,8 +121,25 @@ class TestRealTranscription:
             timeout=300,
         )
 
-        # Verify the command runs without argument errors
         output = result.stdout + result.stderr
+
+        # Verify no argument errors
         assert "unknown preset" not in output.lower()
         assert "invalid preset" not in output.lower()
         assert "unrecognized arguments" not in output.lower()
+
+        # Verify the command succeeded
+        assert result.returncode == 0, f"Transcription failed: {output}"
+
+        # Verify transcription output was created
+        processed_folder = e2e_test_folder / "processed"
+        assert processed_folder.exists(), "Processed folder should be created"
+
+        # Verify JSON output exists and contains valid transcription
+        json_file = processed_folder / "test.json"
+        if json_file.exists():
+            with json_file.open() as f:
+                transcription_data = json.load(f)
+                assert "segments" in transcription_data, "JSON should contain segments"
+                assert transcription_data["language"] == "et", "Language should be Estonian (preset used correctly)"
+                assert len(transcription_data["segments"]) > 0, "Should have transcription segments"

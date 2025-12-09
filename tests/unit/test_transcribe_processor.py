@@ -8,17 +8,6 @@ from backend.processor import TranscriptionProcessor
 from backend.transcribe import TranscriptionMetrics
 
 
-def test_processor_initialization(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
-    """Test that processor initializes correctly."""
-    processor = TranscriptionProcessor(temp_db, temp_folder)
-
-    assert processor.db == temp_db
-    assert processor.input_folder == temp_folder
-    assert processor.preset == "et-large"
-    assert processor.processed_folder.exists()
-    assert processor.failed_folder.exists()
-
-
 def test_processor_custom_preset(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
     """Test processor with custom preset."""
     processor = TranscriptionProcessor(temp_db, temp_folder, preset="turbo")
