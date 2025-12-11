@@ -206,7 +206,7 @@ def _get_all_variants() -> list[Variant]:
             description="nopre_thres1",
             preprocess_steps=[],
             transcription_preset="minimal",
-            transcription_overrides={"no_speech_threshold": 0.5},
+            transcription_overrides={"no_speech_threshold": 0.4},
         ),
         # Variant 18: No preprocessing + minimal params + chunk_length
         Variant(
