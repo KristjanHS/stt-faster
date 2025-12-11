@@ -105,7 +105,12 @@ def _get_all_variants() -> list[Variant]:
             number=10,
             description="norm_highp_noparam",
             preprocess_steps=[
-                PreprocessStep(name="loudnorm_highpass", enabled=True, step_type="loudnorm_highpass"),
+                PreprocessStep(
+                    name="loudnorm_highpass",
+                    enabled=True,
+                    step_type="loudnorm_highpass",
+                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                ),
             ],
             transcription_preset="minimal",
         ),
@@ -125,7 +130,12 @@ def _get_all_variants() -> list[Variant]:
             number=12,
             description="lnorm_highlow_aform_noparam",
             preprocess_steps=[
-                PreprocessStep(name="highlow_aform_loudnorm", enabled=True, step_type="highlow_aform_loudnorm"),
+                PreprocessStep(
+                    name="highlow_aform_loudnorm",
+                    enabled=True,
+                    step_type="highlow_aform_loudnorm",
+                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                ),
             ],
             transcription_preset="minimal",
         ),
@@ -135,7 +145,12 @@ def _get_all_variants() -> list[Variant]:
             number=13,
             description="lnorm_highlow_nosampl_noparam",
             preprocess_steps=[
-                PreprocessStep(name="highlow_nosampl_loudnorm", enabled=True, step_type="highlow_nosampl_loudnorm"),
+                PreprocessStep(
+                    name="highlow_nosampl_loudnorm",
+                    enabled=True,
+                    step_type="highlow_nosampl_loudnorm",
+                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                ),
             ],
             transcription_preset="minimal",
         ),
@@ -145,7 +160,12 @@ def _get_all_variants() -> list[Variant]:
             number=14,
             description="lnorm2_aresampl_noparam",
             preprocess_steps=[
-                PreprocessStep(name="aresampl_loudnorm_fixed", enabled=True, step_type="aresampl_loudnorm_fixed"),
+                PreprocessStep(
+                    name="aresampl_loudnorm_fixed",
+                    enabled=True,
+                    step_type="aresampl_loudnorm_fixed",
+                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                ),
             ],
             transcription_preset="minimal",
         ),
@@ -155,7 +175,12 @@ def _get_all_variants() -> list[Variant]:
             number=15,
             description="lnorm3_aresampl_noparam",
             preprocess_steps=[
-                PreprocessStep(name="aresampl_loudnorm_fixed2", enabled=True, step_type="aresampl_loudnorm_fixed2"),
+                PreprocessStep(
+                    name="aresampl_loudnorm_fixed2",
+                    enabled=True,
+                    step_type="aresampl_loudnorm_fixed2",
+                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                ),
             ],
             transcription_preset="minimal",
         ),
@@ -181,7 +206,7 @@ def _get_all_variants() -> list[Variant]:
             description="nopre_thres1",
             preprocess_steps=[],
             transcription_preset="minimal",
-            transcription_overrides={"no_speech_threshold": 0.6},
+            transcription_overrides={"no_speech_threshold": 0.5},
         ),
         # Variant 18: No preprocessing + minimal params + chunk_length
         Variant(
@@ -200,6 +225,15 @@ def _get_all_variants() -> list[Variant]:
             preprocess_steps=[],
             transcription_preset="minimal",
             transcription_overrides={"condition_on_previous_text": False},
+        ),
+        # Variant 20: No preprocessing + minimal params + beam_size=6
+        Variant(
+            name="noprep_noparamtrans_beam6",
+            number=20,
+            description="nopre_beam6",
+            preprocess_steps=[],
+            transcription_preset="minimal",
+            transcription_overrides={"beam_size": 6},
         ),
     ]
 
@@ -241,7 +275,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-19)
+        number: Variant number (1-20)
 
     Returns:
         Variant instance or None if not found
