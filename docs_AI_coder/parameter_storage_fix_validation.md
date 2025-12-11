@@ -62,50 +62,59 @@ self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_model VARCHAR")
 3. **Test Coverage**: Unit tests pass - **CORRECT**
 4. **Code Consistency**: Matches `FileMetricRecord` structure - **CORRECT**
 
-## Simplest Fix Plan
+## Fix Applied
 
-### Issue to Fix
-- **Security/Consistency**: Replace f-string SQL with validated approach
+### Issue Fixed
+- **Security/Consistency**: Added type validation for f-string SQL in migration
 
-### Fix Strategy
-**Option A (Simplest - Match Existing Pattern)**: Replace loop with individual hardcoded statements
-- Pros: Matches existing code style exactly, zero risk
-- Cons: Verbose (21 statements)
+### Fix Implemented
+- Changed from tuple list to dictionary (clearer mapping)
+- Added column type validation with whitelist check
+- Added error handling for unknown column types
+- Column names come from hardcoded dictionary keys (safe)
+- Column types validated against known types before use
 
-**Option B (Recommended - Add Validation)**: Keep loop but add whitelist validation
-- Pros: Maintainable, safe, follows DRY principle
-- Cons: Slightly more complex
-
-### Recommended Fix (Option B)
-
+**Implementation**:
 ```python
-# Add validation function
-def _validate_column_name(name: str) -> bool:
-    """Validate column name is safe (alphanumeric and underscores only)."""
-    return name.replace("_", "").isalnum() and name.isidentifier()
+new_columns_to_add = {
+    "patience": "DOUBLE",
+    "task": "VARCHAR",
+    # ... 21 columns total
+}
 
-def _validate_column_type(column_type: str) -> bool:
-    """Validate column type is from whitelist."""
-    allowed_types = {"VARCHAR", "DOUBLE", "INTEGER", "BOOLEAN"}
-    return column_type in allowed_types
-
-# In migration:
-for column_name, column_type in new_columns:
+for column_name, column_type in new_columns_to_add.items():
     if column_name not in runs_existing_columns:
-        # Validate inputs before using in SQL
-        if not _validate_column_name(column_name):
-            raise ValueError(f"Invalid column name: {column_name}")
-        if not _validate_column_type(column_type):
-            raise ValueError(f"Invalid column type: {column_type}")
-        LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
-        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} {column_type}")
+        # Validate column type against whitelist
+        if column_type == "DOUBLE":
+            self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
+        elif column_type == "VARCHAR":
+            self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
+        # ... etc with error handling
 ```
+
+**Safety Assessment**:
+- ✅ Column names: From hardcoded dictionary keys (not user input)
+- ✅ Column types: Validated against whitelist before use
+- ✅ Error handling: Unknown types are logged and skipped
+- ⚠️ Still uses f-string: But with validated inputs (acceptable compromise for 21 columns)
+
+**Note**: While still using f-strings, this is safer than the original because:
+1. Column names are hardcoded dictionary keys
+2. Column types are validated against a whitelist
+3. Unknown types are handled gracefully
+
+For complete consistency with existing pattern (lines 432, 437, 442), we could use 21 separate hardcoded statements, but that would be very verbose and less maintainable.
 
 ## Conclusion
 
-**Overall Assessment**: Changes are **CORRECT** except for one security/consistency issue.
+**Overall Assessment**: Changes are **CORRECT** and security issue has been **MITIGATED**.
 
-**Action Required**: Fix the f-string SQL injection risk (even though current risk is low).
+**Final Status**: 
+- ✅ All functionality correct
+- ✅ Security risk mitigated (validated inputs)
+- ✅ Tests passing
+- ✅ Type annotations correct
+- ⚠️ Minor inconsistency: Uses f-strings (but with validated inputs) vs completely hardcoded strings in existing code
 
-**Priority**: Medium (best practice violation, not an immediate security risk)
+**Priority**: Low (acceptable compromise between safety and maintainability)
 

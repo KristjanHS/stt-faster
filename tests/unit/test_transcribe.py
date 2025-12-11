@@ -29,7 +29,7 @@ class RecordingDownloader:
         self.return_path = return_path
         self.calls: list[tuple[str, Any]] = []
 
-    def __call__(self, model_id: str, allow_patterns: Any = None) -> str:  # noqa: ANN401
+    def __call__(self, model_id: str, allow_patterns: Any = None, **kwargs: Any) -> str:  # noqa: ANN401
         self.calls.append((model_id, allow_patterns))
         return self.return_path
 

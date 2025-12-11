@@ -26,6 +26,7 @@ python transcribe.py
 import json
 import logging
 import os
+import threading
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -36,6 +37,65 @@ from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
 
 from backend.exceptions import ModelNotFoundError
+
+
+class _NoOpTqdm:
+    """No-op tqdm class to disable progress bars in huggingface_hub downloads.
+
+    This class implements the minimal tqdm interface needed by huggingface_hub
+    to suppress progress bar output and avoid duplicate "Download complete" messages.
+    """
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def __enter__(self) -> "_NoOpTqdm":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+    def __iter__(self) -> "_NoOpTqdm":
+        return self
+
+    def __next__(self) -> None:
+        raise StopIteration
+
+    def update(self, n: int = 1) -> None:
+        """Update progress (no-op)."""
+        pass
+
+    def set_description(self, desc: str | None = None, refresh: bool = True) -> None:
+        """Set description (no-op)."""
+        pass
+
+    def close(self) -> None:
+        """Close progress bar (no-op)."""
+        pass
+
+    def refresh(self) -> None:
+        """Refresh display (no-op)."""
+        pass
+
+    @classmethod
+    def get_lock(cls) -> threading.Lock:
+        """Return a threading lock for thread-safe operations.
+
+        Required by tqdm's thread_map function when using a custom tqdm class.
+        """
+        if not hasattr(cls, "_lock"):
+            cls._lock = threading.Lock()
+        return cls._lock
+
+    @classmethod
+    def set_lock(cls, lock: threading.Lock) -> None:
+        """Set the threading lock for thread-safe operations.
+
+        Required by tqdm's thread_map function when using a custom tqdm class.
+        """
+        cls._lock = lock
+
+
 from backend.model_config import ModelConfig, get_preset
 from backend.model_loader import ModelLoader
 from backend.preprocess import PreprocessConfig, preprocess_audio
@@ -169,7 +229,8 @@ def _get_estonian_model_path(
         ModelNotFoundError: If CT2 folder doesn't exist in model
     """
     # Only download ct2 folder, skip transformers/native formats
-    model_path = downloader(model_id, allow_patterns=["ct2/*"])  # nosec B615
+    # Disable progress bar to avoid duplicate "Download complete" messages
+    model_path = downloader(model_id, allow_patterns=["ct2/*"], tqdm_class=_NoOpTqdm)  # nosec B615
     ct2_path = path_cls(model_path) / "ct2"
     if not ct2_path.exists():
         raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
@@ -185,7 +246,8 @@ def _get_cached_model_path(model_id: str, *, downloader: Callable[..., str] = sn
     Returns:
         Path to the cached model directory
     """
-    return downloader(model_id)  # nosec B615
+    # Disable progress bar to avoid duplicate "Download complete" messages
+    return downloader(model_id, tqdm_class=_NoOpTqdm)  # nosec B615
 
 
 def _resolve_model_path(

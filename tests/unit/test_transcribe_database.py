@@ -310,6 +310,98 @@ def test_schema_migration_adds_rnnoise_model_column(tmp_path: Path) -> None:
     db.close()
 
 
+def test_migration_on_production_database() -> None:
+    """Test that migrations work correctly on a copy of the production database.
+
+    This test copies the actual production database (if it exists) and verifies
+    that all migrations run successfully and all required columns exist.
+    """
+    import shutil
+    import tempfile
+
+    # Get production database path
+    prod_db_path = Path.home() / ".local" / "share" / "stt-faster" / "transcribe_state.duckdb"
+
+    # Skip test if production database doesn't exist
+    if not prod_db_path.exists():
+        import pytest
+
+        pytest.skip("Production database not found - skipping migration test")
+
+    # Create a temporary copy for testing
+    with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as tmp:
+        test_db_path = tmp.name
+
+    try:
+        # Copy production database
+        shutil.copy2(prod_db_path, test_db_path)
+
+        # Open the copied database - this should trigger migrations
+        db = TranscriptionDatabase(test_db_path)
+
+        # Get all columns from file_metrics table
+        columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
+        db_columns = {row[0] for row in columns_result}
+
+        # Extract INSERT columns from source code
+        from backend.database import TranscriptionDatabase as DB
+
+        source = inspect.getsource(DB.record_file_metric)
+        match = re.search(r"INSERT INTO file_metrics\s*\((.*?)\)\s*VALUES", source, re.DOTALL)
+        assert match is not None, "Could not parse INSERT statement"
+        columns_text = match.group(1)
+        insert_columns = {col.strip() for col in columns_text.split(",") if col.strip()}
+
+        # Verify all INSERT columns exist in the migrated database
+        missing_in_db = insert_columns - db_columns
+        assert not missing_in_db, (
+            f"Migration failed: Columns missing from production database: {missing_in_db}. "
+            f"These columns are referenced in INSERT but don't exist in the database. "
+            f"Add these columns to _migrate_schema() in database.py"
+        )
+
+        # Verify critical columns that were causing production errors
+        critical_columns = {
+            "snr_estimation_method",
+            "patience",
+            "loudnorm_target_lra",
+            "rnnoise_model",
+            "rnnoise_mix",
+        }
+        missing_critical = critical_columns - db_columns
+        assert not missing_critical, (
+            f"Critical columns missing after migration: {missing_critical}. "
+            f"These columns were causing production errors."
+        )
+
+        # Test that we can actually insert a record (ultimate validation)
+        test_record = FileMetricRecord(
+            run_id=1,
+            recorded_at=datetime.now(timezone.utc),
+            audio_path="/test/migration_test.mp3",
+            preset="turbo",
+            status="completed",
+            total_processing_time=10.0,
+            transcribe_duration=8.0,
+            preprocess_duration=2.0,
+            preprocess_enabled=True,
+            preprocess_profile="cpu",
+            target_sample_rate=16000,
+            target_channels=1,
+            snr_estimation_method="estimate_snr_db",
+            patience=1.0,
+            loudnorm_target_lra=7.0,
+        )
+
+        # This should not raise any schema-related errors
+        db.record_file_metric(test_record)
+
+        db.close()
+    finally:
+        # Cleanup
+        Path(test_db_path).unlink(missing_ok=True)
+
+
 def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
     """Test that migration adds rnnoise_mix column to existing databases."""
     db_path = tmp_path / "test_migration_mix.db"
@@ -776,14 +868,15 @@ def test_file_metrics_schema_consistency(temp_db: TranscriptionDatabase) -> None
 
 
 def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) -> None:
-    """Test that schema consistency check catches missing columns like loudnorm_target_lra.
+    """Test that schema consistency check catches missing columns like loudnorm_target_lra and snr_estimation_method.
 
     This simulates the production error scenario where an old database exists
-    without a column that the code expects, and verifies our test would catch it.
+    without columns that the code expects, and verifies our test would catch it.
     """
     db_path = tmp_path / "test_missing_column.db"
 
-    # Create a database with old schema missing loudnorm_target_lra (simulating the production error)
+    # Create a database with old schema missing loudnorm_target_lra and snr_estimation_method
+    # (simulating the production error)
     conn = duckdb.connect(str(db_path))
     conn.execute("""
         CREATE TABLE IF NOT EXISTS file_metrics (
@@ -840,7 +933,7 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
             denoise_library VARCHAR,
 
             -- SNR estimation
-            snr_estimation_method VARCHAR,
+            -- snr_estimation_method VARCHAR,  <-- MISSING! This causes the production error
 
             -- Transcription parameters
             beam_size INTEGER,
@@ -884,7 +977,7 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
     conn.close()
 
     # Now open with TranscriptionDatabase - migration should add missing columns
-    # But if migration doesn't handle loudnorm_target_lra, our test should catch it
+    # But if migration doesn't handle loudnorm_target_lra or snr_estimation_method, our test should catch it
     db = TranscriptionDatabase(db_path)
 
     # Get database columns
@@ -909,6 +1002,13 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
         "Column loudnorm_target_lra should exist after migration. "
         "The migration must add this column to prevent production errors. "
         "If this test fails, add loudnorm_target_lra to _migrate_schema() in database.py"
+    )
+
+    # Verify that snr_estimation_method was added by migration
+    assert "snr_estimation_method" in db_columns, (
+        "Column snr_estimation_method should exist after migration. "
+        "The migration must add this column to prevent production errors. "
+        "If this test fails, add snr_estimation_method to _migrate_schema() in database.py"
     )
 
     # If there are any other missing columns, that's also a problem

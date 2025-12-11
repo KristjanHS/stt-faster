@@ -441,6 +441,53 @@ class TranscriptionDatabase:
                 LOGGER.debug("Migrating schema: adding loudnorm_target_lra column to file_metrics")
                 self.conn.execute("ALTER TABLE file_metrics ADD COLUMN loudnorm_target_lra DOUBLE")
 
+            # Add snr_estimation_method column if it doesn't exist
+            if "snr_estimation_method" not in existing_columns:
+                LOGGER.debug("Migrating schema: adding snr_estimation_method column to file_metrics")
+                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN snr_estimation_method VARCHAR")
+
+            # Add transcription parameter columns to file_metrics if they don't exist
+            # List of transcription parameter columns that might be missing from old databases
+            transcription_columns_to_add = {
+                "patience": "DOUBLE",
+                "task": "VARCHAR",
+                "chunk_length": "INTEGER",
+                "vad_filter": "BOOLEAN",
+                "vad_threshold": "DOUBLE",
+                "vad_min_speech_duration_ms": "INTEGER",
+                "vad_max_speech_duration_s": "DOUBLE",
+                "vad_min_silence_duration_ms": "INTEGER",
+                "vad_speech_pad_ms": "INTEGER",
+                "temperature": "VARCHAR",
+                "temperature_increment_on_fallback": "DOUBLE",
+                "best_of": "INTEGER",
+                "compression_ratio_threshold": "DOUBLE",
+                "logprob_threshold": "DOUBLE",
+                "no_speech_threshold": "DOUBLE",
+                "length_penalty": "DOUBLE",
+                "repetition_penalty": "DOUBLE",
+                "no_repeat_ngram_size": "INTEGER",
+                "suppress_tokens": "VARCHAR",
+                "condition_on_previous_text": "BOOLEAN",
+                "initial_prompt": "VARCHAR",
+            }
+
+            for column_name, column_type in transcription_columns_to_add.items():
+                if column_name not in existing_columns:
+                    LOGGER.debug("Migrating schema: adding %s column to file_metrics", column_name)
+                    # Use hardcoded SQL statements matching existing migration pattern
+                    # This avoids any potential SQL injection risks
+                    if column_type == "DOUBLE":
+                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} DOUBLE")
+                    elif column_type == "VARCHAR":
+                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} VARCHAR")
+                    elif column_type == "INTEGER":
+                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} INTEGER")
+                    elif column_type == "BOOLEAN":
+                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} BOOLEAN")
+                    else:
+                        LOGGER.warning("Unknown column type %s for %s, skipping migration", column_type, column_name)
+
             # Migrate runs table - add missing transcription parameters
             try:
                 runs_columns_result = self.conn.execute("DESCRIBE runs").fetchall()
