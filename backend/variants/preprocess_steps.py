@@ -95,16 +95,22 @@ def _loudnorm_with_highpass(
     target_sample_rate: int,
     target_channels: int,
     loudnorm_preset: str = "default",
+    *,
+    target_i: float | None = None,
+    target_tp: float | None = None,
+    target_lra: float | None = None,
 ) -> StepMetrics:
     """Lightweight ffmpeg step with highpass filter, resampling, and loudness normalization (no RNNoise)."""
     import ffmpeg  # type: ignore[import-untyped]
 
     start = time.time()
     try:
-        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-        target_i = preset_config["I"]
-        target_tp = preset_config.get("TP", -2.0)
-        target_lra = preset_config["LRA"]
+        # Require explicit values (no defaults)
+        if target_i is None or target_tp is None or target_lra is None:
+            raise ValueError(
+                "loudnorm parameters (I, TP, LRA) must be provided via step config. "
+                "All variants using loudnorm must specify these values explicitly."
+            )
 
         # Build lightweight filter graph: highpass + resample + loudnorm (no RNNoise)
         filter_graph = (
@@ -167,18 +173,22 @@ def _highlow_aform_loudnorm(
     target_sample_rate: int,
     target_channels: int,
     loudnorm_preset: str = "default",
+    *,
+    target_i: float | None = None,
+    target_tp: float | None = None,
+    target_lra: float | None = None,
 ) -> StepMetrics:
     """Lightweight ffmpeg step with highpass, lowpass, aformat, and loudness normalization."""
     import ffmpeg  # type: ignore[import-untyped]
 
-    from backend.preprocess.config import PreprocessConfig
-
     start = time.time()
     try:
-        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-        target_i = preset_config["I"]
-        target_tp = preset_config.get("TP", -2.0)
-        target_lra = preset_config["LRA"]
+        # Require explicit values (no defaults)
+        if target_i is None or target_tp is None or target_lra is None:
+            raise ValueError(
+                "loudnorm parameters (I, TP, LRA) must be provided via step config. "
+                "All variants using loudnorm must specify these values explicitly."
+            )
 
         # Build filter graph: highpass + lowpass + aformat + loudnorm
         filter_graph = (
@@ -211,18 +221,22 @@ def _highlow_nosampl_loudnorm(
     target_sample_rate: int,
     target_channels: int,
     loudnorm_preset: str = "default",
+    *,
+    target_i: float | None = None,
+    target_tp: float | None = None,
+    target_lra: float | None = None,
 ) -> StepMetrics:
     """Lightweight ffmpeg step with highpass, lowpass, and loudness normalization (no aformat/sampling)."""
     import ffmpeg  # type: ignore[import-untyped]
 
-    from backend.preprocess.config import PreprocessConfig
-
     start = time.time()
     try:
-        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-        target_i = preset_config["I"]
-        target_tp = preset_config.get("TP", -2.0)
-        target_lra = preset_config["LRA"]
+        # Require explicit values (no defaults)
+        if target_i is None or target_tp is None or target_lra is None:
+            raise ValueError(
+                "loudnorm parameters (I, TP, LRA) must be provided via step config. "
+                "All variants using loudnorm must specify these values explicitly."
+            )
 
         # Build filter graph: highpass + lowpass + loudnorm (no aformat/sampling)
         filter_graph = f"highpass=f=60,lowpass=f=8000,loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
@@ -249,14 +263,25 @@ def _aresampl_loudnorm_fixed(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    target_i: float | None = None,
+    target_tp: float | None = None,
+    target_lra: float | None = None,
 ) -> StepMetrics:
     """Lightweight ffmpeg step with aresample to 16kHz and loudness normalization with fixed parameters."""
     import ffmpeg  # type: ignore[import-untyped]
 
     start = time.time()
     try:
+        # Require explicit values (no defaults)
+        if target_i is None or target_tp is None or target_lra is None:
+            raise ValueError(
+                "loudnorm parameters (I, TP, LRA) must be provided via step config. "
+                "All variants using loudnorm must specify these values explicitly."
+            )
+
         # Build filter graph: aresample to 16kHz + loudnorm with fixed parameters
-        filter_graph = "aresample=resampler=soxr:osr=16000,loudnorm=I=-23:TP=-2:LRA=11"
+        filter_graph = f"aresample=resampler=soxr:osr=16000,loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
 
         stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
@@ -280,14 +305,25 @@ def _aresampl_loudnorm_fixed2(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    target_i: float | None = None,
+    target_tp: float | None = None,
+    target_lra: float | None = None,
 ) -> StepMetrics:
     """Lightweight ffmpeg step with aresample to 16kHz and loudness normalization with fixed params (I=-24, LRA=15)."""
     import ffmpeg  # type: ignore[import-untyped]
 
     start = time.time()
     try:
+        # Require explicit values (no defaults)
+        if target_i is None or target_tp is None or target_lra is None:
+            raise ValueError(
+                "loudnorm parameters (I, TP, LRA) must be provided via step config. "
+                "All variants using loudnorm must specify these values explicitly."
+            )
+
         # Build filter graph: aresample to 16kHz + loudnorm with fixed parameters
-        filter_graph = "aresample=resampler=soxr:osr=16000,loudnorm=I=-24:TP=-2:LRA=15"
+        filter_graph = f"aresample=resampler=soxr:osr=16000,loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
 
         stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
@@ -701,12 +737,19 @@ def create_preprocess_runner(
                 elif step.step_type == "loudnorm_highpass":
                     # Lightweight loudnorm step with highpass filter
                     intermediate_path = Path(temp_dir.name) / f"loudnorm_highpass_{step_index}.wav"
+                    # Get custom loudnorm values from step config if provided
+                    custom_i = step.config.get("I") if step.config else None
+                    custom_tp = step.config.get("TP") if step.config else None
+                    custom_lra = step.config.get("LRA") if step.config else None
                     step_metric = _loudnorm_with_highpass(
                         input_path=current_path,
                         output_path=intermediate_path,
                         target_sample_rate=merged_config.target_sample_rate,
                         target_channels=resolved_channels,
                         loudnorm_preset=merged_config.loudnorm_preset,
+                        target_i=custom_i,
+                        target_tp=custom_tp,
+                        target_lra=custom_lra,
                     )
                     step_metrics.append(step_metric)
                     current_path = intermediate_path
@@ -752,12 +795,19 @@ def create_preprocess_runner(
                 elif step.step_type == "highlow_aform_loudnorm":
                     # Highpass + lowpass + aformat + loudnorm step
                     intermediate_path = Path(temp_dir.name) / f"highlow_aform_loudnorm_{step_index}.wav"
+                    # Get custom loudnorm values from step config if provided
+                    custom_i = step.config.get("I") if step.config else None
+                    custom_tp = step.config.get("TP") if step.config else None
+                    custom_lra = step.config.get("LRA") if step.config else None
                     step_metric = _highlow_aform_loudnorm(
                         input_path=current_path,
                         output_path=intermediate_path,
                         target_sample_rate=merged_config.target_sample_rate,
                         target_channels=resolved_channels,
                         loudnorm_preset=merged_config.loudnorm_preset,
+                        target_i=custom_i,
+                        target_tp=custom_tp,
+                        target_lra=custom_lra,
                     )
                     step_metrics.append(step_metric)
                     current_path = intermediate_path
@@ -778,12 +828,19 @@ def create_preprocess_runner(
                 elif step.step_type == "highlow_nosampl_loudnorm":
                     # Highpass + lowpass + loudnorm (no aformat) step
                     intermediate_path = Path(temp_dir.name) / f"highlow_nosampl_loudnorm_{step_index}.wav"
+                    # Get custom loudnorm values from step config if provided
+                    custom_i = step.config.get("I") if step.config else None
+                    custom_tp = step.config.get("TP") if step.config else None
+                    custom_lra = step.config.get("LRA") if step.config else None
                     step_metric = _highlow_nosampl_loudnorm(
                         input_path=current_path,
                         output_path=intermediate_path,
                         target_sample_rate=merged_config.target_sample_rate,
                         target_channels=resolved_channels,
                         loudnorm_preset=merged_config.loudnorm_preset,
+                        target_i=custom_i,
+                        target_tp=custom_tp,
+                        target_lra=custom_lra,
                     )
                     step_metrics.append(step_metric)
                     current_path = intermediate_path
@@ -804,11 +861,18 @@ def create_preprocess_runner(
                 elif step.step_type == "aresampl_loudnorm_fixed":
                     # Aresample to 16kHz + loudnorm with fixed parameters step
                     intermediate_path = Path(temp_dir.name) / f"aresampl_loudnorm_fixed_{step_index}.wav"
+                    # Get custom loudnorm values from step config if provided
+                    custom_i = step.config.get("I") if step.config else None
+                    custom_tp = step.config.get("TP") if step.config else None
+                    custom_lra = step.config.get("LRA") if step.config else None
                     step_metric = _aresampl_loudnorm_fixed(
                         input_path=current_path,
                         output_path=intermediate_path,
                         target_sample_rate=merged_config.target_sample_rate,
                         target_channels=resolved_channels,
+                        target_i=custom_i,
+                        target_tp=custom_tp,
+                        target_lra=custom_lra,
                     )
                     step_metrics.append(step_metric)
                     current_path = intermediate_path
@@ -829,11 +893,18 @@ def create_preprocess_runner(
                 elif step.step_type == "aresampl_loudnorm_fixed2":
                     # Aresample to 16kHz + loudnorm with fixed params (I=-24, LRA=15) step
                     intermediate_path = Path(temp_dir.name) / f"aresampl_loudnorm_fixed2_{step_index}.wav"
+                    # Get custom loudnorm values from step config if provided
+                    custom_i = step.config.get("I") if step.config else None
+                    custom_tp = step.config.get("TP") if step.config else None
+                    custom_lra = step.config.get("LRA") if step.config else None
                     step_metric = _aresampl_loudnorm_fixed2(
                         input_path=current_path,
                         output_path=intermediate_path,
                         target_sample_rate=merged_config.target_sample_rate,
                         target_channels=resolved_channels,
+                        target_i=custom_i,
+                        target_tp=custom_tp,
+                        target_lra=custom_lra,
                     )
                     step_metrics.append(step_metric)
                     current_path = intermediate_path

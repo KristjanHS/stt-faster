@@ -55,7 +55,7 @@ class TestVariantSystemsComparison:
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run variant 7 in first output directory
+        # Run variant 7 in first output directory (skip all other active variants: 17, 18, 19)
         result_old = subprocess.run(
             [
                 sys.executable,
@@ -77,6 +77,10 @@ class TestVariantSystemsComparison:
                 "14",
                 "15",
                 "16",
+                "17",
+                "18",
+                "19",
+                "20",
                 "--output-dir",
                 str(output_dir_old),
             ],
@@ -88,7 +92,7 @@ class TestVariantSystemsComparison:
         # Verify first run succeeded
         assert result_old.returncode == 0, f"First run failed: {result_old.stderr}\n{result_old.stdout}"
 
-        # Run variant 7 in second output directory
+        # Run variant 7 in second output directory (skip all other active variants: 17, 18, 19)
         result_new = subprocess.run(
             [
                 sys.executable,
@@ -110,6 +114,10 @@ class TestVariantSystemsComparison:
                 "14",
                 "15",
                 "16",
+                "17",
+                "18",
+                "19",
+                "20",
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -194,65 +202,11 @@ class TestVariantSystemsComparison:
             )
 
     def test_all_active_variants_execute_successfully(self, test_audio_file: Path, output_dir_new: Path) -> None:
-        """Test that all active variants (7, 10-16) execute successfully."""
+        """Test that all active variants (7, 17, 18, 19) execute successfully."""
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with active variants only (skip 1-6, 8, 9)
-        result = subprocess.run(
-            [
-                sys.executable,
-                str(script_path),
-                str(test_audio_file),
-                "--skip-variants",
-                "1",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "8",
-                "9",
-                "--output-dir",
-                str(output_dir_new),
-            ],
-            capture_output=True,
-            text=True,
-            timeout=600,  # 10 minutes for multiple variants
-        )
-
-        # Verify system ran successfully
-        assert result.returncode == 0, f"System failed: {result.stderr}\n{result.stdout}"
-
-        # Verify output files were created
-        json_files = list(output_dir_new.glob("**/*_comparison_*.json"))
-        assert len(json_files) > 0, "System should create comparison JSON files"
-
-        # Load and verify results
-        with json_files[0].open() as f:
-            results = json.load(f)
-
-        # Should have 8 variants: 7, 10, 11, 12, 13, 14, 15, 16
-        assert len(results) == 8, f"Should have 8 variant results, got {len(results)}"
-
-        # Verify all variants succeeded
-        variant_numbers = {r["variant_number"] for r in results}
-        expected_numbers = {7, 10, 11, 12, 13, 14, 15, 16}
-        assert variant_numbers == expected_numbers, f"Expected variants {expected_numbers}, got {variant_numbers}"
-
-        # Verify all have success status
-        for result_item in results:
-            assert result_item["status"] == "success", (
-                f"Variant {result_item['variant_number']} should succeed, "
-                f"got: {result_item.get('error', 'unknown error')}"
-            )
-
-    def test_variant_filtering_works_correctly(self, test_audio_file: Path, output_dir_new: Path) -> None:
-        """Test that --skip-variants filtering works correctly."""
-        project_root = Path(__file__).parent.parent.parent
-        script_path = project_root / "scripts" / "compare_transcription_variants.py"
-
-        # Run with only variant 7
+        # Run with active variants only (skip all inactive variants: 1-6, 8-16, 20)
         result = subprocess.run(
             [
                 sys.executable,
@@ -274,6 +228,72 @@ class TestVariantSystemsComparison:
                 "14",
                 "15",
                 "16",
+                "20",
+                "--output-dir",
+                str(output_dir_new),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=600,  # 10 minutes for multiple variants
+        )
+
+        # Verify system ran successfully
+        assert result.returncode == 0, f"System failed: {result.stderr}\n{result.stdout}"
+
+        # Verify output files were created
+        json_files = list(output_dir_new.glob("**/*_comparison_*.json"))
+        assert len(json_files) > 0, "System should create comparison JSON files"
+
+        # Load and verify results
+        with json_files[0].open() as f:
+            results = json.load(f)
+
+        # Should have 4 variants: 7, 17, 18, 19 (current active variants)
+        assert len(results) == 4, f"Should have 4 variant results, got {len(results)}"
+
+        # Verify all variants succeeded
+        variant_numbers = {r["variant_number"] for r in results}
+        expected_numbers = {7, 17, 18, 19}
+        assert variant_numbers == expected_numbers, f"Expected variants {expected_numbers}, got {variant_numbers}"
+
+        # Verify all have success status
+        for result_item in results:
+            assert result_item["status"] == "success", (
+                f"Variant {result_item['variant_number']} should succeed, "
+                f"got: {result_item.get('error', 'unknown error')}"
+            )
+
+    def test_variant_filtering_works_correctly(self, test_audio_file: Path, output_dir_new: Path) -> None:
+        """Test that --skip-variants filtering works correctly."""
+        project_root = Path(__file__).parent.parent.parent
+        script_path = project_root / "scripts" / "compare_transcription_variants.py"
+
+        # Run with only variant 7 (skip all other active variants: 17, 18, 19)
+        result = subprocess.run(
+            [
+                sys.executable,
+                str(script_path),
+                str(test_audio_file),
+                "--skip-variants",
+                "1",
+                "2",
+                "3",
+                "4",
+                "5",
+                "6",
+                "8",
+                "9",
+                "10",
+                "11",
+                "12",
+                "13",
+                "14",
+                "15",
+                "16",
+                "17",
+                "18",
+                "19",
+                "20",
                 "--output-dir",
                 str(output_dir_new),
             ],

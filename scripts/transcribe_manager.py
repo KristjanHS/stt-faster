@@ -181,6 +181,9 @@ def cmd_status(args: argparse.Namespace) -> int:
     Returns:
         Exit code (0 for success, 1 for failure)
     """
+    # Configure logging based on verbosity
+    _configure_logging(getattr(args, "verbose", False))
+
     try:
         with TranscriptionDatabase(args.db_path) as db:
             summary = db.get_summary()

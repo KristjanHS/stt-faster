@@ -323,6 +323,12 @@ def transcribe_with_minimal_params(
         for param_name, param_value in transcription_overrides.items():
             if param_name in allowed_override_params:
                 transcribe_kwargs[param_name] = param_value
+                LOGGER.debug(
+                    "Applied override: %s = %s (from transcription_overrides)",
+                    param_name,
+                    param_value,
+                )
+    LOGGER.debug("Calling model.transcribe() with kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),
         **transcribe_kwargs,
