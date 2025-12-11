@@ -908,6 +908,7 @@ class TranscriptionDatabase:
             row = cursor.fetchone()
             if row:
                 run_id = row[0]
+                self.conn.commit()
                 LOGGER.debug("Recorded run with ID: %s", run_id)
                 return run_id
 
@@ -915,6 +916,32 @@ class TranscriptionDatabase:
 
         except Exception as e:
             msg = f"Failed to record run: {e}"
+            raise DatabaseError(msg) from e
+
+    def get_run_by_id(self, run_id: int) -> dict[str, Any] | None:
+        """Get a specific run by ID.
+
+        Args:
+            run_id: The run ID to retrieve
+
+        Returns:
+            Dictionary with run info or None if not found
+        """
+        if not self.conn:
+            msg = "Database not initialized"
+            raise DatabaseError(msg)
+
+        try:
+            cursor = self.conn.execute("SELECT * FROM runs WHERE id = ?", [run_id])
+            row = cursor.fetchone()
+
+            if not row:
+                return None
+
+            columns = [desc[0] for desc in cursor.description]
+            return dict(zip(columns, row))
+        except Exception as e:
+            msg = f"Failed to fetch run {run_id}: {e}"
             raise DatabaseError(msg) from e
 
     def get_run_history(self, limit: int | None = None) -> list[dict[str, Any]]:

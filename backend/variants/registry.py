@@ -206,7 +206,7 @@ def _get_all_variants() -> list[Variant]:
             description="nopre_thres1",
             preprocess_steps=[],
             transcription_preset="minimal",
-            transcription_overrides={"no_speech_threshold": 0.4},
+            transcription_overrides={"no_speech_threshold": 0.3},
         ),
         # Variant 18: No preprocessing + minimal params + chunk_length
         Variant(
@@ -233,7 +233,7 @@ def _get_all_variants() -> list[Variant]:
             description="nopre_beam6",
             preprocess_steps=[],
             transcription_preset="minimal",
-            transcription_overrides={"beam_size": 6},
+            transcription_overrides={"beam_size": 8},
         ),
     ]
 
@@ -241,14 +241,13 @@ def _get_all_variants() -> list[Variant]:
 def get_builtin_variants() -> list[Variant]:
     """Return list of active built-in variants.
 
-    Currently only variants 7, 17, 18, 19 are enabled.
     All other variants are disabled but remain defined and can be accessed
     via get_variant_by_number() or get_variant_by_name().
     All variants now use declarative preprocessing steps.
     """
     all_variants = _get_all_variants()
     # Only return active variants: 7, 17, 18, 19
-    active_variant_numbers = {7, 17, 18, 19}
+    active_variant_numbers = {7, 17, 20}
     return [v for v in all_variants if v.number in active_variant_numbers]
 
 

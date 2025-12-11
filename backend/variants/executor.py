@@ -315,6 +315,7 @@ def transcribe_with_minimal_params(
     # Only include parameters that were explicitly overridden and are allowed
     # This set defines which parameters can be overridden in minimal preset
     allowed_override_params = {
+        "beam_size",
         "chunk_length",
         "no_speech_threshold",
         "condition_on_previous_text",

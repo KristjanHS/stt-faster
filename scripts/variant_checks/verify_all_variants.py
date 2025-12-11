@@ -111,8 +111,14 @@ def verify_variant(variant_number: int) -> bool:
             "language": "et",
         }
 
+        # Exclude override parameters from base check (they'll be checked separately)
+        override_params = set(variant.transcription_overrides.keys()) if variant.transcription_overrides else set()
+
         all_correct = True
         for param, expected_value in expected_base.items():
+            # Skip parameters that are overridden
+            if param in override_params:
+                continue
             if param not in actual_kwargs:
                 print(f"    ❌ {param}: MISSING (expected {expected_value})")  # noqa: T201
                 all_correct = False
