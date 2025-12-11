@@ -677,7 +677,7 @@ class TranscriptionProcessor:
                 self.db.record_file_metric(file_record)
 
         except DatabaseError as exc:
-            LOGGER.warning("Failed to record run metadata: %s", exc)
+            LOGGER.error("Failed to record run metadata: %s", exc, exc_info=True)
             run_id = None
 
         # Return stats for display/logging

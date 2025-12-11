@@ -9,6 +9,8 @@
 .PHONY: unit integration e2e verify-variants
 # Audio
 .PHONY: preprocess-audio
+# Database
+.PHONY: show-run show-runs
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
@@ -54,6 +56,10 @@ help:
 	@echo ""
 	@echo "  -- Audio --"
 	@echo "  preprocess-audio  - Run preprocessing on tests/test.mp3 (AUDIO=..., OUT=... to override)"
+	@echo ""
+	@echo "  -- Database --"
+	@echo "  show-run          - Show run information (RUN_ID=... to specify, or shows latest)"
+	@echo "  show-runs         - Show last 20 runs in compact format"
 	@echo ""
 	@echo "  -- Docker (Production) --"
 	@echo "  docker-build-prod    - Build production Docker image for end users"
@@ -213,6 +219,26 @@ preprocess-audio:
 	OUT=$(if $(OUT),$(OUT),reports/preprocessed.wav); \
 	echo "Preprocessing $$SRC -> $$OUT"; \
 	STT_PREPROCESS_ENABLED=1 .venv/bin/python scripts/run_preprocess.py --input "$$SRC" --output "$$OUT"
+
+# Show run information by ID or latest if no ID provided
+show-run:
+	@if [ ! -x .venv/bin/python ]; then \
+	  echo "Missing .venv/bin/python. Run ./run_uv.sh first."; \
+	  exit 1; \
+	fi
+	@if [ -n "$(RUN_ID)" ]; then \
+	  .venv/bin/python scripts/db/show_run.py "$(RUN_ID)"; \
+	else \
+	  .venv/bin/python scripts/db/show_run.py; \
+	fi
+
+# Show last 20 runs in compact format
+show-runs:
+	@if [ ! -x .venv/bin/python ]; then \
+	  echo "Missing .venv/bin/python. Run ./run_uv.sh first."; \
+	  exit 1; \
+	fi
+	.venv/bin/python scripts/db/show_recent_runs.py --limit 20 --compact
 
 
 pyright:
