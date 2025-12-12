@@ -25,7 +25,7 @@ VARIANT_DESCRIPTIONS = {
     "denoise_only": "Only denoise_light + project defaults",
     "ffmpeg_minimal": "Only ffmpeg pipeline + minimal defaults",
     "full_minimal": "Full preprocessing (ffmpeg + denoise) + minimal defaults",
-    "noprep_noparamtrans": "No preprocessing + minimal transcription parameters",
+    "baseline_raw_defaults": "No preprocessing + true baseline (raw whisper defaults, no parameter overrides)",
     "normonly_noparamtrans": "Only normalization + minimal transcription parameters",
     "onlyden_noparamtrans": "Only denoise + minimal transcription parameters",
     "noprep_minimal_no_speech_threshold": "No preprocessing + minimal params + no_speech_threshold override",

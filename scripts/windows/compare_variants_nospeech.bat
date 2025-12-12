@@ -54,7 +54,7 @@ echo Processing audio file: !AUDIO_FILE!
 echo WSL path: !WSL_INPUT_DIR!
 echo.
 echo Variant details:
-echo   - Variant 1: Baseline (noprep_noparamtrans)
+echo   - Variant 1: Baseline (baseline_raw_defaults)
 echo   - Variant 90: Diagnostic baseline (vad_filter=False)
 echo   - Variant 91: Diagnostic conservative (ns=0.75, lp=-0.9, vad_filter=False)
 echo   - Variant 92: Diagnostic balanced (ns=0.65, lp=-0.8, vad_filter=False)

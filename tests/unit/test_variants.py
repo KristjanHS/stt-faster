@@ -174,7 +174,7 @@ class TestVariantExecutor:
         # We'll use a variant that has no preprocessing to minimize dependencies
 
         # Get a real variant that we can test with minimal setup
-        variant = get_variant_by_number(1)  # noprep_noparamtrans - simplest variant
+        variant = get_variant_by_number(1)  # baseline_raw_defaults - simplest variant
         assert variant is not None
 
         # Note: This test would require actual model loading, so we'll skip it

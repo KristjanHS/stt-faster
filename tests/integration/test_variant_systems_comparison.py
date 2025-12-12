@@ -48,7 +48,7 @@ class TestVariantSystemsComparison:
     def test_variant_1_outputs_match(self, test_audio_file: Path, output_dir_old: Path, output_dir_new: Path) -> None:
         """Test that variant 1 produces consistent outputs.
 
-        Variant 1 (noprep_noparamtrans) is the simplest variant and should
+        Variant 1 (baseline_raw_defaults) is the simplest variant and should
         produce consistent results across multiple runs. This test validates that
         the variant system produces reproducible transcription results.
         """
@@ -153,8 +153,8 @@ class TestVariantSystemsComparison:
         # Verify both are variant 1
         assert old_result["variant_number"] == 1, "First run should be variant 1"
         assert new_result["variant_number"] == 1, "Second run should be variant 1"
-        assert old_result["variant"] == "noprep_noparamtrans", "First run should be noprep_noparamtrans"
-        assert new_result["variant"] == "noprep_noparamtrans", "Second run should be noprep_noparamtrans"
+        assert old_result["variant"] == "baseline_raw_defaults", "First run should be baseline_raw_defaults"
+        assert new_result["variant"] == "baseline_raw_defaults", "Second run should be baseline_raw_defaults"
 
         # Verify both succeeded
         assert old_result["status"] == "success", f"First run should succeed, got: {old_result.get('error', 'unknown')}"

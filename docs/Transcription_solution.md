@@ -54,7 +54,7 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 | 4 | `denoise_only` | Denoise light | Project defaults | Denoising only |
 | 5 | `ffmpeg_minimal` | FFmpeg pipeline | Minimal defaults | Normalization + minimal config |
 | 6 | `full_minimal` | FFmpeg + denoise | Minimal defaults | Full preprocessing + minimal |
-| 7 | `noprep_noparamtrans` | None | Minimal | **No preprocessing, minimal params (no VAD)** |
+| 7 | `baseline_raw_defaults` | None | Baseline | **No preprocessing, true baseline (raw whisper defaults, no parameter overrides)** |
 | 8 | `normonly_noparamtrans` | FFmpeg pipeline | Minimal | Normalization + minimal params |
 | 9 | `onlyden_noparamtrans` | Denoise light | Minimal | Denoising + minimal params |
 | 10 | `norm_highp_noparamtrans` | Loudnorm + highpass | Minimal | Lightweight normalization with highpass filter |

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from backend.variants.transcription_presets import (
+    create_baseline_config,
     create_minimal_config,
     create_project_config,
 )
@@ -27,12 +28,12 @@ def _get_all_variants() -> list[Variant]:
     """
     return [
         # Group 1: No preprocessing (simplest) - Variants 1-7
-        # Variant 1: No preprocessing + minimal transcription parameters (simplest)
+        # Variant 1: No preprocessing + raw decode baseline (no VAD by design)
         Variant(
-            name="noprep_noparamtrans",
+            name="baseline_no_vad_defaults",
             number=1,
             preprocess_steps=[],
-            transcription_config=create_minimal_config(),
+            transcription_config=create_baseline_config(vad_filter=False),
         ),
         # Variant 2: No preprocessing + project defaults
         Variant(
@@ -274,53 +275,69 @@ def _get_all_variants() -> list[Variant]:
             transcription_config=create_minimal_config(no_speech_threshold=0.55),
         ),
         # Group 7: Validation sweep variants (diagnostic, vad_filter=False) - Variants 90-93
-        # Variant 90: Baseline for comparison (vad_filter=False)
+        # Variant 90: Control for diagnostic sweep (vad_filter=False, chunk_length=20, beam_size=5)
         Variant(
-            name="diag_base_defaults",
+            name="diag_control_no_vad_chunk20_beam5",
             number=90,
             preprocess_steps=[],
-            transcription_config=create_minimal_config(vad_filter=False),
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
+            ),
         ),
-        # Variant 91: Conservative - rarely skips (no_speech_threshold=0.75, logprob_threshold=-0.9)
+        # Variant 91: Conservative - catches avg_lp≈-0.79 (no_speech_threshold=0.75, logprob_threshold=-0.75)
         Variant(
-            name="diag_ns_075_lp_090",
+            name="diag_ns_075_lp_075",
             number=91,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
                 vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
                 no_speech_threshold=0.75,
-                logprob_threshold=-0.9,
+                logprob_threshold=-0.75,
             ),
         ),
-        # Variant 92: Balanced - should skip some obvious silent windows with low-confidence text
+        # Variant 92: Balanced - catches avg_lp≈-0.79 (no_speech_threshold=0.75, logprob_threshold=-0.7)
+        # Isolates lp effect by keeping ns=0.75 same as variant 91
         Variant(
-            name="diag_ns_065_lp_080",
+            name="diag_ns_075_lp_070",
             number=92,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
                 vad_filter=False,
-                no_speech_threshold=0.65,
-                logprob_threshold=-0.8,
+                chunk_length=20,
+                beam_size=5,
+                no_speech_threshold=0.75,
+                logprob_threshold=-0.7,
             ),
         ),
-        # Variant 93: More "active" hallucination guard (still not crazy)
+        # Variant 93: More active - catches avg_lp≈-0.79 with lower ns
+        # (no_speech_threshold=0.65, logprob_threshold=-0.7)
         Variant(
-            name="diag_ns_060_lp_070",
+            name="diag_ns_065_lp_070",
             number=93,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
                 vad_filter=False,
-                no_speech_threshold=0.60,
+                chunk_length=20,
+                beam_size=5,
+                no_speech_threshold=0.65,
                 logprob_threshold=-0.7,
             ),
         ),
         # Group 8: Production candidate variants - Variants 94-96
+        # Production regime: vad_filter=True, chunk_length=20, beam_size=5
         # Variant 94: Safest - almost only skips truly silent windows
         Variant(
             name="prod_ns_075_lp_080",
             number=94,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                vad_filter=True,
+                chunk_length=20,
+                beam_size=5,
                 no_speech_threshold=0.75,
                 logprob_threshold=-0.8,
             ),
@@ -331,6 +348,9 @@ def _get_all_variants() -> list[Variant]:
             number=95,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                vad_filter=True,
+                chunk_length=20,
+                beam_size=5,
                 no_speech_threshold=0.70,
                 logprob_threshold=-0.7,
             ),
@@ -341,6 +361,9 @@ def _get_all_variants() -> list[Variant]:
             number=96,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                vad_filter=True,
+                chunk_length=20,
+                beam_size=5,
                 no_speech_threshold=0.65,
                 logprob_threshold=-0.7,
             ),
@@ -369,7 +392,7 @@ def get_builtin_variants() -> list[Variant]:
     """
     all_variants = _get_all_variants()
     # Only return active variants:
-    # 1 (noprep_noparamtrans), 4 (noprep_minimal_no_speech_threshold), 7 (noprep_minimal_beam_size)
+    # 1 (baseline_no_vad_defaults), 4 (noprep_minimal_no_speech_threshold), 7 (noprep_minimal_beam_size)
     active_variant_numbers = {1, 4, 7}
     return [v for v in all_variants if v.number in active_variant_numbers]
 
@@ -412,7 +435,7 @@ def get_conservative_sweep_variants() -> list[int]:
     """Return variant numbers for conservative sweep.
 
     Conservative sweep includes:
-    - Variant 1: Baseline (noprep_noparamtrans)
+    - Variant 1: Baseline (baseline_no_vad_defaults)
     - Variant 6: condition_on_previous_text=False
     - Variants 21-26: Conservative sweep variants (no preprocessing, minimal config with small deltas)
 
