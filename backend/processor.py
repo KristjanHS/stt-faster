@@ -746,7 +746,6 @@ class TranscriptionProcessor:
                         rnnoise_mix=m.rnnoise_mix,
                         input_channels=m.input_channels,
                         input_sample_rate=m.input_sample_rate,
-                        input_bit_depth=m.input_bit_depth,
                         input_format=m.input_format,
                         volume_adjustment_db=m.volume_adjustment_db,
                         resampler=m.resampler,

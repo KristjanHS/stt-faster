@@ -207,7 +207,6 @@ def test_schema_migration_adds_rnnoise_model_column(tmp_path: Path) -> None:
             -- Audio inspection
             input_channels INTEGER,
             input_sample_rate INTEGER,
-            input_bit_depth INTEGER,
             input_format VARCHAR,
 
             -- Downmix/resample parameters used
@@ -444,7 +443,6 @@ def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
             -- Audio inspection
             input_channels INTEGER,
             input_sample_rate INTEGER,
-            input_bit_depth INTEGER,
             input_format VARCHAR,
 
             -- Downmix/resample parameters used
@@ -587,7 +585,6 @@ def test_schema_migration_adds_both_rnnoise_columns(tmp_path: Path) -> None:
             -- Audio inspection
             input_channels INTEGER,
             input_sample_rate INTEGER,
-            input_bit_depth INTEGER,
             input_format VARCHAR,
 
             -- Downmix/resample parameters used
@@ -796,7 +793,6 @@ def test_file_metrics_schema_consistency(temp_db: TranscriptionDatabase) -> None
         # Audio inspection
         input_channels=2,
         input_sample_rate=44100,
-        input_bit_depth=16,
         input_format="mp3",
         # Downmix/resample parameters
         volume_adjustment_db=-3.0,
@@ -913,7 +909,6 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
             -- Audio inspection
             input_channels INTEGER,
             input_sample_rate INTEGER,
-            input_bit_depth INTEGER,
             input_format VARCHAR,
 
             -- Downmix/resample parameters

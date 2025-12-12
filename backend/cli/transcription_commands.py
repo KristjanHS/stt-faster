@@ -20,7 +20,7 @@ from backend.cli.ui import (
 )
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
-from backend.variants.registry import get_conservative_sweep_variants, get_variant_by_number
+from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
@@ -114,9 +114,7 @@ def _parse_variant_numbers(args: argparse.Namespace) -> tuple[list[int], str | N
         Tuple of (variant_numbers list, error_message or None)
     """
     variant_numbers: list[int] = []
-    if args.variant_sweep == "conservative":
-        variant_numbers = get_conservative_sweep_variants()
-    elif args.variants:
+    if args.variants:
         try:
             variant_numbers = [int(v.strip()) for v in args.variants.split(",")]
         except ValueError:
@@ -222,8 +220,6 @@ def _process_multi_variant(
         Exit code (0 for success, 1 for failure)
     """
     console.print(f"\n[bold]Running {len(variants)} variants[/bold]")
-    if args.variant_sweep == "conservative":
-        console.print("[dim]Using conservative sweep preset[/dim]")
 
     git_commit = _get_git_commit_hash()
     timestamp = datetime.now()
