@@ -15,6 +15,8 @@ from pathlib import Path
 
 import pytest
 
+from backend.variants import get_builtin_variants
+
 
 @pytest.mark.slow
 class TestVariantSystemsComparison:
@@ -46,45 +48,31 @@ class TestVariantSystemsComparison:
         return tmp_path / "new_system"
 
     def test_variant_1_outputs_match(self, test_audio_file: Path, output_dir_old: Path, output_dir_new: Path) -> None:
-        """Test that variant 1 produces consistent outputs.
+        """Test that the first active variant produces consistent outputs.
 
-        Variant 1 (baseline_true_defaults) is the simplest variant and should
-        produce consistent results across multiple runs. This test validates that
-        the variant system produces reproducible transcription results.
+        The first active variant should produce consistent results across multiple runs.
+        This test validates that the variant system produces reproducible transcription results.
         """
+        # Get active variants from configuration
+        active_variants = get_builtin_variants()
+        assert len(active_variants) > 0, "Should have at least one active variant"
+        first_variant = active_variants[0]
+
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run variant 1 in first output directory (skip all other variants: 2-24)
+        # Build skip list: skip all variants except the first active one
+        all_variant_numbers = {v.number for v in active_variants}
+        skip_variants = sorted([str(n) for n in all_variant_numbers if n != first_variant.number])
+
+        # Run first active variant in first output directory
         result_old = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "10",
-                "11",
-                "12",
-                "13",
-                "14",
-                "15",
-                "16",
-                "17",
-                "18",
-                "19",
-                "20",
-                "21",
-                "22",
-                "23",
-                "24",
+                *skip_variants,
                 "--output-dir",
                 str(output_dir_old),
             ],
@@ -96,36 +84,14 @@ class TestVariantSystemsComparison:
         # Verify first run succeeded
         assert result_old.returncode == 0, f"First run failed: {result_old.stderr}\n{result_old.stdout}"
 
-        # Run variant 1 in second output directory (skip all other variants: 2-24)
+        # Run first active variant in second output directory
         result_new = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "10",
-                "11",
-                "12",
-                "13",
-                "14",
-                "15",
-                "16",
-                "17",
-                "18",
-                "19",
-                "20",
-                "21",
-                "22",
-                "23",
-                "24",
+                *skip_variants,
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -158,11 +124,15 @@ class TestVariantSystemsComparison:
         old_result = old_results[0]
         new_result = new_results[0]
 
-        # Verify both are variant 1
-        assert old_result["variant_number"] == 1, "First run should be variant 1"
-        assert new_result["variant_number"] == 1, "Second run should be variant 1"
-        assert old_result["variant"] == "baseline_true_defaults", "First run should be baseline_true_defaults"
-        assert new_result["variant"] == "baseline_true_defaults", "Second run should be baseline_true_defaults"
+        # Verify both are the first active variant
+        assert old_result["variant_number"] == first_variant.number, (
+            f"First run should be variant {first_variant.number}"
+        )
+        assert new_result["variant_number"] == first_variant.number, (
+            f"Second run should be variant {first_variant.number}"
+        )
+        assert old_result["variant"] == first_variant.name, f"First run should be {first_variant.name}"
+        assert new_result["variant"] == first_variant.name, f"Second run should be {first_variant.name}"
 
         # Verify both succeeded
         assert old_result["status"] == "success", f"First run should succeed, got: {old_result.get('error', 'unknown')}"
@@ -210,38 +180,28 @@ class TestVariantSystemsComparison:
             )
 
     def test_all_active_variants_execute_successfully(self, test_audio_file: Path, output_dir_new: Path) -> None:
-        """Test that all active variants (1, 2, 3) execute successfully."""
+        """Test that the first 3 active variants execute successfully."""
+        # Get active variants from configuration
+        active_variants = get_builtin_variants()
+        assert len(active_variants) >= 3, f"Should have at least 3 active variants, got {len(active_variants)}"
+        test_variants = active_variants[:3]
+        test_variant_numbers = {v.number for v in test_variants}
+
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with active variants only (skip all inactive variants: 4-24)
+        # Build skip list: skip all variants except the first 3 active ones
+        all_variant_numbers = {v.number for v in active_variants}
+        skip_variants = sorted([str(n) for n in all_variant_numbers if n not in test_variant_numbers])
+
+        # Run with first 3 active variants only
         result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "10",
-                "11",
-                "12",
-                "13",
-                "14",
-                "15",
-                "16",
-                "17",
-                "18",
-                "19",
-                "20",
-                "21",
-                "22",
-                "23",
-                "24",
+                *skip_variants,
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -261,13 +221,14 @@ class TestVariantSystemsComparison:
         with json_files[0].open() as f:
             results = json.load(f)
 
-        # Should have 3 variants: 1, 2, 3 (current active variants)
+        # Should have 3 variants (first 3 active variants)
         assert len(results) == 3, f"Should have 3 variant results, got {len(results)}"
 
         # Verify all variants succeeded
         variant_numbers = {r["variant_number"] for r in results}
-        expected_numbers = {1, 2, 3}
-        assert variant_numbers == expected_numbers, f"Expected variants {expected_numbers}, got {variant_numbers}"
+        assert variant_numbers == test_variant_numbers, (
+            f"Expected variants {test_variant_numbers}, got {variant_numbers}"
+        )
 
         # Verify all have success status
         for result_item in results:
@@ -278,39 +239,26 @@ class TestVariantSystemsComparison:
 
     def test_variant_filtering_works_correctly(self, test_audio_file: Path, output_dir_new: Path) -> None:
         """Test that --skip-variants filtering works correctly."""
+        # Get active variants from configuration
+        active_variants = get_builtin_variants()
+        assert len(active_variants) > 0, "Should have at least one active variant"
+        first_variant = active_variants[0]
+
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with only variant 1 (skip all other variants: 2-24)
+        # Build skip list: skip all variants except the first active one
+        all_variant_numbers = {v.number for v in active_variants}
+        skip_variants = sorted([str(n) for n in all_variant_numbers if n != first_variant.number])
+
+        # Run with only the first active variant
         result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "2",
-                "3",
-                "4",
-                "5",
-                "6",
-                "7",
-                "8",
-                "9",
-                "10",
-                "11",
-                "12",
-                "13",
-                "14",
-                "15",
-                "16",
-                "17",
-                "18",
-                "19",
-                "20",
-                "21",
-                "22",
-                "23",
-                "24",
+                *skip_variants,
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -321,7 +269,7 @@ class TestVariantSystemsComparison:
 
         assert result.returncode == 0, f"Filtering failed: {result.stderr}"
 
-        # Verify only variant 1 was executed
+        # Verify only the first active variant was executed
         json_files = list(output_dir_new.glob("**/*_comparison_*.json"))
         assert len(json_files) > 0
 
@@ -329,4 +277,5 @@ class TestVariantSystemsComparison:
             results = json.load(f)
 
         assert len(results) == 1, "Should have exactly one variant result"
-        assert results[0]["variant_number"] == 1, "Should be variant 1 only"
+        assert results[0]["variant_number"] == first_variant.number, f"Should be variant {first_variant.number} only"
+        assert results[0]["variant"] == first_variant.name, f"Should be {first_variant.name} only"
