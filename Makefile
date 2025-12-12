@@ -251,9 +251,9 @@ show-runs:
 
 # Generate variant comparison report
 # Optional parameters:
-#   VARIANTS_DIR - Path to variant_outputs directory or Alt_* folder (default: auto-detect latest Alt_* in C:\Users\PC\Downloads\transcribe\)
-#   FAR_RANGE - Time range for far speaker excerpt (format: start-end, e.g., "20-60")
-#   SILENCE_RANGE - Time range for silence excerpt (format: start-end, e.g., "120-160")
+#   VARIANTS_DIR - Path to timestamped folder (YYYY-MM-DDTHH-MM-SS) or parent directory (default: auto-detect latest in C:\Users\PC\Downloads\transcribe\)
+#   FAR_RANGE - Time range for far speaker excerpt (format: start-end, default: "251-291")
+#   SILENCE_RANGE - Time range for silence excerpt (format: start-end, default: "19-61")
 #   VARIANTS - Comma-separated variant numbers to include (default: all from run_meta.json)
 variant-report:
 	@if [ ! -x .venv/bin/python ]; then \
@@ -265,12 +265,10 @@ variant-report:
 	if [ -n "$${VARIANTS_DIR:-}" ]; then \
 	  SCRIPT_ARGS="$$SCRIPT_ARGS \"$$VARIANTS_DIR\""; \
 	fi; \
-	if [ -n "$${FAR_RANGE:-}" ]; then \
-	  SCRIPT_ARGS="$$SCRIPT_ARGS --far-speaker-range \"$$FAR_RANGE\""; \
-	fi; \
-	if [ -n "$${SILENCE_RANGE:-}" ]; then \
-	  SCRIPT_ARGS="$$SCRIPT_ARGS --silence-range \"$$SILENCE_RANGE\""; \
-	fi; \
+	FAR_RANGE=$${FAR_RANGE:-251-291}; \
+	SILENCE_RANGE=$${SILENCE_RANGE:-19-61}; \
+	SCRIPT_ARGS="$$SCRIPT_ARGS --far-speaker-range $$FAR_RANGE"; \
+	SCRIPT_ARGS="$$SCRIPT_ARGS --silence-range $$SILENCE_RANGE"; \
 	if [ -n "$${VARIANTS:-}" ]; then \
 	  SCRIPT_ARGS="$$SCRIPT_ARGS --variants \"$$VARIANTS\""; \
 	fi; \
