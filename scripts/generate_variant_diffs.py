@@ -20,17 +20,20 @@ LOGGER = logging.getLogger(__name__)
 # Variant descriptions from compare_transcription_variants.py
 VARIANT_DESCRIPTIONS = {
     "no_preprocessing": "No preprocessing + project defaults",
-    "industry_defaults": "No preprocessing + industry defaults",
+    "noprep_minimal": "No preprocessing + minimal defaults",
     "ffmpeg_only": "Only ffmpeg pipeline + project defaults",
     "denoise_only": "Only denoise_light + project defaults",
-    "ffmpeg_industry_defaults": "Only ffmpeg pipeline + industry defaults",
-    "full_industry_defaults": "Full preprocessing (ffmpeg + denoise) + industry defaults",
+    "ffmpeg_minimal": "Only ffmpeg pipeline + minimal defaults",
+    "full_minimal": "Full preprocessing (ffmpeg + denoise) + minimal defaults",
     "noprep_noparamtrans": "No preprocessing + minimal transcription parameters",
     "normonly_noparamtrans": "Only normalization + minimal transcription parameters",
     "onlyden_noparamtrans": "Only denoise + minimal transcription parameters",
-    "noprep_noparamtrans_thres1": "No preprocessing + minimal params + no_speech_threshold=0.6",
-    "noprep_noparamtrans_chunk1": "No preprocessing + minimal params + chunk_length=20",
-    "noprep_noparamtrans_condprev1": "No preprocessing + minimal params + condition_on_previous_text=False",
+    "noprep_minimal_no_speech_threshold": "No preprocessing + minimal params + no_speech_threshold override",
+    "noprep_minimal_chunk_length": "No preprocessing + minimal params + chunk_length override",
+    "noprep_minimal_condition_on_previous_text": (
+        "No preprocessing + minimal params + condition_on_previous_text override"
+    ),
+    "noprep_minimal_beam_size": "No preprocessing + minimal params + beam_size override",
 }
 
 

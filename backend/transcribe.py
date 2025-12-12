@@ -26,6 +26,7 @@ python transcribe.py
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Iterable
@@ -227,10 +228,20 @@ def _get_estonian_model_path(
 
     Raises:
         ModelNotFoundError: If CT2 folder doesn't exist in model
+        ValueError: If model_id format is invalid or potentially unsafe
     """
+    # Validate model_id format to ensure it's a safe HuggingFace model ID
+    # Must contain "/" (org/model format) and only alphanumeric, dash, underscore
+    if not model_id or "/" not in model_id:
+        raise ValueError(f"Invalid HuggingFace model_id format: {model_id}")
+    # Ensure model_id only contains safe characters (alphanumeric, dash, underscore, slash)
+    if not re.match(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$", model_id):
+        raise ValueError(f"Unsafe model_id format detected: {model_id}")
+
     # Only download ct2 folder, skip transformers/native formats
     # Disable progress bar to avoid duplicate "Download complete" messages
-    model_path = downloader(model_id, allow_patterns=["ct2/*"], tqdm_class=_NoOpTqdm)  # nosec B615
+    # Note: huggingface_hub uses HTTPS by default, ensuring secure downloads
+    model_path = downloader(model_id, allow_patterns=["ct2/*"], tqdm_class=_NoOpTqdm)
     ct2_path = path_cls(model_path) / "ct2"
     if not ct2_path.exists():
         raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
@@ -245,9 +256,21 @@ def _get_cached_model_path(model_id: str, *, downloader: Callable[..., str] = sn
 
     Returns:
         Path to the cached model directory
+
+    Raises:
+        ValueError: If model_id format is invalid or potentially unsafe
     """
+    # Validate model_id format to ensure it's a safe HuggingFace model ID
+    # Must contain "/" (org/model format) and only alphanumeric, dash, underscore
+    if not model_id or "/" not in model_id:
+        raise ValueError(f"Invalid HuggingFace model_id format: {model_id}")
+    # Ensure model_id only contains safe characters (alphanumeric, dash, underscore, slash)
+    if not re.match(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$", model_id):
+        raise ValueError(f"Unsafe model_id format detected: {model_id}")
+
     # Disable progress bar to avoid duplicate "Download complete" messages
-    return downloader(model_id, tqdm_class=_NoOpTqdm)  # nosec B615
+    # Note: huggingface_hub uses HTTPS by default, ensuring secure downloads
+    return downloader(model_id, tqdm_class=_NoOpTqdm)
 
 
 def _resolve_model_path(

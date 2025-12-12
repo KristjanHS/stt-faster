@@ -39,10 +39,10 @@ def verify_variant(variant_number: int) -> bool:
         return False
 
     print(f"\n{'=' * 80}")  # noqa: T201
-    print(f"Variant {variant_number}: {variant.name} ({variant.description})")  # noqa: T201
+    print(f"Variant {variant_number}: {variant.name}")  # noqa: T201
     print("=" * 80)  # noqa: T201
-    print(f"  Preset: {variant.transcription_preset}")  # noqa: T201
-    print(f"  Overrides: {variant.transcription_overrides}")  # noqa: T201
+    config = variant.transcription_config
+    print(f"  Config: TranscriptionConfig with {len([f for f in dir(config) if not f.startswith('_')])} parameters")  # noqa: T201
     print()  # noqa: T201
 
     # Create a fake audio file
@@ -82,73 +82,75 @@ def verify_variant(variant_number: int) -> bool:
                     preprocess_config=PreprocessConfig(enabled=False),
                     preprocess_runner=fake_preprocess_runner,
                     transcription_config=transcription_config,
-                    transcription_overrides=variant.transcription_overrides,
                 )
-            except Exception:  # noqa: B110
+            except Exception as e:  # noqa: B110
                 # We expect it to fail since we're using fake audio, but we should have captured the call
                 # The call should have been made before any error occurs
                 if not recording_model.calls:
                     # If no call was captured, this is a real error
-                    raise
+                    print(f"  ❌ Error: Transcription failed before model.transcribe() was called: {e}")  # noqa: T201
+                    return False
 
         # Verify we captured a call
         if not recording_model.calls:
             print("  ❌ Error: model.transcribe() was never called!")  # noqa: T201
             return False
 
-        # Get the actual kwargs that were passed
+        # Get the actual kwargs and args that were passed
         actual_kwargs = recording_model.calls[0]["kwargs"]
+        actual_args = recording_model.calls[0]["args"]
 
-        print("  ACTUAL parameters passed to model.transcribe():")  # noqa: T201
+        print("  ACTUAL PARAMETERS PASSED TO model.transcribe():")  # noqa: T201
+        print(f"    Args: {actual_args}")  # noqa: T201
+        print("    Kwargs:")  # noqa: T201
         for key, value in sorted(actual_kwargs.items()):
-            print(f"    - {key}: {value}")  # noqa: T201
+            print(f"      - {key}: {value}")  # noqa: T201
+        print()  # noqa: T201
 
-        # Verify expected base parameters
+        # Derive expected parameters from the variant's transcription config
+        # Base parameters that are always included
         expected_base = {
-            "beam_size": 5,
-            "word_timestamps": False,
-            "task": "transcribe",
-            "language": "et",
+            "beam_size": getattr(transcription_config, "beam_size", 5),
+            "word_timestamps": getattr(transcription_config, "word_timestamps", False),
+            "task": getattr(transcription_config, "task", "transcribe"),
+            "language": "et",  # From the test call
         }
 
-        # Exclude override parameters from base check (they'll be checked separately)
-        override_params = set(variant.transcription_overrides.keys()) if variant.transcription_overrides else set()
+        # Parameters that can be overridden (from transcribe_with_minimal_params logic)
+        allowed_override_params = {"beam_size", "chunk_length", "no_speech_threshold", "condition_on_previous_text"}
+
+        # Build expected kwargs from config
+        expected_kwargs = expected_base.copy()
+        for param in allowed_override_params:
+            if hasattr(transcription_config, param):
+                value = getattr(transcription_config, param)
+                if value is not None:
+                    expected_kwargs[param] = value
+
+        print("  VERIFICATION RESULT:")  # noqa: T201
+        print()  # noqa: T201
 
         all_correct = True
-        for param, expected_value in expected_base.items():
-            # Skip parameters that are overridden
-            if param in override_params:
-                continue
+        # Verify all expected parameters are present and correct
+        for param, expected_value in expected_kwargs.items():
             if param not in actual_kwargs:
                 print(f"    ❌ {param}: MISSING (expected {expected_value})")  # noqa: T201
                 all_correct = False
             elif actual_kwargs[param] != expected_value:
-                print(f"    ❌ {param}: {actual_kwargs[param]} (expected {expected_value})")  # noqa: T201
+                actual_value = actual_kwargs[param]
+                print(f"    ❌ {param}: {actual_value} (expected {expected_value})")  # noqa: T201
                 all_correct = False
+            else:
+                print(f"    ✅ {param}: {actual_kwargs[param]} (matches config)")  # noqa: T201
 
-        # Verify override parameters
-        if variant.transcription_overrides:
-            print()  # noqa: T201
-            print("  Override parameters:")  # noqa: T201
-            for param, expected_value in variant.transcription_overrides.items():
-                if param in actual_kwargs:
-                    if actual_kwargs[param] == expected_value:
-                        print(f"    ✅ {param}: {actual_kwargs[param]} (matches override)")  # noqa: T201
-                    else:
-                        print(f"    ❌ {param}: {actual_kwargs[param]} (expected {expected_value})")  # noqa: T201
-                        all_correct = False
-                else:
-                    print(f"    ❌ {param}: MISSING (expected {expected_value} from override)")  # noqa: T201
-                    all_correct = False
-
-        # Check for unexpected parameters
+        # Check for unexpected parameters (only allow expected ones)
         allowed_params = {"beam_size", "word_timestamps", "task", "language"}
-        if variant.transcription_overrides:
-            allowed_params.update(variant.transcription_overrides.keys())
+        allowed_params.update(allowed_override_params)
         unexpected = set(actual_kwargs.keys()) - allowed_params
         if unexpected:
             print()  # noqa: T201
-            print(f"    ⚠️  Unexpected parameters: {unexpected}")  # noqa: T201
+            print(f"    ⚠️  Unexpected parameters found: {unexpected}")  # noqa: T201
+            print(f"       (These should not be present for variant {variant_number})")  # noqa: T201
 
         if all_correct and not unexpected:
             print()  # noqa: T201
