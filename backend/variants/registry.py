@@ -22,6 +22,8 @@ def _get_all_variants() -> list[Variant]:
     - Variant 16: Multiple preprocessing steps
     - Variants 17-20: Complex normalization
     - Variants 21-26: Conservative sweep variants (no preprocessing)
+    - Variants 90-93: Validation sweep variants (diagnostic, vad_filter=False)
+    - Variants 94-96: Production candidate variants (no_speech_threshold + logprob_threshold tuning)
     """
     return [
         # Group 1: No preprocessing (simplest) - Variants 1-7
@@ -271,6 +273,78 @@ def _get_all_variants() -> list[Variant]:
             preprocess_steps=[],
             transcription_config=create_minimal_config(no_speech_threshold=0.55),
         ),
+        # Group 7: Validation sweep variants (diagnostic, vad_filter=False) - Variants 90-93
+        # Variant 90: Baseline for comparison (vad_filter=False)
+        Variant(
+            name="diag_base_defaults",
+            number=90,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(vad_filter=False),
+        ),
+        # Variant 91: Conservative - rarely skips (no_speech_threshold=0.75, logprob_threshold=-0.9)
+        Variant(
+            name="diag_ns_075_lp_090",
+            number=91,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                no_speech_threshold=0.75,
+                logprob_threshold=-0.9,
+            ),
+        ),
+        # Variant 92: Balanced - should skip some obvious silent windows with low-confidence text
+        Variant(
+            name="diag_ns_065_lp_080",
+            number=92,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                no_speech_threshold=0.65,
+                logprob_threshold=-0.8,
+            ),
+        ),
+        # Variant 93: More "active" hallucination guard (still not crazy)
+        Variant(
+            name="diag_ns_060_lp_070",
+            number=93,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                no_speech_threshold=0.60,
+                logprob_threshold=-0.7,
+            ),
+        ),
+        # Group 8: Production candidate variants - Variants 94-96
+        # Variant 94: Safest - almost only skips truly silent windows
+        Variant(
+            name="prod_ns_075_lp_080",
+            number=94,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                no_speech_threshold=0.75,
+                logprob_threshold=-0.8,
+            ),
+        ),
+        # Variant 95: Balanced hallucination guard
+        Variant(
+            name="prod_ns_070_lp_070",
+            number=95,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                no_speech_threshold=0.70,
+                logprob_threshold=-0.7,
+            ),
+        ),
+        # Variant 96: Only if you still see hallucinations in silence
+        Variant(
+            name="prod_ns_065_lp_070",
+            number=96,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                no_speech_threshold=0.65,
+                logprob_threshold=-0.7,
+            ),
+        ),
     ]
 
 
@@ -323,7 +397,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-26)
+        number: Variant number (1-96)
 
     Returns:
         Variant instance or None if not found

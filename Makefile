@@ -11,6 +11,8 @@
 .PHONY: preprocess-audio
 # Database
 .PHONY: show-run show-runs
+# Reports
+.PHONY: variant-report
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
@@ -60,6 +62,9 @@ help:
 	@echo "  -- Database --"
 	@echo "  show-run          - Show run information (RUN_ID=... to specify, or shows latest)"
 	@echo "  show-runs         - Show last 20 runs in compact format"
+	@echo ""
+	@echo "  -- Reports --"
+	@echo "  variant-report    - Generate variant comparison report (VARIANTS_DIR=... optional, FAR_RANGE=... and SILENCE_RANGE=... optional)"
 	@echo ""
 	@echo "  -- Docker (Production) --"
 	@echo "  docker-build-prod    - Build production Docker image for end users"
@@ -243,6 +248,33 @@ show-runs:
 	  exit 1; \
 	fi
 	.venv/bin/python scripts/db/show_recent_runs.py --limit 20 --compact
+
+# Generate variant comparison report
+# Optional parameters:
+#   VARIANTS_DIR - Path to variant_outputs directory or Alt_* folder (default: auto-detect latest Alt_* in C:\Users\PC\Downloads\transcribe\)
+#   FAR_RANGE - Time range for far speaker excerpt (format: start-end, e.g., "20-60")
+#   SILENCE_RANGE - Time range for silence excerpt (format: start-end, e.g., "120-160")
+#   VARIANTS - Comma-separated variant numbers to include (default: all from run_meta.json)
+variant-report:
+	@if [ ! -x .venv/bin/python ]; then \
+	  echo "Missing .venv/bin/python. Run ./run_uv.sh first."; \
+	  exit 1; \
+	fi
+	@set -euo pipefail; \
+	SCRIPT_ARGS=""; \
+	if [ -n "$${VARIANTS_DIR:-}" ]; then \
+	  SCRIPT_ARGS="$$SCRIPT_ARGS \"$$VARIANTS_DIR\""; \
+	fi; \
+	if [ -n "$${FAR_RANGE:-}" ]; then \
+	  SCRIPT_ARGS="$$SCRIPT_ARGS --far-speaker-range \"$$FAR_RANGE\""; \
+	fi; \
+	if [ -n "$${SILENCE_RANGE:-}" ]; then \
+	  SCRIPT_ARGS="$$SCRIPT_ARGS --silence-range \"$$SILENCE_RANGE\""; \
+	fi; \
+	if [ -n "$${VARIANTS:-}" ]; then \
+	  SCRIPT_ARGS="$$SCRIPT_ARGS --variants \"$$VARIANTS\""; \
+	fi; \
+	.venv/bin/python scripts/generate_variant_report.py $$SCRIPT_ARGS
 
 
 pyright:
