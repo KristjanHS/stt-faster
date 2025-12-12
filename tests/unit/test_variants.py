@@ -359,22 +359,23 @@ class TestVariantPresets:
         minimal_variants = []
         for variant in all_variants:
             config = variant.transcription_config
-            # Minimal config typically has word_timestamps=False and task="transcribe"
+            # Minimal config has word_timestamps=True (enabled for accurate text slicing) and task="transcribe"
             # and matches minimal_ref for these key attributes
             if config.word_timestamps == minimal_ref.word_timestamps and config.task == minimal_ref.task:
                 minimal_variants.append(variant)
 
         # Verify minimal config variants have expected structure
         for variant in minimal_variants:
-            assert variant.transcription_config.word_timestamps is False
-            assert variant.transcription_config.task == "transcribe"
+            assert variant.transcription_config.word_timestamps == minimal_ref.word_timestamps
+            assert variant.transcription_config.task == minimal_ref.task
 
         # Check that at least some active variants use minimal config
         active_variants = get_builtin_variants()
         active_minimal = [
             v
             for v in active_variants
-            if v.transcription_config.word_timestamps is False and v.transcription_config.task == "transcribe"
+            if v.transcription_config.word_timestamps == minimal_ref.word_timestamps
+            and v.transcription_config.task == minimal_ref.task
         ]
         assert len(active_minimal) > 0, "At least one active variant should use minimal config"
 

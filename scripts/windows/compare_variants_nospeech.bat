@@ -70,7 +70,7 @@ REM Environment variables:
 REM   HF_HOME - Hugging Face cache location
 REM   HF_HUB_CACHE - Hugging Face hub cache
 REM Output: Both txt and json formats
-REM Output structure: variant_outputs/variant_XXX_name/processed/
+REM Output structure: timestamped folder (e.g., 2024-01-15T10-30-45) directly under input directory
 REM Note: transcribe_manager.py processes folders, so we pass the directory containing the file
 wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --preset et-large --language et --output-format both --variants '!VARIANTS!'"
 
@@ -79,13 +79,13 @@ echo ========================================
 echo Processing Complete!
 echo ========================================
 echo.
-echo Outputs are organized in: %~dp0variant_outputs\
+echo Outputs are organized in timestamped folders directly under: %~dp0
 echo All variants are in a single timestamped folder (e.g., 2024-01-15T10-30-45)
 echo Files are prefixed with variant number (e.g., variant_001_audio.wav.txt)
 echo A single run_meta.json contains metadata for all variants
 echo.
 echo To generate a comparison report, run:
-echo   wsl -e bash -c "cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/generate_variant_report.py '!WSL_INPUT_DIR!/variant_outputs' --variants 1,90,91,92,93,94,95,96 --far-speaker-range 20-60 --silence-range 120-160"
+echo   wsl -e bash -c "cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/generate_variant_report.py '!WSL_INPUT_DIR!' --variants 1,90,91,92,93,94,95,96 --far-speaker-range 20-60 --silence-range 120-160"
 echo.
 echo (Adjust time ranges as needed for your audio file)
 echo.
