@@ -152,7 +152,6 @@ class TranscriptionMetrics:
     # Audio inspection (from input_info)
     input_channels: int | None = None
     input_sample_rate: int | None = None
-    input_bit_depth: int | None = None
     input_format: str | None = None
 
     # Downmix/resample parameters
@@ -643,7 +642,6 @@ def transcribe(
             # Audio inspection (from input_info)
             input_channels=preprocess_result.input_info.channels if preprocess_result.input_info else None,
             input_sample_rate=preprocess_result.input_info.sample_rate if preprocess_result.input_info else None,
-            input_bit_depth=None,  # Not available in current AudioInfo
             input_format=preprocess_result.input_info.sample_format if preprocess_result.input_info else None,
             # Downmix/resample parameters
             volume_adjustment_db=-6.0,  # Hardcoded in downmix_and_resample

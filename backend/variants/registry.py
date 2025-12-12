@@ -385,17 +385,3 @@ def get_variant_by_number(number: int) -> Variant | None:
         if variant.number == number:
             return variant
     return None
-
-
-def get_conservative_sweep_variants() -> list[int]:
-    """Return variant numbers for conservative sweep.
-
-    Conservative sweep includes baseline and simple variants:
-    - Variant 1: Baseline (baseline_true_defaults)
-    - Variant 2: Baseline no VAD (baseline_no_vad)
-    - Variant 3: Diagnostic control (diag_control_no_vad_chunk20_beam5)
-
-    Returns:
-        List of variant numbers for conservative sweep
-    """
-    return [1, 2, 3]
