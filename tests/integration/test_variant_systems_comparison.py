@@ -55,7 +55,7 @@ class TestVariantSystemsComparison:
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run variant 1 in first output directory (skip all other active variants: 4, 7)
+        # Run variant 1 in first output directory (skip all other variants: 2-24)
         result_old = subprocess.run(
             [
                 sys.executable,
@@ -81,6 +81,10 @@ class TestVariantSystemsComparison:
                 "18",
                 "19",
                 "20",
+                "21",
+                "22",
+                "23",
+                "24",
                 "--output-dir",
                 str(output_dir_old),
             ],
@@ -92,7 +96,7 @@ class TestVariantSystemsComparison:
         # Verify first run succeeded
         assert result_old.returncode == 0, f"First run failed: {result_old.stderr}\n{result_old.stdout}"
 
-        # Run variant 1 in second output directory (skip all other active variants: 4, 7)
+        # Run variant 1 in second output directory (skip all other variants: 2-24)
         result_new = subprocess.run(
             [
                 sys.executable,
@@ -118,6 +122,10 @@ class TestVariantSystemsComparison:
                 "18",
                 "19",
                 "20",
+                "21",
+                "22",
+                "23",
+                "24",
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -202,21 +210,21 @@ class TestVariantSystemsComparison:
             )
 
     def test_all_active_variants_execute_successfully(self, test_audio_file: Path, output_dir_new: Path) -> None:
-        """Test that all active variants (1, 4, 7) execute successfully."""
+        """Test that all active variants (1, 2, 3) execute successfully."""
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with active variants only (skip all inactive variants: 2-3, 5-6, 8-20)
+        # Run with active variants only (skip all inactive variants: 4-24)
         result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "2",
-                "3",
+                "4",
                 "5",
                 "6",
+                "7",
                 "8",
                 "9",
                 "10",
@@ -230,6 +238,10 @@ class TestVariantSystemsComparison:
                 "18",
                 "19",
                 "20",
+                "21",
+                "22",
+                "23",
+                "24",
                 "--output-dir",
                 str(output_dir_new),
             ],
@@ -249,12 +261,12 @@ class TestVariantSystemsComparison:
         with json_files[0].open() as f:
             results = json.load(f)
 
-        # Should have 3 variants: 1, 4, 7 (current active variants)
+        # Should have 3 variants: 1, 2, 3 (current active variants)
         assert len(results) == 3, f"Should have 3 variant results, got {len(results)}"
 
         # Verify all variants succeeded
         variant_numbers = {r["variant_number"] for r in results}
-        expected_numbers = {1, 4, 7}
+        expected_numbers = {1, 2, 3}
         assert variant_numbers == expected_numbers, f"Expected variants {expected_numbers}, got {variant_numbers}"
 
         # Verify all have success status
@@ -269,7 +281,7 @@ class TestVariantSystemsComparison:
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with only variant 1 (skip all other active variants: 4, 7)
+        # Run with only variant 1 (skip all other variants: 2-24)
         result = subprocess.run(
             [
                 sys.executable,
@@ -295,6 +307,10 @@ class TestVariantSystemsComparison:
                 "18",
                 "19",
                 "20",
+                "21",
+                "22",
+                "23",
+                "24",
                 "--output-dir",
                 str(output_dir_new),
             ],
