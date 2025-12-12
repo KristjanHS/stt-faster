@@ -356,11 +356,6 @@ class TestProductionRuntime:
 
 
 @pytest.mark.docker
-class TestProductionVolumes:
-    """Test volume mounts and permissions."""
-
-
-@pytest.mark.docker
 @pytest.mark.network
 class TestProductionTranscription:
     """Test actual transcription functionality (requires network for model download)."""
