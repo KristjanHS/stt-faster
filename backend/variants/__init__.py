@@ -8,6 +8,7 @@ from backend.variants.executor import (
 from backend.variants.registry import (
     get_all_variants,
     get_builtin_variants,
+    get_conservative_sweep_variants,
     get_variant_by_name,
     get_variant_by_number,
 )
@@ -19,6 +20,7 @@ __all__ = [
     "execute_variant",
     "get_all_variants",
     "get_builtin_variants",
+    "get_conservative_sweep_variants",
     "get_variant_by_name",
     "get_variant_by_number",
     "create_variant_preprocess_runner",

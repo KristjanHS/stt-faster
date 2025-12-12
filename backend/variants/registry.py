@@ -332,3 +332,17 @@ def get_variant_by_number(number: int) -> Variant | None:
         if variant.number == number:
             return variant
     return None
+
+
+def get_conservative_sweep_variants() -> list[int]:
+    """Return variant numbers for conservative sweep.
+
+    Conservative sweep includes:
+    - Variant 1: Baseline (noprep_noparamtrans)
+    - Variant 6: condition_on_previous_text=False
+    - Variants 21-26: Conservative sweep variants (no preprocessing, minimal config with small deltas)
+
+    Returns:
+        List of variant numbers for conservative sweep
+    """
+    return [1, 6, 21, 22, 23, 24, 25, 26]
