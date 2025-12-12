@@ -11,11 +11,6 @@ Usage:
         --preset et-32 --language et --output-format both \\
         --variants "1,6,21,22,23,24,25,26"
 
-    # Process folder with conservative sweep preset
-    .venv/bin/python scripts/transcribe_manager.py process /path/to/audio \\
-        --preset et-32 --language et --output-format both \\
-        --variant-sweep conservative
-
     # Check status
     .venv/bin/python scripts/transcribe_manager.py status
 """
@@ -167,7 +162,7 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "Variant number to use (1-26). "
             "Default: 1 (no preprocessing + minimal transcription parameters). "
-            "Mutually exclusive with --variants and --variant-sweep."
+            "Mutually exclusive with --variants."
         ),
     )
     variant_group.add_argument(
@@ -177,18 +172,7 @@ def create_parser() -> argparse.ArgumentParser:
         help=(
             "Comma-separated list of variant numbers to run (e.g., '1,6,21,22'). "
             "Each variant will be processed sequentially with outputs in separate subfolders. "
-            "Mutually exclusive with --variant and --variant-sweep."
-        ),
-    )
-    variant_group.add_argument(
-        "--variant-sweep",
-        type=str,
-        choices=["conservative"],
-        default=None,
-        help=(
-            "Run a predefined variant sweep. "
-            "'conservative' runs variants 1,6,21,22,23,24,25,26. "
-            "Mutually exclusive with --variant and --variants."
+            "Mutually exclusive with --variant."
         ),
     )
     process_parser.add_argument(

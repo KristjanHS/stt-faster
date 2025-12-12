@@ -119,7 +119,6 @@ FILE_STATISTICS_COLUMNS = {
 OPTIONAL_FILE_STATISTICS = {
     "preprocess_snr_before",  # May be None if SNR estimation wasn't performed
     "preprocess_snr_after",  # May be None if SNR estimation wasn't performed
-    "input_bit_depth",  # Not available in current AudioInfo implementation
 }
 
 
