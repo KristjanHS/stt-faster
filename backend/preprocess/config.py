@@ -261,6 +261,27 @@ class TranscriptionConfig:
     # Prompting
     initial_prompt: str | None = None
 
+    # Internal: Track which fields were explicitly set (for baseline configs)
+    _explicit_fields: set[str] = field(default_factory=lambda: set[str](), repr=False, init=False)
+
+    def set(self, key: str, value: Any) -> None:
+        """Set a field value and mark it as explicitly set.
+
+        Args:
+            key: Field name to set
+            value: Value to set
+        """
+        setattr(self, key, value)
+        self._explicit_fields.add(key)
+
+    def to_kwargs(self) -> dict[str, Any]:
+        """Return only explicitly set fields as kwargs dict.
+
+        Returns:
+            Dictionary containing only fields that were explicitly set
+        """
+        return {k: getattr(self, k) for k in self._explicit_fields}
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "TranscriptionConfig":
         """Build configuration from environment variables or a provided mapping."""
