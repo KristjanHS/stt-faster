@@ -275,22 +275,6 @@ def main() -> int:
     LOGGER.info("")
     LOGGER.info("Comparison summary saved to: %s", comparison_json_path.name)
 
-    # Generate markdown diff report
-    try:
-        # Import the diff generation function
-        # Add scripts directory to path temporarily
-        scripts_dir = Path(__file__).parent
-        if str(scripts_dir) not in sys.path:
-            sys.path.insert(0, str(scripts_dir))
-        from generate_variant_diffs import generate_markdown_report
-
-        diff_output_path = comparison_json_path.with_suffix(".md").with_name(comparison_json_path.stem + "_diffs.md")
-        generate_markdown_report(results, diff_output_path, audio_stem)
-        LOGGER.info("Diff report saved to: %s", diff_output_path.name)
-    except Exception as exc:
-        LOGGER.warning("Failed to generate diff report: %s", exc)
-        # Don't fail the whole script if diff generation fails
-
     # Return non-zero if any variant failed
     return 0 if all(r["status"] == "success" for r in results) else 1
 

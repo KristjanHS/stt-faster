@@ -208,6 +208,10 @@ class TranscriptionMetrics:
     output_format: str | None = None
     float_precision: int | None = None
 
+    # Segment statistics
+    segment_count: int | None = None
+    no_speech_skips_count: int | None = None
+
 
 def _get_estonian_model_path(
     model_id: str,
@@ -357,6 +361,15 @@ def segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     if speaker is not None:
         data["speaker"] = speaker
 
+    # Include no_speech_prob and avg_logprob if available (from faster-whisper segments)
+    no_speech_prob = getattr(segment, "no_speech_prob", None)
+    if no_speech_prob is not None:
+        data["no_speech_prob"] = float(no_speech_prob)
+
+    avg_logprob = getattr(segment, "avg_logprob", None)
+    if avg_logprob is not None:
+        data["avg_logprob"] = float(avg_logprob)
+
     cleaned = {key: value for key, value in data.items() if value is not None}
     return _round_floats(cleaned)
 
@@ -492,9 +505,23 @@ def transcribe(
         segment_payloads: list[Dict[str, Any]] = []
         audio_processed = 0.0
         last_progress_log = transcribe_start
+        no_speech_skips = 0
+
+        # Track segments that would have been skipped due to no_speech_threshold
+        no_speech_threshold = transcription_config.no_speech_threshold
+        logprob_threshold = transcription_config.logprob_threshold
 
         for segment in segments:
             segment_payloads.append(segment_to_payload(segment))
+
+            # Count segments that would have been skipped (no_speech_prob > threshold AND avg_logprob <= threshold)
+            no_speech_prob = getattr(segment, "no_speech_prob", None)
+            avg_logprob = getattr(segment, "avg_logprob", None)
+            if no_speech_prob is not None and avg_logprob is not None:
+                no_speech_val = float(no_speech_prob)
+                avg_logprob_val = float(avg_logprob)
+                if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
+                    no_speech_skips += 1
 
             end_time = getattr(segment, "end", None)
             if end_time is not None:
@@ -628,6 +655,9 @@ def transcribe(
             # Output parameters (these will come from processor context in future enhancement)
             output_format=None,  # Not available at this level, will be set by processor
             float_precision=FLOAT_PRECISION,
+            # Segment statistics
+            segment_count=len(segment_payloads),
+            no_speech_skips_count=no_speech_skips if no_speech_skips > 0 else None,
         )
         if metrics_collector:
             metrics_collector(metrics_payload)

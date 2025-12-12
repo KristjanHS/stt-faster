@@ -78,6 +78,7 @@ GPU tests validate system setup and actual GPU functionality (behavior tests):
 6. **Folder-Based Organization**: Use `tests/unit/`, `tests/integration/`, `tests/e2e/` folders to indicate test type - do not use test-type markers
 7. **Avoid Trivial Tests**: Don't test file existence, help text, version strings, or implementation details - test what the code does, not how
 8. **Data-Driven Tests with Dynamic Discovery**: Prefer dynamic discovery over hardcoded values to make tests sustainable and resilient to changes
+9. **Distinguish Intentional Errors from Real Issues**: When testing error handling, use `caplog` to capture and verify expected errors, and document them clearly in test docstrings
 
 ## Data-Driven Testing with Dynamic Discovery
 
@@ -143,6 +144,72 @@ These are examples of low-value tests that should be avoided:
 - **Trivial defaults** - Test that defaults work, not every single default value
 - **Code inspection** - Don't test if strings exist in source files
 - **Hardcoded mappings** - Use dynamic discovery instead of hardcoding variant numbers, names, or expected value mappings
+
+## Handling Intentional Test Errors
+
+When testing error handling scenarios, tests intentionally trigger errors or warnings. To distinguish these from actual issues:
+
+### Best Practices
+
+1. **Use `caplog` to Capture Expected Errors**: Use pytest's `caplog` fixture to capture and verify that expected errors are logged correctly
+2. **Document Intentional Errors**: Clearly document in test docstrings that errors are intentional and part of the test scenario
+3. **Verify Error Logging**: Assert that expected errors are logged, ensuring error handling works correctly
+4. **Don't Suppress Errors**: Keep errors visible in test output for debugging, but verify they're expected
+
+### Example
+
+**✅ Good - Captures and verifies expected errors:**
+```python
+def test_process_file_failure(
+    temp_db: TranscriptionDatabase,
+    temp_folder: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test handling of transcription failure.
+    
+    This test intentionally triggers a transcription error to verify error handling.
+    Expected ERROR logs are captured and verified, not suppressed.
+    """
+    # Create test audio file
+    audio_file = temp_folder / "audio1.wav"
+    audio_file.touch()
+    temp_db.add_file(str(audio_file), "pending")
+
+    # Make transcription fail intentionally
+    transcribe = RecordingTranscribe(should_fail=True)
+
+    # Capture logs at ERROR level to verify expected error logging
+    with caplog.at_level(logging.ERROR, logger="backend.processor"):
+        processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+        result = processor.process_file(str(audio_file))
+
+    # Verify expected error was logged (this is intentional for this test)
+    assert any("Failed to process" in record.message for record in caplog.records), (
+        "Expected ERROR log for transcription failure (this is intentional)"
+    )
+    
+    # Verify error handling behavior
+    assert result.status == "failed"
+    assert result.metrics is None
+```
+
+**❌ Bad - Errors appear without context:**
+```python
+def test_process_file_failure(temp_db, temp_folder):
+    """Test handling of transcription failure."""
+    # Error logs appear but aren't verified or documented as intentional
+    transcribe = RecordingTranscribe(should_fail=True)
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+    result = processor.process_file(str(audio_file))
+    assert result.status == "failed"
+```
+
+### Benefits
+
+- **Clear Intent**: Test docstrings explain that errors are intentional
+- **Verified Behavior**: Tests verify that error logging works correctly
+- **Debugging Support**: Errors remain visible in output for troubleshooting
+- **No False Positives**: Clear distinction between expected test errors and actual failures
 
 ---
 

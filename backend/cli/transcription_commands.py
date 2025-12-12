@@ -226,23 +226,27 @@ def _process_multi_variant(
         console.print("[dim]Using conservative sweep preset[/dim]")
 
     git_commit = _get_git_commit_hash()
-    timestamp = datetime.now(timezone.utc).isoformat()
+    timestamp = datetime.now(timezone.utc)
+    timestamp_str = timestamp.isoformat()
+    # Create timestamped folder name (filesystem-safe)
+    timestamp_folder = timestamp.strftime("%Y-%m-%dT%H-%M-%S")
 
-    # Create output root directory
+    # Create single timestamped output directory
     output_root = input_folder / "variant_outputs"
     output_root.mkdir(exist_ok=True)
+    run_folder = output_root / timestamp_folder
+    run_folder.mkdir(exist_ok=True)
 
+    # Collect all variant metadata
+    all_variant_metadata: list[dict[str, Any]] = []
     all_results: dict[int, dict[str, Any]] = {}
+
     for variant in variants:
         overrides = _get_variant_overrides(variant)
         console.print(
             f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] "
             f"(overrides: {overrides if overrides else 'none'})"
         )
-
-        # Create variant-specific output folder
-        variant_folder = output_root / f"variant_{variant.number:03d}_{variant.name}"
-        variant_folder.mkdir(exist_ok=True)
 
         try:
             with TranscriptionDatabase(args.db_path) as db:
@@ -258,38 +262,39 @@ def _process_multi_variant(
                     disable_file_moving=True,
                 )
 
-                # Override the processed_folder to be variant-specific
-                processor.processed_folder = variant_folder / "processed"
-                processor.failed_folder = variant_folder / "failed"
-                # Write outputs here (protected member access for multi-variant mode)
-                processor._output_base_dir = variant_folder / "processed"  # type: ignore[reportPrivateUsage]
+                # Use single run folder for all outputs
+                # Files will be prefixed with variant number in the processor
+                processor.processed_folder = run_folder
+                processor.failed_folder = run_folder / "failed"
+                # Set output base dir and store variant info for filename prefixing
+                processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
+                processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
+                processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
                 processor.processed_folder.mkdir(exist_ok=True, parents=True)
                 processor.failed_folder.mkdir(exist_ok=True, parents=True)
 
                 results = processor.process_folder()
                 all_results[variant.number] = results
 
-                # Write run_meta.json
+                # Collect variant metadata
                 transcription_config = variant.transcription_config
-                run_meta = {
+                variant_meta = {
                     "variant_number": variant.number,
                     "variant_name": variant.name,
                     "transcription_config": {
                         "beam_size": getattr(transcription_config, "beam_size", None),
                         "chunk_length": getattr(transcription_config, "chunk_length", None),
                         "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
+                        "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
+                        "vad_filter": getattr(transcription_config, "vad_filter", None),
                         "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
                     },
-                    "preset": args.preset,
-                    "language": args.language,
-                    "output_format": args.output_format,
-                    "git_commit_hash": git_commit,
-                    "timestamp": timestamp,
+                    "results": {
+                        "succeeded": results.get("succeeded", 0),
+                        "failed": results.get("failed", 0),
+                    },
                 }
-
-                meta_path = variant_folder / "run_meta.json"
-                with meta_path.open("w", encoding="utf-8") as f:
-                    json.dump(run_meta, f, indent=2, ensure_ascii=False)
+                all_variant_metadata.append(variant_meta)
 
                 console.print(
                     f"[green]✓[/green] Variant {variant.number} completed: "
@@ -301,11 +306,39 @@ def _process_multi_variant(
             if getattr(args, "verbose", False):
                 LOGGER.exception("Full error details:")
             all_results[variant.number] = {"succeeded": 0, "failed": 0, "error": str(error)}
+            # Add failed variant to metadata
+            all_variant_metadata.append(
+                {
+                    "variant_number": variant.number,
+                    "variant_name": variant.name,
+                    "error": str(error),
+                    "results": {"succeeded": 0, "failed": 0},
+                }
+            )
+
+    # Write single run_meta.json with all variants
+    run_meta = {
+        "timestamp": timestamp_str,
+        "git_commit_hash": git_commit,
+        "preset": args.preset,
+        "language": args.language,
+        "output_format": args.output_format,
+        "variants": all_variant_metadata,
+        "summary": {
+            "total_variants": len(variants),
+            "total_succeeded": sum(int(r.get("succeeded", 0)) for r in all_results.values()),
+            "total_failed": sum(int(r.get("failed", 0)) for r in all_results.values()),
+        },
+    }
+
+    meta_path = run_folder / "run_meta.json"
+    with meta_path.open("w", encoding="utf-8") as f:
+        json.dump(run_meta, f, indent=2, ensure_ascii=False)
 
     # Display overall summary
     total_succeeded = sum(int(r.get("succeeded", 0)) for r in all_results.values())
     total_failed = sum(int(r.get("failed", 0)) for r in all_results.values())
-    display_multi_variant_summary(len(variants), total_succeeded, total_failed, str(output_root))
+    display_multi_variant_summary(len(variants), total_succeeded, total_failed, str(run_folder))
 
     return 0 if total_failed == 0 else 1
 

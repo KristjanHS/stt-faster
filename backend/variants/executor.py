@@ -418,9 +418,23 @@ def transcribe_with_minimal_params(
     segment_payloads: list[dict[str, Any]] = []
     audio_processed = 0.0
     last_progress_log = transcribe_start
+    no_speech_skips = 0
+
+    # Track segments that would have been skipped due to no_speech_threshold
+    no_speech_threshold = getattr(transcription_config, "no_speech_threshold", 0.5)  # Default from TranscriptionConfig
+    logprob_threshold = getattr(transcription_config, "logprob_threshold", -1.0)  # Default from TranscriptionConfig
 
     for segment in segments:
         segment_payloads.append(segment_to_payload(segment))
+
+        # Count segments that would have been skipped (no_speech_prob > threshold AND avg_logprob <= threshold)
+        no_speech_prob = getattr(segment, "no_speech_prob", None)
+        avg_logprob = getattr(segment, "avg_logprob", None)
+        if no_speech_prob is not None and avg_logprob is not None:
+            no_speech_val = float(no_speech_prob)
+            avg_logprob_val = float(avg_logprob)
+            if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
+                no_speech_skips += 1
 
         # Track progress for logging
         end_time = getattr(segment, "end", None)
@@ -598,6 +612,9 @@ def transcribe_with_minimal_params(
         # Output parameters
         output_format=None,  # Not available at this level, will be set by processor
         float_precision=FLOAT_PRECISION,
+        # Segment statistics
+        segment_count=len(segment_payloads),
+        no_speech_skips_count=no_speech_skips if no_speech_skips > 0 else None,
     )
     if metrics_collector:
         metrics_collector(metrics_payload)
