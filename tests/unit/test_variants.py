@@ -141,6 +141,12 @@ class TestVariantRegistry:
             "aresampl_loudnorm_fixed",
             "aresampl_loudnorm_fixed2",
             "loudnorm_2pass_linear",
+            "limiter_only",
+            "volume_limiter",
+            "peak_normalize_2pass",
+            "sox_peak_normalize",
+            "compressor_limiter",
+            "dynaudnorm_conservative",
         )
         for variant in variants:
             # Only check variants without custom runners

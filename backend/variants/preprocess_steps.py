@@ -538,6 +538,292 @@ def _loudnorm_2pass_linear(
     )
 
 
+def _custom_ffmpeg_filter(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    filter_graph: str,
+    step_name: str,
+) -> StepMetrics:
+    """Generic function for applying custom FFmpeg audio filters.
+
+    Args:
+        input_path: Path to input audio file
+        output_path: Path to output audio file
+        target_sample_rate: Target sample rate in Hz
+        target_channels: Target number of channels
+        filter_graph: FFmpeg filter graph string
+        step_name: Name for step metrics
+
+    Returns:
+        StepMetrics with processing duration
+    """
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=1,  # Force mono for Whisper/faster-whisper
+            af=filter_graph,
+            ar=target_sample_rate,
+            acodec="pcm_s16le",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+    except Exception as exc:
+        raise StepExecutionError(step_name, f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name=step_name, backend="ffmpeg", duration=duration)
+
+
+def _limiter_only(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Apply limiter only (alimiter=limit=0.98).
+
+    Goal: protect against clipping/overs with minimal audible change.
+    """
+    filter_graph = "alimiter=limit=0.98"
+    return _custom_ffmpeg_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_graph=filter_graph,
+        step_name="limiter_only",
+    )
+
+
+def _volume_with_limiter(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    volume_db: float,
+) -> StepMetrics:
+    """Apply fixed volume gain + limiter.
+
+    Args:
+        volume_db: Volume gain in dB (e.g., 1.5 for +1.5dB)
+    """
+    filter_graph = f"volume={volume_db}dB,alimiter=limit=0.98"
+    return _custom_ffmpeg_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_graph=filter_graph,
+        step_name=f"volume_{volume_db}db_limiter",
+    )
+
+
+def _peak_normalize_2pass(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    target_db: float,
+    max_gain_db: float = 6.0,
+) -> StepMetrics:
+    """Two-pass peak normalization: detect max volume, then apply gain + limiter.
+
+    Args:
+        target_db: Target peak level in dBFS (e.g., -6.0)
+        max_gain_db: Maximum gain to apply in dB (default 6.0, use 3.0 for P6)
+    """
+    import re
+
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        # Pass 1: volumedetect
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            "null",
+            af="volumedetect",
+            f="null",
+        )
+        _, stderr = ffmpeg.run(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            overwrite_output=True,
+            quiet=True,
+            capture_stdout=True,
+            capture_stderr=True,
+        )
+
+        # Parse max_volume from stderr
+        stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr  # type: ignore[reportUnnecessaryIsInstance]
+        match = re.search(r"max_volume:\s*([-\d.]+)\s*dB", stderr_str)
+        if not match:
+            raise StepExecutionError(
+                "peak_normalize_2pass",
+                f"Could not find max_volume in volumedetect output: {stderr_str[:500]}",
+            )
+
+        max_volume_db = float(match.group(1))
+
+        # Compute gain: clamp((-target_db - max_volume_db), 0.0, max_gain_db)
+        gain_db = max(0.0, min(-target_db - max_volume_db, max_gain_db))
+
+        LOGGER.info(
+            "Peak normalize: max_volume=%.2f dBFS, target=%.2f dBFS, applying gain=%.2f dB",
+            max_volume_db,
+            target_db,
+            gain_db,
+        )
+
+        # Pass 2: Apply gain + limiter
+        if gain_db > 0.0:
+            filter_graph = f"volume={gain_db}dB,alimiter=limit=0.98"
+        else:
+            # No gain needed, just apply limiter
+            filter_graph = "alimiter=limit=0.98"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=1,  # Force mono
+            af=filter_graph,
+            ar=target_sample_rate,
+            acodec="pcm_s16le",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode("utf-8") if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("peak_normalize_2pass", f"ffmpeg failed: {stderr}") from exc
+    except Exception as exc:
+        raise StepExecutionError("peak_normalize_2pass", f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(
+        name=f"peak_normalize_{target_db}db",
+        backend="ffmpeg",
+        duration=duration,
+        metadata={"target_db": target_db, "max_gain_db": max_gain_db, "applied_gain_db": gain_db},
+    )
+
+
+def _sox_peak_normalize(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    target_db: float,
+) -> StepMetrics:
+    """Peak normalize using SoX (sox gain -n), then apply limiter.
+
+    Args:
+        target_db: Target peak level in dBFS (e.g., -3.0)
+    """
+    import shutil
+    import subprocess  # nosec B404
+    from tempfile import NamedTemporaryFile
+
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+
+    # Check if sox is available
+    sox_path = shutil.which("sox")
+    if not sox_path:
+        raise StepExecutionError("sox_peak_normalize", "sox is required but not found on PATH")
+
+    try:
+        # sox in.wav out.wav gain -n -3
+        # -n means normalize to the given level
+        # Use temporary file for SoX output
+        with NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+            tmp_path = Path(tmp_file.name)
+
+        cmd = [
+            sox_path,
+            str(input_path),
+            "-r",
+            str(target_sample_rate),
+            "-c",
+            "1",  # Force mono
+            str(tmp_path),
+            "gain",
+            "-n",
+            str(target_db),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True, text=True)  # nosec B603
+
+        # Apply limiter after SoX (as per user note about intersample overs)
+        stream = ffmpeg.input(str(tmp_path))  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            af="alimiter=limit=0.98",
+            acodec="pcm_s16le",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+
+        # Clean up temporary file
+        tmp_path.unlink(missing_ok=True)
+
+    except subprocess.CalledProcessError as exc:
+        raise StepExecutionError("sox_peak_normalize", f"sox failed: {exc.stderr}") from exc
+    except Exception as exc:
+        raise StepExecutionError("sox_peak_normalize", f"Error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name=f"sox_peak_normalize_{target_db}db", backend="sox+ffmpeg", duration=duration)
+
+
+def _compressor_with_limiter(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Apply super-gentle compressor + tiny makeup gain + limiter.
+
+    Goal: lift quiet speech a little without big pumping.
+    """
+    filter_graph = "acompressor=threshold=-24dB:ratio=1.3:attack=20:release=250:makeup=1dB,alimiter=limit=0.98"
+    return _custom_ffmpeg_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_graph=filter_graph,
+        step_name="compressor_limiter",
+    )
+
+
+def _dynaudnorm_conservative(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+) -> StepMetrics:
+    """Apply super-gentle dynaudnorm (dynamic normalizer, ultra conservative) + limiter.
+
+    Goal: tiny help on quiet speakers; high risk of raising noise, so keep mild.
+    """
+    filter_graph = "dynaudnorm=f=150:g=3:p=0.95:m=5,alimiter=limit=0.98"
+    return _custom_ffmpeg_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_graph=filter_graph,
+        step_name="dynaudnorm_conservative",
+    )
+
+
 def create_preprocess_runner(
     steps: list[Any],  # list[PreprocessStep] but avoiding circular import
     base_config: PreprocessConfig,
@@ -972,6 +1258,164 @@ def create_preprocess_runner(
                         _copy_intermediate_file(
                             intermediate_path,
                             "01_loudnorm_2pass_linear",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "limiter_only":
+                    # Limiter only step (P1)
+                    intermediate_path = Path(temp_dir.name) / f"limiter_only_{step_index}.wav"
+                    step_metric = _limiter_only(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_limiter_only",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "volume_limiter":
+                    # Volume gain + limiter step (P2, P3)
+                    intermediate_path = Path(temp_dir.name) / f"volume_limiter_{step_index}.wav"
+                    volume_db = step.config.get("volume_db", 1.5) if step.config else 1.5
+                    step_metric = _volume_with_limiter(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        volume_db=volume_db,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            f"01_volume_{volume_db}db_limiter",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "peak_normalize_2pass":
+                    # Two-pass peak normalization step (P4, P5, P6)
+                    intermediate_path = Path(temp_dir.name) / f"peak_normalize_2pass_{step_index}.wav"
+                    target_db = step.config.get("target_db", -6.0) if step.config else -6.0
+                    max_gain_db = step.config.get("max_gain_db", 6.0) if step.config else 6.0
+                    step_metric = _peak_normalize_2pass(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        target_db=target_db,
+                        max_gain_db=max_gain_db,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            f"01_peak_normalize_{target_db}db",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "sox_peak_normalize":
+                    # SoX peak normalization step (P7)
+                    intermediate_path = Path(temp_dir.name) / f"sox_peak_normalize_{step_index}.wav"
+                    target_db = step.config.get("target_db", -3.0) if step.config else -3.0
+                    step_metric = _sox_peak_normalize(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                        target_db=target_db,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            f"01_sox_peak_normalize_{target_db}db",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "compressor_limiter":
+                    # Compressor + limiter step (P8)
+                    intermediate_path = Path(temp_dir.name) / f"compressor_limiter_{step_index}.wav"
+                    step_metric = _compressor_with_limiter(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_compressor_limiter",
+                            variant_number,
+                            variant_description,
+                            base_name,
+                            datetime_suffix,
+                            output_dir,
+                            original_filename,
+                            merged_config.output_dir,
+                        )
+
+                elif step.step_type == "dynaudnorm_conservative":
+                    # Conservative dynaudnorm + limiter step (P9)
+                    intermediate_path = Path(temp_dir.name) / f"dynaudnorm_conservative_{step_index}.wav"
+                    step_metric = _dynaudnorm_conservative(
+                        input_path=current_path,
+                        output_path=intermediate_path,
+                        target_sample_rate=merged_config.target_sample_rate,
+                        target_channels=resolved_channels,
+                    )
+                    step_metrics.append(step_metric)
+                    current_path = intermediate_path
+
+                    if copy_intermediate:
+                        _copy_intermediate_file(
+                            intermediate_path,
+                            "01_dynaudnorm_conservative",
                             variant_number,
                             variant_description,
                             base_name,

@@ -20,11 +20,19 @@ def _get_all_variants() -> list[Variant]:
     - Variants 1-2: No preprocessing, baseline configs (simplest)
     - Variants 3-6: No preprocessing, diagnostic/config tuning
     - Variants 7-11: No preprocessing, production VAD tuning
-    - Variants 12-21: Hybrid variants (2 + 5 + 21 combinations)
-      - 12-15: Variant 5 baseline with more decoding power (beam 6/7, patience)
-      - 16-18: Variant 21 baseline (no context) with more decoding power
-      - 19-21: Gentler silence gates for quiet speech recovery
-    - Variant 22: Complex normalization
+    - Variants 12-21: Decode quality and silence guard variants
+      - 12-15: Group A - Improve Variant 2 accuracy (beam 6/7, patience)
+      - 16-18: Group B - Ultra conservative silence guard (Guard-lite)
+      - 19-20: Group C - No context carryover variants
+      - 21: Group D - Boundary effects (chunk 25)
+    - Variant 22: Complex normalization (aresample + loudnorm)
+    - Variants 23-32: Conservative level/volume tweaks
+      - 23: P0 - Control (resample only)
+      - 24: P1 - Limiter only
+      - 25-26: P2-P3 - Fixed gain + limiter (+1.5dB, +3dB)
+      - 27-29: P4-P6 - Peak normalize 2-pass (-6dBFS, -3dBFS, -3dBFS max +3dB)
+      - 30: P7 - SoX peak normalize (-3dBFS)
+      - 31-32: P8-P9 - Compressor and dynaudnorm (conservative)
     """
     return [
         # Group 1: No preprocessing, baseline configs (simplest) - Variants 1-2
@@ -191,161 +199,148 @@ def _get_all_variants() -> list[Variant]:
                 ),
             ),
         ),
-        # Group 4: Hybrid variants (2 + 5 + 21 combinations) - Variants 12-21
-        # A) Variant 5 baseline, but more decoding power (aim: fewer word mistakes like v2)
-        # Variant 12: Variant 5 + beam 6
+        # Group 4: Decode quality and silence guard variants - Variants 12-21
+        # Group A — Improve Variant 2 accuracy without changing behavior much (decode quality)
+        # Variant 12: Beam 6
         Variant(
-            name="hyb_v5_beam6",
+            name="decode_beam6",
             number=12,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=6,
-                condition_on_previous_text=True,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
+                beam_size=6,
             ),
         ),
-        # Variant 13: Variant 5 + beam 7
+        # Variant 13: Beam 7
         Variant(
-            name="hyb_v5_beam7",
+            name="decode_beam7",
             number=13,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=7,
-                condition_on_previous_text=True,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
+                beam_size=7,
             ),
         ),
-        # Variant 14: Variant 5 + beam 6 + patience 1.2
+        # Variant 14: Beam 6 + patience 1.2
         Variant(
-            name="hyb_v5_beam6_pat12",
+            name="decode_beam6_pat12",
             number=14,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
                 beam_size=6,
                 patience=1.2,
-                condition_on_previous_text=True,
-                vad_filter=False,
-                chunk_length=20,
-                word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
             ),
         ),
-        # Variant 15: Variant 5 + beam 7 + patience 1.2
+        # Variant 15: Beam 7 + patience 1.2
         Variant(
-            name="hyb_v5_beam7_pat12",
+            name="decode_beam7_pat12",
             number=15,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
                 beam_size=7,
                 patience=1.2,
-                condition_on_previous_text=True,
-                vad_filter=False,
-                chunk_length=20,
-                word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
             ),
         ),
-        # B) Variant 21 baseline (no context), but more decoding power (aim: keep recall without extra errors)
-        # Variant 16: No context + beam 6
+        # Group B — Add Variant 5's silence guard, but ultra conservative
+        # Variant 16: Guard-lite + Beam 6
         Variant(
-            name="hyb_v21_noctx_beam6",
+            name="guardlite_beam6",
             number=16,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=6,
-                condition_on_previous_text=False,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
+                beam_size=6,
+                no_speech_threshold=0.95,
+                logprob_threshold=-0.46,
             ),
         ),
-        # Variant 17: No context + beam 7
+        # Variant 17: Guard-lite + Beam 7
         Variant(
-            name="hyb_v21_noctx_beam7",
+            name="guardlite_beam7",
             number=17,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=7,
-                condition_on_previous_text=False,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
+                beam_size=7,
+                no_speech_threshold=0.95,
+                logprob_threshold=-0.46,
             ),
         ),
-        # Variant 18: No context + beam 6 + patience 1.2
+        # Variant 18: Guard-lite + Beam 6 + patience 1.2
         Variant(
-            name="hyb_v21_noctx_beam6_pat12",
+            name="guardlite_beam6_pat12",
             number=18,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
                 beam_size=6,
                 patience=1.2,
-                condition_on_previous_text=False,
-                vad_filter=False,
-                chunk_length=20,
-                word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
+                no_speech_threshold=0.95,
+                logprob_threshold=-0.46,
             ),
         ),
-        # C) Slightly gentler silence gate (aim: recover quiet speech if v5 is dropping it)
-        # Variant 19: Beam 6 + ns 0.88 + lp -0.50
+        # Group C — Add Variant 21's "no context carryover", but stabilize it
+        # Variant 19: No-context + Beam 6 + patience 1.2
         Variant(
-            name="hyb_gate_ns088_lp050_beam6",
+            name="noctx_beam6_pat12",
             number=19,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=6,
-                condition_on_previous_text=True,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.88,
-                logprob_threshold=-0.50,
+                beam_size=6,
+                patience=1.2,
+                condition_on_previous_text=False,
             ),
         ),
-        # Variant 20: Beam 6 + ns 0.90 + lp -0.55 (more conservative skip; may keep quiet speech)
+        # Variant 20: No-context + Guard-lite + Beam 6 + patience 1.2
         Variant(
-            name="hyb_gate_ns090_lp055_beam6",
+            name="noctx_guardlite_beam6_pat12",
             number=20,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=6,
-                condition_on_previous_text=True,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.55,
+                beam_size=6,
+                patience=1.2,
+                condition_on_previous_text=False,
+                no_speech_threshold=0.95,
+                logprob_threshold=-0.46,
             ),
         ),
-        # Variant 21: No context + beam 6 + ns 0.88 + lp -0.50
+        # Group D — Boundary effects (quiet speakers at chunk edges)
+        # Variant 21: Guard-lite + Beam 6 + patience 1.2 + chunk 25
         Variant(
-            name="hyb_noctx_gate_ns088_lp050_beam6",
+            name="guardlite_beam6_pat12_chunk25",
             number=21,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
-                beam_size=6,
-                condition_on_previous_text=False,
                 vad_filter=False,
-                chunk_length=20,
+                task="transcribe",
                 word_timestamps=True,
-                no_speech_threshold=0.88,
-                logprob_threshold=-0.50,
+                beam_size=6,
+                patience=1.2,
+                chunk_length=25,
+                no_speech_threshold=0.95,
+                logprob_threshold=-0.46,
             ),
         ),
         # Variant 22: Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
@@ -361,6 +356,200 @@ def _get_all_variants() -> list[Variant]:
                 ),
             ],
             transcription_config=create_minimal_config(),
+        ),
+        # Group 5: Conservative level/volume tweaks - Variants 23-32
+        # Variant 23: P0 — Control (no level change, just resample/downmix if needed)
+        Variant(
+            name="level_p0_control",
+            number=23,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="resample_only",
+                    enabled=True,
+                    step_type="resample",
+                    config=None,
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 24: P1 — Limiter only
+        Variant(
+            name="level_p1_limiter",
+            number=24,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="limiter_only",
+                    enabled=True,
+                    step_type="limiter_only",
+                    config=None,
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 25: P2 — Tiny fixed gain (+1.5 dB) + limiter
+        Variant(
+            name="level_p2_volume_1_5db",
+            number=25,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config={"volume_db": 1.5},
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 26: P3 — Small fixed gain (+3 dB) + limiter
+        Variant(
+            name="level_p3_volume_3db",
+            number=26,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_3db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config={"volume_db": 3.0},
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 27: P4 — Peak-normalize to -6 dBFS (two-pass, only if truly quiet)
+        Variant(
+            name="level_p4_peaknorm_n6db",
+            number=27,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="peak_normalize_n6db",
+                    enabled=True,
+                    step_type="peak_normalize_2pass",
+                    config={"target_db": -6.0, "max_gain_db": 6.0},
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 28: P5 — Peak-normalize to -3 dBFS
+        Variant(
+            name="level_p5_peaknorm_n3db",
+            number=28,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="peak_normalize_n3db",
+                    enabled=True,
+                    step_type="peak_normalize_2pass",
+                    config={"target_db": -3.0, "max_gain_db": 6.0},
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 29: P6 — Peak-normalize to -3 dBFS, but cap gain harder (+3 dB max)
+        Variant(
+            name="level_p6_peaknorm_n3db_max3db",
+            number=29,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="peak_normalize_n3db_max3db",
+                    enabled=True,
+                    step_type="peak_normalize_2pass",
+                    config={"target_db": -3.0, "max_gain_db": 3.0},
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 30: P7 — SoX peak normalize to -3 dBFS
+        Variant(
+            name="level_p7_sox_peaknorm_n3db",
+            number=30,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="sox_peak_normalize_n3db",
+                    enabled=True,
+                    step_type="sox_peak_normalize",
+                    config={"target_db": -3.0},
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 31: P8 — Super-gentle compressor + tiny makeup + limiter
+        Variant(
+            name="level_p8_compressor",
+            number=31,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="compressor_limiter",
+                    enabled=True,
+                    step_type="compressor_limiter",
+                    config=None,
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 32: P9 — Super-gentle dynaudnorm (ultra conservative) + limiter
+        Variant(
+            name="level_p9_dynaudnorm",
+            number=32,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="dynaudnorm_conservative",
+                    enabled=True,
+                    step_type="dynaudnorm_conservative",
+                    config=None,
+                ),
+            ],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+            ),
+        ),
+        # Variant 33: Same as variant 2 but with word_timestamps_present=True
+        Variant(
+            name="baseline_no_vad_word_timestamps_present",
+            number=33,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_no_vad_baseline_config(),
+                    config.set("word_timestamps_present", True),
+                    config,
+                )[2]
+            )(),
         ),
     ]
 
@@ -387,8 +576,23 @@ def get_builtin_variants() -> list[Variant]:
     all_variants = _get_all_variants()
     # Only return active variants for batch jobs:
     # Variants 2, 5: baseline_no_vad, diagnostic/config tuning
-    # Variants 12-21: Hybrid variants (2 + 5 + 21 combinations with more decoding power and gentler gates)
-    active_variant_numbers = {2, 5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
+    # Variants 12-21: Decode quality and silence guard variants
+    active_variant_numbers = {
+        2,
+        5,
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31,
+        32,
+        33,
+    }
     return [v for v in all_variants if v.number in active_variant_numbers]
 
 
@@ -415,7 +619,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-22)
+        number: Variant number (1-33)
 
     Returns:
         Variant instance or None if not found
