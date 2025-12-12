@@ -250,6 +250,8 @@ class TranscriptionProcessor:
         )
         self._move = move_fn
         self._output_base_dir: Path | None = None  # For multi-variant: base dir for outputs
+        self._variant_number: int | None = None  # For multi-variant: variant number for filename prefix
+        self._variant_name: str | None = None  # For multi-variant: variant name for filename prefix
 
         # Create subdirectories for processed and failed files
         self.processed_folder = self.input_folder / PROCESSED_FOLDER_NAME
@@ -343,6 +345,11 @@ class TranscriptionProcessor:
                     )
                     output_dir = self._output_base_dir
                     base_name = file_path_obj.stem
+
+                # Add variant prefix if in multi-variant mode
+                if self._variant_number is not None:
+                    variant_prefix = f"variant_{self._variant_number:03d}_{self._variant_name}_"
+                    base_name = f"{variant_prefix}{base_name}"
 
                 if self.output_format == "both":
                     output_path = output_dir / f"{base_name}.txt"
