@@ -130,7 +130,6 @@ class FileMetricRecord:
     # Audio inspection
     input_channels: int | None = None
     input_sample_rate: int | None = None
-    input_bit_depth: int | None = None
     input_format: str | None = None
 
     # Downmix/resample parameters used
@@ -374,7 +373,6 @@ class TranscriptionDatabase:
                     -- Audio inspection
                     input_channels INTEGER,
                     input_sample_rate INTEGER,
-                    input_bit_depth INTEGER,
                     input_format VARCHAR,
 
                     -- Downmix/resample parameters used
@@ -760,7 +758,7 @@ class TranscriptionDatabase:
                     audio_duration, total_processing_time, transcribe_duration, preprocess_duration, speed_ratio,
                     preprocess_enabled, preprocess_profile, target_sample_rate, target_channels,
                     preprocess_snr_before, preprocess_snr_after, rnnoise_model, rnnoise_mix,
-                    input_channels, input_sample_rate, input_bit_depth, input_format,
+                    input_channels, input_sample_rate, input_format,
                     volume_adjustment_db, resampler, sample_format,
                     loudnorm_preset, loudnorm_target_i, loudnorm_target_tp, loudnorm_target_lra, loudnorm_backend,
                     denoise_method, denoise_library,
@@ -823,7 +821,6 @@ class TranscriptionDatabase:
                     record.rnnoise_mix,
                     record.input_channels,
                     record.input_sample_rate,
-                    record.input_bit_depth,
                     record.input_format,
                     record.volume_adjustment_db,
                     record.resampler,
