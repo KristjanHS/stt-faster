@@ -211,6 +211,7 @@ class TranscriptionMetrics:
     # Segment statistics
     segment_count: int | None = None
     no_speech_skips_count: int | None = None
+    no_speech_skip_windows: list[dict[str, Any]] | None = None
 
 
 def _get_estonian_model_path(
@@ -370,6 +371,23 @@ def segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     if avg_logprob is not None:
         data["avg_logprob"] = float(avg_logprob)
 
+    # Include word timestamps if available
+    words = getattr(segment, "words", None)
+    if words is not None:
+        word_list: list[Dict[str, Any]] = []
+        for word in words:
+            word_data: Dict[str, Any] = {
+                "word": getattr(word, "word", ""),
+                "start": getattr(word, "start", None),
+                "end": getattr(word, "end", None),
+            }
+            # Remove None values
+            word_data = {k: v for k, v in word_data.items() if v is not None}
+            if word_data:
+                word_list.append(word_data)
+        if word_list:
+            data["words"] = word_list
+
     cleaned = {key: value for key, value in data.items() if value is not None}
     return _round_floats(cleaned)
 
@@ -506,6 +524,7 @@ def transcribe(
         audio_processed = 0.0
         last_progress_log = transcribe_start
         no_speech_skips = 0
+        no_speech_skip_windows: list[Dict[str, Any]] = []
 
         # Track segments that would have been skipped due to no_speech_threshold
         no_speech_threshold = transcription_config.no_speech_threshold
@@ -514,14 +533,31 @@ def transcribe(
         for segment in segments:
             segment_payloads.append(segment_to_payload(segment))
 
-            # Count segments that would have been skipped (no_speech_prob > threshold AND avg_logprob <= threshold)
+            # Track segments that match skip criteria
+            # (no_speech_prob > threshold AND avg_logprob <= threshold)
+            # Note: These are segments that passed but match skip criteria.
+            # Truly skipped windows don't appear in output.
             no_speech_prob = getattr(segment, "no_speech_prob", None)
             avg_logprob = getattr(segment, "avg_logprob", None)
+            seg_start = getattr(segment, "start", None)
+            seg_end = getattr(segment, "end", None)
+
             if no_speech_prob is not None and avg_logprob is not None:
                 no_speech_val = float(no_speech_prob)
                 avg_logprob_val = float(avg_logprob)
                 if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
                     no_speech_skips += 1
+                    # Add to debug list
+                    skip_window = {
+                        "start": float(seg_start) if seg_start is not None else None,
+                        "end": float(seg_end) if seg_end is not None else None,
+                        "no_speech_prob": no_speech_val,
+                        "avg_logprob": avg_logprob_val,
+                    }
+                    # Remove None values
+                    skip_window = {k: v for k, v in skip_window.items() if v is not None}
+                    if skip_window:
+                        no_speech_skip_windows.append(skip_window)
 
             end_time = getattr(segment, "end", None)
             if end_time is not None:
@@ -657,10 +693,20 @@ def transcribe(
             float_precision=FLOAT_PRECISION,
             # Segment statistics
             segment_count=len(segment_payloads),
-            no_speech_skips_count=no_speech_skips if no_speech_skips > 0 else None,
+            no_speech_skips_count=no_speech_skips,  # Always record, even if 0
+            no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
         )
         if metrics_collector:
             metrics_collector(metrics_payload)
+
+        # Add metrics to payload JSON for report generation
+        metrics_dict: Dict[str, Any] = {
+            "segment_count": metrics_payload.segment_count,
+            "no_speech_skips_count": metrics_payload.no_speech_skips_count,
+        }
+        if metrics_payload.no_speech_skip_windows:
+            metrics_dict["no_speech_skip_windows"] = metrics_payload.no_speech_skip_windows
+        payload["metrics"] = metrics_dict
 
         cleaned = {key: value for key, value in payload.items() if value is not None}
         return _round_floats(cleaned)
