@@ -14,7 +14,7 @@
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
-.PHONY: pip-audit semgrep actionlint
+.PHONY: pip-audit semgrep actionlint bandit ci-bandit detect-secrets ci-detect-secrets
 # CI helpers and Git
 .PHONY: uv-sync-test pre-push
 
@@ -73,6 +73,10 @@ help:
 	@echo "  pip-audit          - Export from uv.lock and audit prod/dev+test deps"
 	@echo "  semgrep      - Run Semgrep locally via uvx (no metrics)"
 	@echo "  actionlint         - Lint GitHub workflows using actionlint in Docker"
+	@echo "  bandit             - Run Bandit security scan locally (direct)"
+	@echo "  ci-bandit          - Run Bandit via act (local CI emulation)"
+	@echo "  detect-secrets     - Run detect-secrets scan locally (direct)"
+	@echo "  ci-detect-secrets  - Run detect-secrets via act (local CI emulation)"
 	@echo ""
 	@echo "  -- CI helpers & Git --"
 	@echo "  uv-sync-test       - uv sync test group (frozen) + pip check"
@@ -315,6 +319,75 @@ semgrep:
 		echo "uv not found. Install uv: https://astral.sh/uv"; \
 		exit 1; \
 	fi
+
+# Run Bandit security scan locally (direct execution, fallback if act unavailable)
+# This mirrors the CI behavior: scans backend/scripts, excludes tests, uses pyproject.toml config
+# NOTE: This does NOT use baseline - it will report ALL issues (same as CI)
+# For baseline mode (optional): bandit -r -c pyproject.toml -b .bandit.baseline.json -x tests backend scripts
+bandit:
+	@echo ">> Running Bandit security scan (local, no baseline - matches CI behavior)..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run bandit -r -c pyproject.toml -x tests backend scripts; \
+	else \
+		if [ -x .venv/bin/bandit ]; then \
+			.venv/bin/bandit -r -c pyproject.toml -x tests backend scripts; \
+		else \
+			echo "uv not found and .venv/bin/bandit not available."; \
+			echo "Install uv: https://astral.sh/uv or run: uv sync --group dev"; \
+			exit 1; \
+		fi; \
+	fi
+
+# Run Bandit via act (local CI emulation - preferred method)
+# This runs the same GitHub Actions workflow locally, ensuring identical behavior
+ci-bandit:
+	@echo ">> Running Bandit via act (local CI emulation)..."
+	@if ! command -v act >/dev/null 2>&1; then \
+		echo "⚠️  act not found. Install with: make install-act"; \
+		echo "   Or use direct local scan: make bandit"; \
+		exit 1; \
+	fi
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠️  Docker is not running. Start Docker Desktop to use act."; \
+		echo "   Or use direct local scan: make bandit"; \
+		exit 1; \
+	fi
+	@echo "Running: act -j bandit -W .github/workflows/security.yml"
+	@act -j bandit -W .github/workflows/security.yml
+
+# Run detect-secrets security scan locally (direct execution, fallback if act unavailable)
+# This mirrors the CI behavior: uses pre-commit hook with baseline file
+# The baseline file (.secrets.baseline) must be kept in sync with the codebase
+detect-secrets:
+	@echo ">> Running detect-secrets scan (local, uses baseline)..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run pre-commit run detect-secrets --all-files; \
+	else \
+		if [ -x .venv/bin/pre-commit ]; then \
+			.venv/bin/pre-commit run detect-secrets --all-files; \
+		else \
+			echo "uv not found and .venv/bin/pre-commit not available."; \
+			echo "Install uv: https://astral.sh/uv or run: uv sync --group dev"; \
+			exit 1; \
+		fi; \
+	fi
+
+# Run detect-secrets via act (local CI emulation - preferred method)
+# This runs the same GitHub Actions workflow locally, ensuring identical behavior
+ci-detect-secrets:
+	@echo ">> Running detect-secrets via act (local CI emulation)..."
+	@if ! command -v act >/dev/null 2>&1; then \
+		echo "⚠️  act not found. Install with: make install-act"; \
+		echo "   Or use direct local scan: make detect-secrets"; \
+		exit 1; \
+	fi
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠️  Docker is not running. Start Docker Desktop to use act."; \
+		echo "   Or use direct local scan: make detect-secrets"; \
+		exit 1; \
+	fi
+	@echo "Running: act -j detect-secrets -W .github/workflows/security.yml"
+	@act -j detect-secrets -W .github/workflows/security.yml
 
 # --- Production Docker (for end users) ---
 .PHONY: docker-build-prod docker-run-prod

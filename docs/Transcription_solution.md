@@ -49,11 +49,11 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 | # | Name | Preprocessing | Transcription | Description |
 |---|------|----------------|---------------|-------------|
 | 1 | `no_preprocessing` | None | Project defaults | Baseline with project config |
-| 2 | `industry_defaults` | None | Industry defaults | Baseline with industry config |
+| 2 | `noprep_minimal` | None | Minimal defaults | Baseline with minimal config |
 | 3 | `ffmpeg_only` | FFmpeg pipeline | Project defaults | Normalization only |
 | 4 | `denoise_only` | Denoise light | Project defaults | Denoising only |
-| 5 | `ffmpeg_industry_defaults` | FFmpeg pipeline | Industry defaults | Normalization + industry config |
-| 6 | `full_industry_defaults` | FFmpeg + denoise | Industry defaults | Full preprocessing + industry |
+| 5 | `ffmpeg_minimal` | FFmpeg pipeline | Minimal defaults | Normalization + minimal config |
+| 6 | `full_minimal` | FFmpeg + denoise | Minimal defaults | Full preprocessing + minimal |
 | 7 | `noprep_noparamtrans` | None | Minimal | **No preprocessing, minimal params (no VAD)** |
 | 8 | `normonly_noparamtrans` | FFmpeg pipeline | Minimal | Normalization + minimal params |
 | 9 | `onlyden_noparamtrans` | Denoise light | Minimal | Denoising + minimal params |
