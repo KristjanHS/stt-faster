@@ -661,6 +661,11 @@ def transcribe(
             # SNR estimation
             snr_estimation_method="estimate_snr_db",  # Hardcoded method
             # Transcription parameters
+            # Note: This function always passes all parameters from transcription_config to model.transcribe(),
+            # so all values are known and captured here. For baseline/minimal variants (see variants/executor.py),
+            # some parameters may be None because they weren't explicitly passed, and faster-whisper uses
+            # its own internal defaults (which we don't know). Those None values are correctly preserved
+            # in the database to indicate unknown library defaults rather than assumed config defaults.
             beam_size=transcription_config.beam_size,
             patience=transcription_config.patience,
             word_timestamps=transcription_config.word_timestamps,

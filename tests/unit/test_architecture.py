@@ -86,7 +86,11 @@ def test_scripts_are_thin_wrappers():
         # If a script has >200 lines of code, it might contain business logic
         # Exception: comparison/utility scripts that orchestrate multiple variants
         # are allowed to be longer as they need to be self-contained
-        excluded_scripts = {"compare_transcription_variants.py", "generate_variant_report.py"}
+        excluded_scripts = {
+            "compare_transcription_variants.py",
+            "generate_variant_report.py",
+            "check_parameter_completeness.py",  # Database checking utility script
+        }
         if script_file.name in excluded_scripts:
             # Allow up to 2000 lines for comparison/utility scripts
             assert len(lines) < 2000, (

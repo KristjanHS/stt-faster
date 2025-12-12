@@ -240,10 +240,12 @@ class TestVariantFiltering:
         assert len(filtered) == len(variants) - 1
 
         # Verify all variants (including inactive) are still accessible by number
-        # Test up to variant 26 (current max)
-        for i in range(1, 27):
-            variant = get_variant_by_number(i)
-            assert variant is not None, f"Variant {i} should be accessible by number"
+        # Test that all variants in the registry are accessible by their number
+        all_variants = get_all_variants()
+        for variant in all_variants:
+            retrieved = get_variant_by_number(variant.number)
+            assert retrieved is not None, f"Variant {variant.number} should be accessible by number"
+            assert retrieved.number == variant.number, "Retrieved variant should have correct number"
 
 
 class TestVariantDataStructures:
