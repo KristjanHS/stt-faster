@@ -1,7 +1,10 @@
 """Unit tests for transcription processor."""
 
+import logging
 import shutil
 from pathlib import Path
+
+import pytest
 
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
@@ -93,12 +96,26 @@ class RecordingTranscribe:
         self.metrics = metrics
 
     def __call__(
-        self, file_path: str, json_path: str, preset: str, language: str | None = None
+        self, file_path: str, output_path: str, preset: str, language: str | None = None
     ) -> TranscriptionMetrics | None:
-        self.calls.append((file_path, json_path, preset, language))
+        self.calls.append((file_path, output_path, preset, language))
         if self.should_fail:
             raise RuntimeError("Test error")
-        Path(json_path).write_text("{}")
+
+        output_path_obj = Path(output_path)
+        # Handle "both" format: if output_path is .txt, also create .json
+        if output_path_obj.suffix == ".txt":
+            # Create both .txt and .json files
+            output_path_obj.write_text("Test transcription text\n")
+            json_path = output_path_obj.with_suffix(".json")
+            json_path.write_text("{}")
+        elif output_path_obj.suffix == ".json":
+            # Only JSON format
+            output_path_obj.write_text("{}")
+        else:
+            # Default: write to the path as-is
+            output_path_obj.write_text("{}")
+
         return self.metrics or self._default_metrics(file_path, preset, language)
 
     @staticmethod
@@ -171,8 +188,13 @@ def test_process_file_success(
 def test_process_file_failure(
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """Test handling of transcription failure."""
+    """Test handling of transcription failure.
+
+    This test intentionally triggers a transcription error to verify error handling.
+    Expected ERROR logs are captured and verified, not suppressed.
+    """
     # Create test audio file
     audio_file = temp_folder / "audio1.wav"
     audio_file.touch()
@@ -183,8 +205,15 @@ def test_process_file_failure(
     # Make transcription fail
     transcribe = RecordingTranscribe(should_fail=True)
 
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
-    result = processor.process_file(str(audio_file))
+    # Capture logs at ERROR level to verify expected error logging
+    with caplog.at_level(logging.ERROR, logger="backend.processor"):
+        processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+        result = processor.process_file(str(audio_file))
+
+    # Verify expected error was logged (this is intentional for this test)
+    assert any("Failed to process" in record.message for record in caplog.records), (
+        "Expected ERROR log for transcription failure (this is intentional)"
+    )
 
     assert result.status == "failed"
     assert result.metrics is None
@@ -200,15 +229,30 @@ def test_process_file_failure(
     assert (processor.failed_folder / "audio1.wav").exists()
 
 
-def test_process_file_not_found(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
-    """Test processing a non-existent file."""
+def test_process_file_not_found(
+    temp_db: TranscriptionDatabase,
+    temp_folder: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Test processing a non-existent file.
+
+    This test intentionally processes a missing file to verify error handling.
+    Expected ERROR logs are captured and verified, not suppressed.
+    """
     audio_file = temp_folder / "nonexistent.wav"
 
     # Register file in database (but don't create it)
     temp_db.add_file(str(audio_file), "pending")
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
-    result = processor.process_file(str(audio_file))
+    # Capture logs at ERROR level to verify expected error logging
+    with caplog.at_level(logging.ERROR, logger="backend.processor"):
+        processor = TranscriptionProcessor(temp_db, temp_folder)
+        result = processor.process_file(str(audio_file))
+
+    # Verify expected error was logged (this is intentional for this test)
+    assert any("File not found" in record.message for record in caplog.records), (
+        "Expected ERROR log for missing file (this is intentional)"
+    )
 
     assert result.status == "failed"
     assert result.error_message is not None
@@ -271,11 +315,15 @@ def test_process_folder(
 def test_process_file_move_failure_keeps_pending_status(
     temp_db: TranscriptionDatabase,
     temp_folder: Path,
+    caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test that if file move fails, database status is NOT updated to completed.
 
     This is a regression test for the bug where database status was updated
     before moving files, causing orphaned files that won't be reprocessed.
+
+    This test intentionally triggers file move failures to verify error handling.
+    Expected ERROR and WARNING logs are captured and verified, not suppressed.
     """
     # Create test audio file
     audio_file = temp_folder / "audio1.wav"
@@ -288,8 +336,18 @@ def test_process_file_move_failure_keeps_pending_status(
     transcribe = RecordingTranscribe()
     failing_move = RecordingMover(should_fail=True)
 
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, move_fn=failing_move)
-    result = processor.process_file(str(audio_file))
+    # Capture logs at WARNING and ERROR levels to verify expected error logging
+    with caplog.at_level(logging.WARNING, logger="backend.processor"):
+        processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, move_fn=failing_move)
+        result = processor.process_file(str(audio_file))
+
+    # Verify expected errors/warnings were logged (these are intentional for this test)
+    assert any("Failed to process" in record.message for record in caplog.records), (
+        "Expected ERROR log for move failure (this is intentional)"
+    )
+    assert any("Failed to move file" in record.message for record in caplog.records), (
+        "Expected WARNING log for move failure (this is intentional)"
+    )
 
     # Processing should fail
     assert result.status == "failed"
@@ -303,3 +361,91 @@ def test_process_file_move_failure_keeps_pending_status(
 
     # Verify file is still in original location (not moved)
     assert audio_file.exists()
+
+
+def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
+    temp_db: TranscriptionDatabase,
+    temp_folder: Path,
+) -> None:
+    """Test that files in subdirectories preserve directory structure when _output_base_dir is set.
+
+    This prevents collisions when files with the same name exist in different subdirectories.
+    """
+    # Create subdirectories with files having the same name
+    subdir1 = temp_folder / "subdir1"
+    subdir2 = temp_folder / "subdir2"
+    subdir1.mkdir()
+    subdir2.mkdir()
+
+    audio1 = subdir1 / "audio.wav"
+    audio2 = subdir2 / "audio.wav"
+    audio1.touch()
+    audio2.touch()
+
+    # Register files
+    temp_db.add_file(str(audio1), "pending")
+    temp_db.add_file(str(audio2), "pending")
+
+    # Create output base directory (simulating multi-variant mode)
+    output_base = temp_folder / "outputs"
+    output_base.mkdir()
+
+    transcribe = RecordingTranscribe()
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, disable_file_moving=True)
+    processor._output_base_dir = output_base
+
+    # Process both files
+    result1 = processor.process_file(str(audio1))
+    result2 = processor.process_file(str(audio2))
+
+    assert result1.status == "completed"
+    assert result2.status == "completed"
+
+    # Verify outputs are in separate subdirectories, preventing collision
+    output1_txt = output_base / "subdir1" / "audio.txt"
+    output1_json = output_base / "subdir1" / "audio.json"
+    output2_txt = output_base / "subdir2" / "audio.txt"
+    output2_json = output_base / "subdir2" / "audio.json"
+
+    assert output1_txt.exists(), f"Expected {output1_txt} to exist"
+    assert output1_json.exists(), f"Expected {output1_json} to exist"
+    assert output2_txt.exists(), f"Expected {output2_txt} to exist"
+    assert output2_json.exists(), f"Expected {output2_json} to exist"
+
+    # Verify they are different files (not overwritten)
+    assert output1_txt != output2_txt
+    assert output1_json != output2_json
+
+
+def test_process_file_root_level_file_with_output_base_dir(
+    temp_db: TranscriptionDatabase,
+    temp_folder: Path,
+) -> None:
+    """Test that files at root level work correctly with _output_base_dir (no subdirectory created)."""
+    # Create file at root level
+    audio_file = temp_folder / "audio.wav"
+    audio_file.touch()
+
+    temp_db.add_file(str(audio_file), "pending")
+
+    output_base = temp_folder / "outputs"
+    output_base.mkdir()
+
+    transcribe = RecordingTranscribe()
+    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, disable_file_moving=True)
+    processor._output_base_dir = output_base
+
+    result = processor.process_file(str(audio_file))
+
+    assert result.status == "completed"
+
+    # Verify output is directly in output_base, not in a subdirectory
+    output_txt = output_base / "audio.txt"
+    output_json = output_base / "audio.json"
+
+    assert output_txt.exists(), f"Expected {output_txt} to exist"
+    assert output_json.exists(), f"Expected {output_json} to exist"
+    # Verify no unnecessary subdirectory was created (outputs should be directly in output_base)
+    # Check that there are no subdirectories in output_base (only files)
+    subdirs = [d for d in output_base.iterdir() if d.is_dir()]
+    assert len(subdirs) == 0, f"Expected no subdirectories in {output_base}, found: {subdirs}"

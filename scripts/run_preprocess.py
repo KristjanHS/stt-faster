@@ -28,7 +28,7 @@ def main() -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy(result.output_path, dest)
 
-    steps = []
+    steps: list[str] = []
     for m in result.metrics.steps:
         step_str = f"{m.name} {m.duration:.2f}s ({m.backend})"
         if m.metadata and "lra_used" in m.metadata:

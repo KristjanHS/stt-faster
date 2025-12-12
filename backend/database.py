@@ -32,6 +32,19 @@ class RunRecord:
     target_sample_rate: int | None
     target_channels: int | None
     loudnorm_preset: str | None = None
+    # Preprocessing parameters used (from actual processing)
+    volume_adjustment_db: float | None = None
+    resampler: str | None = None
+    sample_format: str | None = None
+    loudnorm_target_i: float | None = None
+    loudnorm_target_tp: float | None = None
+    loudnorm_target_lra: float | None = None
+    loudnorm_backend: str | None = None
+    denoise_method: str | None = None
+    denoise_library: str | None = None
+    rnnoise_model: str | None = None
+    rnnoise_mix: float | None = None
+    snr_estimation_method: str | None = None
 
     # Model Config
     model_id: str | None = None
@@ -39,6 +52,10 @@ class RunRecord:
     compute_type: str | None = None
 
     # Transcription Config
+    # Note: For baseline/minimal variants, some parameters may be None because they weren't
+    # explicitly passed to model.transcribe(). In those cases, faster-whisper uses its own
+    # internal defaults, which we don't know. Setting these to None is more honest than
+    # using TranscriptionConfig defaults that weren't actually used.
     beam_size: int | None = None
     patience: float | None = None
     word_timestamps: bool | None = None
@@ -136,6 +153,10 @@ class FileMetricRecord:
     snr_estimation_method: str | None = None
 
     # Transcription parameters used
+    # Note: For baseline/minimal variants, some parameters may be None because they weren't
+    # explicitly passed to model.transcribe(). In those cases, faster-whisper uses its own
+    # internal defaults, which we don't know. Setting these to None is more honest than
+    # using TranscriptionConfig defaults that weren't actually used.
     beam_size: int | None = None
     patience: float | None = None
     word_timestamps: bool | None = None
@@ -261,6 +282,19 @@ class TranscriptionDatabase:
                     target_sample_rate INTEGER,
                     target_channels INTEGER,
                     loudnorm_preset VARCHAR,
+                    -- Preprocessing parameters used
+                    volume_adjustment_db DOUBLE,
+                    resampler VARCHAR,
+                    sample_format VARCHAR,
+                    loudnorm_target_i DOUBLE,
+                    loudnorm_target_tp DOUBLE,
+                    loudnorm_target_lra DOUBLE,
+                    loudnorm_backend VARCHAR,
+                    denoise_method VARCHAR,
+                    denoise_library VARCHAR,
+                    rnnoise_model VARCHAR,
+                    rnnoise_mix DOUBLE,
+                    snr_estimation_method VARCHAR,
 
                     model_id VARCHAR,
                     device VARCHAR,
@@ -528,6 +562,36 @@ class TranscriptionDatabase:
                     LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
                     # Use hardcoded SQL statements matching existing migration pattern
                     # This avoids any potential SQL injection risks
+                    if column_type == "DOUBLE":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
+                    elif column_type == "VARCHAR":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
+                    elif column_type == "INTEGER":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
+                    elif column_type == "BOOLEAN":
+                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
+                    else:
+                        LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+
+            # Add preprocessing parameter columns to runs table
+            preprocessing_columns_to_add = {
+                "volume_adjustment_db": "DOUBLE",
+                "resampler": "VARCHAR",
+                "sample_format": "VARCHAR",
+                "loudnorm_target_i": "DOUBLE",
+                "loudnorm_target_tp": "DOUBLE",
+                "loudnorm_target_lra": "DOUBLE",
+                "loudnorm_backend": "VARCHAR",
+                "denoise_method": "VARCHAR",
+                "denoise_library": "VARCHAR",
+                "rnnoise_model": "VARCHAR",
+                "rnnoise_mix": "DOUBLE",
+                "snr_estimation_method": "VARCHAR",
+            }
+
+            for column_name, column_type in preprocessing_columns_to_add.items():
+                if column_name not in runs_existing_columns:
+                    LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
                     if column_type == "DOUBLE":
                         self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
                     elif column_type == "VARCHAR":
@@ -826,6 +890,9 @@ class TranscriptionDatabase:
                     recorded_at, input_folder,
                     preset, language,
                     preprocess_enabled, preprocess_profile, target_sample_rate, target_channels, loudnorm_preset,
+                    volume_adjustment_db, resampler, sample_format,
+                    loudnorm_target_i, loudnorm_target_tp, loudnorm_target_lra, loudnorm_backend,
+                    denoise_method, denoise_library, rnnoise_model, rnnoise_mix, snr_estimation_method,
                     model_id, device, compute_type,
                     beam_size, patience, word_timestamps, task, chunk_length,
                     vad_filter, vad_threshold, vad_min_speech_duration_ms, vad_max_speech_duration_s,
@@ -843,6 +910,9 @@ class TranscriptionDatabase:
                 ) VALUES (
                     ?, ?,
                     ?, ?,
+                    ?, ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?, ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?, ?, ?,
@@ -867,6 +937,18 @@ class TranscriptionDatabase:
                     record.target_sample_rate,
                     record.target_channels,
                     record.loudnorm_preset,
+                    record.volume_adjustment_db,
+                    record.resampler,
+                    record.sample_format,
+                    record.loudnorm_target_i,
+                    record.loudnorm_target_tp,
+                    record.loudnorm_target_lra,
+                    record.loudnorm_backend,
+                    record.denoise_method,
+                    record.denoise_library,
+                    record.rnnoise_model,
+                    record.rnnoise_mix,
+                    record.snr_estimation_method,
                     record.model_id,
                     record.device,
                     record.compute_type,

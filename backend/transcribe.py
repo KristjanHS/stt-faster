@@ -26,6 +26,7 @@ python transcribe.py
 import json
 import logging
 import os
+import re
 import threading
 import time
 from collections.abc import Iterable
@@ -207,6 +208,15 @@ class TranscriptionMetrics:
     output_format: str | None = None
     float_precision: int | None = None
 
+    # Segment statistics
+    segment_count: int | None = None
+    no_speech_skips_count: int | None = None  # Legacy field - use segments_matching_no_speech_rule_count instead
+    no_speech_skip_windows: list[dict[str, Any]] | None = None  # Legacy field
+    # Note: segments_matching_no_speech_rule_count is NOT a skip count - it counts output segments
+    # that match the heuristic. Truly skipped windows produce no segments.
+    segments_matching_no_speech_rule_count: int | None = None
+    segments_matching_no_speech_rule_windows: list[dict[str, Any]] | None = None
+
 
 def _get_estonian_model_path(
     model_id: str,
@@ -227,10 +237,20 @@ def _get_estonian_model_path(
 
     Raises:
         ModelNotFoundError: If CT2 folder doesn't exist in model
+        ValueError: If model_id format is invalid or potentially unsafe
     """
+    # Validate model_id format to ensure it's a safe HuggingFace model ID
+    # Must contain "/" (org/model format) and only alphanumeric, dash, underscore
+    if not model_id or "/" not in model_id:
+        raise ValueError(f"Invalid HuggingFace model_id format: {model_id}")
+    # Ensure model_id only contains safe characters (alphanumeric, dash, underscore, slash)
+    if not re.match(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$", model_id):
+        raise ValueError(f"Unsafe model_id format detected: {model_id}")
+
     # Only download ct2 folder, skip transformers/native formats
     # Disable progress bar to avoid duplicate "Download complete" messages
-    model_path = downloader(model_id, allow_patterns=["ct2/*"], tqdm_class=_NoOpTqdm)  # nosec B615
+    # Note: huggingface_hub uses HTTPS by default, ensuring secure downloads
+    model_path = downloader(model_id, allow_patterns=["ct2/*"], tqdm_class=_NoOpTqdm)
     ct2_path = path_cls(model_path) / "ct2"
     if not ct2_path.exists():
         raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
@@ -245,9 +265,21 @@ def _get_cached_model_path(model_id: str, *, downloader: Callable[..., str] = sn
 
     Returns:
         Path to the cached model directory
+
+    Raises:
+        ValueError: If model_id format is invalid or potentially unsafe
     """
+    # Validate model_id format to ensure it's a safe HuggingFace model ID
+    # Must contain "/" (org/model format) and only alphanumeric, dash, underscore
+    if not model_id or "/" not in model_id:
+        raise ValueError(f"Invalid HuggingFace model_id format: {model_id}")
+    # Ensure model_id only contains safe characters (alphanumeric, dash, underscore, slash)
+    if not re.match(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$", model_id):
+        raise ValueError(f"Unsafe model_id format detected: {model_id}")
+
     # Disable progress bar to avoid duplicate "Download complete" messages
-    return downloader(model_id, tqdm_class=_NoOpTqdm)  # nosec B615
+    # Note: huggingface_hub uses HTTPS by default, ensuring secure downloads
+    return downloader(model_id, tqdm_class=_NoOpTqdm)
 
 
 def _resolve_model_path(
@@ -333,6 +365,32 @@ def segment_to_payload(segment: "Segment") -> Dict[str, Any]:
     speaker = getattr(segment, "speaker", None)
     if speaker is not None:
         data["speaker"] = speaker
+
+    # Include no_speech_prob and avg_logprob if available (from faster-whisper segments)
+    no_speech_prob = getattr(segment, "no_speech_prob", None)
+    if no_speech_prob is not None:
+        data["no_speech_prob"] = float(no_speech_prob)
+
+    avg_logprob = getattr(segment, "avg_logprob", None)
+    if avg_logprob is not None:
+        data["avg_logprob"] = float(avg_logprob)
+
+    # Include word timestamps if available
+    words = getattr(segment, "words", None)
+    if words is not None:
+        word_list: list[Dict[str, Any]] = []
+        for word in words:
+            word_data: Dict[str, Any] = {
+                "word": getattr(word, "word", ""),
+                "start": getattr(word, "start", None),
+                "end": getattr(word, "end", None),
+            }
+            # Remove None values
+            word_data = {k: v for k, v in word_data.items() if v is not None}
+            if word_data:
+                word_list.append(word_data)
+        if word_list:
+            data["words"] = word_list
 
     cleaned = {key: value for key, value in data.items() if value is not None}
     return _round_floats(cleaned)
@@ -469,9 +527,41 @@ def transcribe(
         segment_payloads: list[Dict[str, Any]] = []
         audio_processed = 0.0
         last_progress_log = transcribe_start
+        no_speech_skips = 0
+        no_speech_skip_windows: list[Dict[str, Any]] = []
+
+        # Track segments that would have been skipped due to no_speech_threshold
+        no_speech_threshold = transcription_config.no_speech_threshold
+        logprob_threshold = transcription_config.logprob_threshold
 
         for segment in segments:
             segment_payloads.append(segment_to_payload(segment))
+
+            # Track segments that match skip criteria
+            # (no_speech_prob > threshold AND avg_logprob <= threshold)
+            # Note: These are segments that passed but match skip criteria.
+            # Truly skipped windows don't appear in output.
+            no_speech_prob = getattr(segment, "no_speech_prob", None)
+            avg_logprob = getattr(segment, "avg_logprob", None)
+            seg_start = getattr(segment, "start", None)
+            seg_end = getattr(segment, "end", None)
+
+            if no_speech_prob is not None and avg_logprob is not None:
+                no_speech_val = float(no_speech_prob)
+                avg_logprob_val = float(avg_logprob)
+                if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
+                    no_speech_skips += 1
+                    # Add to debug list
+                    skip_window = {
+                        "start": float(seg_start) if seg_start is not None else None,
+                        "end": float(seg_end) if seg_end is not None else None,
+                        "no_speech_prob": no_speech_val,
+                        "avg_logprob": avg_logprob_val,
+                    }
+                    # Remove None values
+                    skip_window = {k: v for k, v in skip_window.items() if v is not None}
+                    if skip_window:
+                        no_speech_skip_windows.append(skip_window)
 
             end_time = getattr(segment, "end", None)
             if end_time is not None:
@@ -571,6 +661,11 @@ def transcribe(
             # SNR estimation
             snr_estimation_method="estimate_snr_db",  # Hardcoded method
             # Transcription parameters
+            # Note: This function always passes all parameters from transcription_config to model.transcribe(),
+            # so all values are known and captured here. For baseline/minimal variants (see variants/executor.py),
+            # some parameters may be None because they weren't explicitly passed, and faster-whisper uses
+            # its own internal defaults (which we don't know). Those None values are correctly preserved
+            # in the database to indicate unknown library defaults rather than assumed config defaults.
             beam_size=transcription_config.beam_size,
             patience=transcription_config.patience,
             word_timestamps=transcription_config.word_timestamps,
@@ -605,9 +700,22 @@ def transcribe(
             # Output parameters (these will come from processor context in future enhancement)
             output_format=None,  # Not available at this level, will be set by processor
             float_precision=FLOAT_PRECISION,
+            # Segment statistics
+            segment_count=len(segment_payloads),
+            no_speech_skips_count=no_speech_skips,  # Always record, even if 0
+            no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
         )
         if metrics_collector:
             metrics_collector(metrics_payload)
+
+        # Add metrics to payload JSON for report generation
+        metrics_dict: Dict[str, Any] = {
+            "segment_count": metrics_payload.segment_count,
+            "no_speech_skips_count": metrics_payload.no_speech_skips_count,
+        }
+        if metrics_payload.no_speech_skip_windows:
+            metrics_dict["no_speech_skip_windows"] = metrics_payload.no_speech_skip_windows
+        payload["metrics"] = metrics_dict
 
         cleaned = {key: value for key, value in payload.items() if value is not None}
         return _round_floats(cleaned)

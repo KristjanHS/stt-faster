@@ -11,10 +11,12 @@
 .PHONY: preprocess-audio
 # Database
 .PHONY: show-run show-runs
+# Reports
+.PHONY: variant-report
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
-.PHONY: pip-audit semgrep actionlint
+.PHONY: pip-audit semgrep actionlint bandit ci-bandit detect-secrets ci-detect-secrets
 # CI helpers and Git
 .PHONY: uv-sync-test pre-push
 
@@ -61,6 +63,9 @@ help:
 	@echo "  show-run          - Show run information (RUN_ID=... to specify, or shows latest)"
 	@echo "  show-runs         - Show last 20 runs in compact format"
 	@echo ""
+	@echo "  -- Reports --"
+	@echo "  variant-report    - Generate variant comparison report (VARIANTS_DIR=... optional, FAR_RANGE=... and SILENCE_RANGE=... optional)"
+	@echo ""
 	@echo "  -- Docker (Production) --"
 	@echo "  docker-build-prod    - Build production Docker image for end users"
 	@echo "  docker-run-prod      - Run production Docker container (shows help)"
@@ -73,6 +78,10 @@ help:
 	@echo "  pip-audit          - Export from uv.lock and audit prod/dev+test deps"
 	@echo "  semgrep      - Run Semgrep locally via uvx (no metrics)"
 	@echo "  actionlint         - Lint GitHub workflows using actionlint in Docker"
+	@echo "  bandit             - Run Bandit security scan locally (direct)"
+	@echo "  ci-bandit          - Run Bandit via act (local CI emulation)"
+	@echo "  detect-secrets     - Run detect-secrets scan locally (direct)"
+	@echo "  ci-detect-secrets  - Run detect-secrets via act (local CI emulation)"
 	@echo ""
 	@echo "  -- CI helpers & Git --"
 	@echo "  uv-sync-test       - uv sync test group (frozen) + pip check"
@@ -240,6 +249,31 @@ show-runs:
 	fi
 	.venv/bin/python scripts/db/show_recent_runs.py --limit 20 --compact
 
+# Generate variant comparison report
+# Optional parameters:
+#   VARIANTS_DIR - Path to timestamped folder (YYYY-MM-DDTHH-MM-SS) or parent directory (default: auto-detect latest in %USERPROFILE%\Downloads\transcribe\)
+#   FAR_RANGE - Time range for far speaker excerpt (format: start-end, default: "252-291")
+#   SILENCE_RANGE - Time range for silence excerpt (format: start-end, default: "19-61")
+#   VARIANTS - Comma-separated variant numbers to include (default: all from run_meta.json)
+variant-report:
+	@if [ ! -x .venv/bin/python ]; then \
+	  echo "Missing .venv/bin/python. Run ./run_uv.sh first."; \
+	  exit 1; \
+	fi
+	@set -euo pipefail; \
+	SCRIPT_ARGS=""; \
+	if [ -n "$${VARIANTS_DIR:-}" ]; then \
+	  SCRIPT_ARGS="$$SCRIPT_ARGS \"$$VARIANTS_DIR\""; \
+	fi; \
+	FAR_RANGE=$${FAR_RANGE:-252-291}; \
+	SILENCE_RANGE=$${SILENCE_RANGE:-19-61}; \
+	SCRIPT_ARGS="$$SCRIPT_ARGS --far-speaker-range $$FAR_RANGE"; \
+	SCRIPT_ARGS="$$SCRIPT_ARGS --silence-range $$SILENCE_RANGE"; \
+	if [ -n "$${VARIANTS:-}" ]; then \
+	  SCRIPT_ARGS="$$SCRIPT_ARGS --variants \"$$VARIANTS\""; \
+	fi; \
+	.venv/bin/python scripts/generate_variant_report.py $$SCRIPT_ARGS
+
 
 pyright:
 	@# Determine interpreter path: prefer .venv, then system python
@@ -315,6 +349,75 @@ semgrep:
 		echo "uv not found. Install uv: https://astral.sh/uv"; \
 		exit 1; \
 	fi
+
+# Run Bandit security scan locally (direct execution, fallback if act unavailable)
+# This mirrors the CI behavior: scans backend/scripts, excludes tests, uses pyproject.toml config
+# NOTE: This does NOT use baseline - it will report ALL issues (same as CI)
+# For baseline mode (optional): bandit -r -c pyproject.toml -b .bandit.baseline.json -x tests backend scripts
+bandit:
+	@echo ">> Running Bandit security scan (local, no baseline - matches CI behavior)..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run bandit -r -c pyproject.toml -x tests backend scripts; \
+	else \
+		if [ -x .venv/bin/bandit ]; then \
+			.venv/bin/bandit -r -c pyproject.toml -x tests backend scripts; \
+		else \
+			echo "uv not found and .venv/bin/bandit not available."; \
+			echo "Install uv: https://astral.sh/uv or run: uv sync --group dev"; \
+			exit 1; \
+		fi; \
+	fi
+
+# Run Bandit via act (local CI emulation - preferred method)
+# This runs the same GitHub Actions workflow locally, ensuring identical behavior
+ci-bandit:
+	@echo ">> Running Bandit via act (local CI emulation)..."
+	@if ! command -v act >/dev/null 2>&1; then \
+		echo "⚠️  act not found. Install with: make install-act"; \
+		echo "   Or use direct local scan: make bandit"; \
+		exit 1; \
+	fi
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠️  Docker is not running. Start Docker Desktop to use act."; \
+		echo "   Or use direct local scan: make bandit"; \
+		exit 1; \
+	fi
+	@echo "Running: act -j bandit -W .github/workflows/security.yml"
+	@act -j bandit -W .github/workflows/security.yml
+
+# Run detect-secrets security scan locally (direct execution, fallback if act unavailable)
+# This mirrors the CI behavior: uses pre-commit hook with baseline file
+# The baseline file (.secrets.baseline) must be kept in sync with the codebase
+detect-secrets:
+	@echo ">> Running detect-secrets scan (local, uses baseline)..."
+	@if command -v uv >/dev/null 2>&1; then \
+		uv run pre-commit run detect-secrets --all-files; \
+	else \
+		if [ -x .venv/bin/pre-commit ]; then \
+			.venv/bin/pre-commit run detect-secrets --all-files; \
+		else \
+			echo "uv not found and .venv/bin/pre-commit not available."; \
+			echo "Install uv: https://astral.sh/uv or run: uv sync --group dev"; \
+			exit 1; \
+		fi; \
+	fi
+
+# Run detect-secrets via act (local CI emulation - preferred method)
+# This runs the same GitHub Actions workflow locally, ensuring identical behavior
+ci-detect-secrets:
+	@echo ">> Running detect-secrets via act (local CI emulation)..."
+	@if ! command -v act >/dev/null 2>&1; then \
+		echo "⚠️  act not found. Install with: make install-act"; \
+		echo "   Or use direct local scan: make detect-secrets"; \
+		exit 1; \
+	fi
+	@if ! docker info >/dev/null 2>&1; then \
+		echo "⚠️  Docker is not running. Start Docker Desktop to use act."; \
+		echo "   Or use direct local scan: make detect-secrets"; \
+		exit 1; \
+	fi
+	@echo "Running: act -j detect-secrets -W .github/workflows/security.yml"
+	@act -j detect-secrets -W .github/workflows/security.yml
 
 # --- Production Docker (for end users) ---
 .PHONY: docker-build-prod docker-run-prod

@@ -4,40 +4,24 @@ This directory contains scripts to verify what transcription parameters each var
 
 ## Scripts
 
-### `verify_variant_7.py`
-
-Verifies that variant 7 uses the expected minimal parameters:
-- `beam_size: 5` (hardcoded)
-- `word_timestamps: False` (hardcoded)
-- `task: "transcribe"` (hardcoded)
-- All other parameters omitted (use faster-whisper defaults)
-
-**Usage:**
-```bash
-.venv/bin/python scripts/variant_checks/verify_variant_7.py
-```
-
-### `verify_variant_17.py`
-
-Verifies that variant 17 uses the base parameters plus the `no_speech_threshold` override:
-- `beam_size: 5` (hardcoded)
-- `word_timestamps: False` (hardcoded)
-- `task: "transcribe"` (hardcoded)
-- `no_speech_threshold: 0.5` (from override)
-- All other parameters omitted (use faster-whisper defaults)
-
-**Usage:**
-```bash
-.venv/bin/python scripts/variant_checks/verify_variant_17.py
-```
-
 ### `verify_all_variants.py`
 
-Verifies transcription parameters for all currently enabled variants (7, 17, 18, 19).
+Verifies transcription parameters for all currently enabled variants by actually executing each variant (with mocked model) to verify what parameters are passed to `model.transcribe()`.
+
+The script verifies:
+- Base minimal parameters: `beam_size: 5`, `word_timestamps: False`, `task: "transcribe"`
+- Override parameters from variant configs (e.g., `no_speech_threshold`, `chunk_length`, etc.)
+- That only allowed override parameters are included
+- That the actual parameters passed to `model.transcribe()` match expectations
 
 **Usage:**
 ```bash
 .venv/bin/python scripts/variant_checks/verify_all_variants.py
+```
+
+**Or via Make:**
+```bash
+make verify-variants
 ```
 
 ## Purpose

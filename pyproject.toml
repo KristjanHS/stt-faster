@@ -151,3 +151,29 @@ python-dotenv = ["dotenv"]
 source = ["backend"]
 disable_warnings = ["no-data-collected"]
 data_file = "reports/coverage/.coverage"
+
+[tool.bandit]
+# Exclude directories from Bandit scanning
+exclude_dirs = ["tests", ".venv", "venv", "build", "dist", ".uvcache", "__pycache__"]
+
+# Minimum severity level: including LOW to catch all security issues
+# Options: low, medium, high
+severity = ["low", "medium", "high"]
+
+# Minimum confidence level: only report Medium and High confidence issues
+# Options: low, medium, high
+confidence = ["medium", "high"]
+
+# CRITICAL SECURITY POLICY: The following test IDs must NEVER be suppressed with # nosec:
+# - B101 (assert_used): Assert statements can be disabled in optimized builds (-O flag)
+# - B310 (urllib_urlopen): urllib doesn't verify SSL by default, use httpx/requests instead
+# - B615 (request_without_timeout): Requests without SSL verification are security risks
+# These issues must be fixed, not suppressed. If you find a legitimate case, discuss with team first.
+
+# NOTE: Baseline is NOT configured here - CI will always report ALL issues
+# For local development with baseline (optional): use -b .bandit.baseline.json flag
+# To generate baseline: bandit -r -x tests --severity-level all --confidence-level all backend scripts -f json -o .bandit.baseline.json
+
+# Optional: Skip specific tests if needed (uncomment and add test IDs)
+# NOTE: B101, B310, B615 should NEVER be added to skips list
+# skips = ["B601"]  # Example: Skip shell injection checks (only if truly safe)

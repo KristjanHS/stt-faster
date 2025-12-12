@@ -14,7 +14,9 @@ import logging
 import os
 import sys
 from pathlib import Path
-from urllib.request import urlopen
+from urllib.parse import urlparse
+
+import httpx
 
 DEFAULT_OUTPUT = Path("models/sh.rnnn")
 DEFAULT_MODEL_URL = (
@@ -28,13 +30,20 @@ def download(url: str, dest: Path) -> None:
     dest.parent.mkdir(parents=True, exist_ok=True)
     LOGGER.info("Downloading RNNoise model from %s to %s", url, dest)
     try:
-        with urlopen(url) as resp, open(dest, "wb") as out:  # nosec B310 - controlled download URL
-            chunk_size = 16_384
-            while True:
-                chunk = resp.read(chunk_size)
-                if not chunk:
-                    break
-                out.write(chunk)
+        # Validate URL scheme - only allow http/https for security
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsafe URL scheme '{parsed.scheme}' in URL: {url}. Only http/https allowed.")
+        # Prefer HTTPS for secure downloads
+        if parsed.scheme == "http":
+            LOGGER.warning("Using HTTP instead of HTTPS for URL: %s", url)
+
+        # Use httpx with SSL verification enabled by default for secure downloads
+        with httpx.stream("GET", url, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            with open(dest, "wb") as out:
+                for chunk in resp.iter_bytes(chunk_size=16_384):
+                    out.write(chunk)
     except Exception as exc:  # pragma: no cover - network I/O
         LOGGER.error("Download failed: %s", exc)
         sys.exit(2)
