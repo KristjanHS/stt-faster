@@ -350,6 +350,45 @@ def _to_float(value: Any, default: float) -> float:
         return default
 
 
+def _resolve_loudnorm_params(
+    target_i: float | None,
+    target_tp: float | None,
+    target_lra: float | None,
+    loudnorm_preset: str,
+) -> tuple[float, float, float]:
+    """Resolve loudnorm parameters from function args or preset config.
+
+    Args:
+        target_i: Explicit I parameter, or None to use preset
+        target_tp: Explicit TP parameter, or None to use preset
+        target_lra: Explicit LRA parameter, or None to use preset
+        loudnorm_preset: Preset name to use if parameters are None
+
+    Returns:
+        Tuple of (target_i, target_tp, target_lra) as floats.
+
+    Raises:
+        ValueError: If required parameters cannot be resolved from preset.
+    """
+    from backend.preprocess.config import PreprocessConfig
+
+    if target_i is None or target_tp is None or target_lra is None:
+        preset = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+        try:
+            if target_i is None:
+                target_i = float(preset["I"])
+            if target_tp is None:
+                target_tp = float(preset.get("TP", -2.0))
+            if target_lra is None:
+                target_lra = float(preset["LRA"])
+        except KeyError as e:
+            raise ValueError(f"Missing required loudnorm parameter in preset '{loudnorm_preset}': {e}") from e
+
+    # All parameters are guaranteed to be float at this point
+    # Type narrowing happens naturally - no explicit checks needed
+    return target_i, target_tp, target_lra
+
+
 def _loudnorm_2pass_linear(
     input_path: Path,
     output_path: Path,
@@ -370,24 +409,12 @@ def _loudnorm_2pass_linear(
 
     import ffmpeg  # type: ignore[import-untyped]
 
-    from backend.preprocess.config import PreprocessConfig
-
     start = time.time()
 
     try:
-        # ----- 0. Resolve target loudnorm parameters from preset / overrides -----
-        if target_i is None or target_tp is None or target_lra is None:
-            preset = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-            if target_i is None:
-                target_i = float(preset["I"])
-            if target_tp is None:
-                target_tp = float(preset.get("TP", -2.0))
-            if target_lra is None:
-                target_lra = float(preset["LRA"])
-
-        # Type narrowing: After the above assignments, these are guaranteed to be float
-        # Pyright already knows they can't be None after the assignments above, so no runtime check needed
-        # No assert statements needed - Pyright's type narrowing handles this automatically
+        # Resolve parameters - returns non-optional floats
+        # Type narrowing happens naturally, runtime safety via exception handling in resolver
+        target_i, target_tp, target_lra = _resolve_loudnorm_params(target_i, target_tp, target_lra, loudnorm_preset)
 
         # ----- 1. First pass: measure loudness stats (no actual output) -----
         first_pass_filter = f"aresample=resampler=soxr:osr={target_sample_rate},loudnorm=print_format=json"

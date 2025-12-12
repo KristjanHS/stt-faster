@@ -314,16 +314,45 @@ class TranscriptionProcessor:
             # Generate output path with appropriate extension
             # If _output_base_dir is set (multi-variant mode), write outputs there
             if self._output_base_dir:
-                base_name = file_path_obj.stem
+                # Preserve directory structure relative to input_folder to prevent collisions
+                # when files with the same name exist in different subdirectories
+                input_folder_path = Path(self.input_folder).resolve()
+                file_path_resolved = file_path_obj.resolve()
+
+                try:
+                    # Calculate relative path from input_folder to file
+                    relative_path = file_path_resolved.relative_to(input_folder_path)
+                    # Get parent directory (if file is in subdirectory) and stem
+                    if relative_path.parent == Path("."):
+                        # File is at root level - output directly to _output_base_dir
+                        output_dir = self._output_base_dir
+                        base_name = relative_path.stem
+                    else:
+                        # File is in subdirectory - preserve structure
+                        output_dir = self._output_base_dir / relative_path.parent
+                        base_name = relative_path.stem
+                        # Ensure output directory exists
+                        output_dir.mkdir(parents=True, exist_ok=True)
+                except ValueError:
+                    # File is not under input_folder (shouldn't happen in normal operation)
+                    # Fall back to using just the filename
+                    LOGGER.warning(
+                        "File %s is not under input folder %s, using filename only",
+                        file_path,
+                        self.input_folder,
+                    )
+                    output_dir = self._output_base_dir
+                    base_name = file_path_obj.stem
+
                 if self.output_format == "both":
-                    output_path = self._output_base_dir / f"{base_name}.txt"
+                    output_path = output_dir / f"{base_name}.txt"
                     output_files = [
-                        self._output_base_dir / f"{base_name}.txt",
-                        self._output_base_dir / f"{base_name}.json",
+                        output_dir / f"{base_name}.txt",
+                        output_dir / f"{base_name}.json",
                     ]
                 else:
                     output_ext = ".txt" if self.output_format == "txt" else ".json"
-                    output_path = self._output_base_dir / f"{base_name}{output_ext}"
+                    output_path = output_dir / f"{base_name}{output_ext}"
                     output_files = [output_path]
             else:
                 # Normal mode: write next to input file
@@ -353,12 +382,16 @@ class TranscriptionProcessor:
                         self._move(str(out_file), str(dest_output))
                         LOGGER.debug("Moved output to: %s", dest_output)
             else:
-                # In no-move mode, just move outputs to processed folder (if different location)
-                for out_file in output_files:
-                    if out_file.exists() and out_file.parent != self.processed_folder:
-                        dest_output = self.processed_folder / out_file.name
-                        self._move(str(out_file), str(dest_output))
-                        LOGGER.debug("Moved output to: %s", dest_output)
+                # In no-move mode, only move outputs if _output_base_dir is not set
+                # When _output_base_dir is set (multi-variant mode), outputs should stay there
+                if not self._output_base_dir:
+                    # Move outputs to processed folder (if different location)
+                    for out_file in output_files:
+                        if out_file.exists() and out_file.parent != self.processed_folder:
+                            dest_output = self.processed_folder / out_file.name
+                            self._move(str(out_file), str(dest_output))
+                            LOGGER.debug("Moved output to: %s", dest_output)
+                # When _output_base_dir is set, outputs are already in the correct location
 
             # Log success in database (for history/statistics)
             # Note: File location is source of truth, not database status
