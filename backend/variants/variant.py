@@ -20,7 +20,9 @@ class PreprocessStep:
             "loudnorm_highpass", "dynaudnorm", "denoise_custom",
             "highlow_aform_loudnorm", "highlow_nosampl_loudnorm",
             "aresampl_loudnorm_fixed", "aresampl_loudnorm_fixed2",
-            "loudnorm_2pass_linear"
+            "loudnorm_2pass_linear", "limiter_only", "volume_limiter",
+            "peak_normalize_2pass", "sox_peak_normalize",
+            "compressor_limiter", "dynaudnorm_conservative"
         )
         config: Optional configuration dictionary for step-specific parameters
     """
@@ -40,6 +42,12 @@ class PreprocessStep:
         "aresampl_loudnorm_fixed",
         "aresampl_loudnorm_fixed2",
         "loudnorm_2pass_linear",
+        "limiter_only",
+        "volume_limiter",
+        "peak_normalize_2pass",
+        "sox_peak_normalize",
+        "compressor_limiter",
+        "dynaudnorm_conservative",
     ]
     config: dict[str, Any] | None = None
 

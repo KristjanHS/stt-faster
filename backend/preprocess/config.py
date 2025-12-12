@@ -224,6 +224,7 @@ class TranscriptionConfig:
 
     # Timestamp and task parameters
     word_timestamps: bool = False
+    word_timestamps_present: bool = False
     task: str = "transcribe"  # "transcribe" or "translate"
 
     # Chunk processing
