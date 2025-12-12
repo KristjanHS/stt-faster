@@ -20,11 +20,10 @@ def _get_all_variants() -> list[Variant]:
     - Variants 1-2: No preprocessing, baseline configs (simplest)
     - Variants 3-6: No preprocessing, diagnostic/config tuning
     - Variants 7-11: No preprocessing, production VAD tuning
-    - Variants 12-13: Beam search quality improvements (beam sizes 6-7)
-    - Variant 14: Patience tuning (patience=1.2)
-    - Variants 15-17: Chunking variations (15s, 25s, 30s)
-    - Variants 18-20: Repetition/gibberish guards (no_repeat_ngram, repetition_penalty, compression_ratio)
-    - Variant 21: Context dependence (condition_on_previous_text=False)
+    - Variants 12-21: Hybrid variants (2 + 5 + 21 combinations)
+      - 12-15: Variant 5 baseline with more decoding power (beam 6/7, patience)
+      - 16-18: Variant 21 baseline (no context) with more decoding power
+      - 19-21: Gentler silence gates for quiet speech recovery
     - Variant 22: Complex normalization
     """
     return [
@@ -192,163 +191,161 @@ def _get_all_variants() -> list[Variant]:
                 ),
             ),
         ),
-        # Group 4: Beam search quality improvements (often helps far/quiet speech) - Variants 12-13
-        # Variant 12: Beam size 6 (improve over #5)
+        # Group 4: Hybrid variants (2 + 5 + 21 combinations) - Variants 12-21
+        # A) Variant 5 baseline, but more decoding power (aim: fewer word mistakes like v2)
+        # Variant 12: Variant 5 + beam 6
         Variant(
-            name="best_beam6_ns090_lp050",
+            name="hyb_v5_beam6",
             number=12,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                condition_on_previous_text=True,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=6,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Variant 13: Beam size 7 (improve over #5)
+        # Variant 13: Variant 5 + beam 7
         Variant(
-            name="best_beam7_ns090_lp050",
+            name="hyb_v5_beam7",
             number=13,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=7,
+                condition_on_previous_text=True,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=7,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Group 5: Patience tuning (lets beam search explore more) - Variant 14
-        # Variant 14: Patience 1.2 (improve over #5)
+        # Variant 14: Variant 5 + beam 6 + patience 1.2
         Variant(
-            name="best_patience12_ns090_lp050",
+            name="hyb_v5_beam6_pat12",
             number=14,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                patience=1.2,
+                condition_on_previous_text=True,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=5,
-                patience=1.2,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Group 6: Chunking variations (changes boundary effects; can help quiet speech) - Variants 15-17
-        # Variant 15: Chunk 15s (improve over #5)
+        # Variant 15: Variant 5 + beam 7 + patience 1.2
         Variant(
-            name="best_chunk15_ns090_lp050",
+            name="hyb_v5_beam7_pat12",
             number=15,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=7,
+                patience=1.2,
+                condition_on_previous_text=True,
                 vad_filter=False,
-                chunk_length=15,
-                beam_size=5,
+                chunk_length=20,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Variant 16: Chunk 25s (improve over #5)
+        # B) Variant 21 baseline (no context), but more decoding power (aim: keep recall without extra errors)
+        # Variant 16: No context + beam 6
         Variant(
-            name="best_chunk25_ns090_lp050",
+            name="hyb_v21_noctx_beam6",
             number=16,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                condition_on_previous_text=False,
                 vad_filter=False,
-                chunk_length=25,
-                beam_size=5,
+                chunk_length=20,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Variant 17: Chunk 30s (improve over #5)
+        # Variant 17: No context + beam 7
         Variant(
-            name="best_chunk30_ns090_lp050",
+            name="hyb_v21_noctx_beam7",
             number=17,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=7,
+                condition_on_previous_text=False,
                 vad_filter=False,
-                chunk_length=30,
-                beam_size=5,
+                chunk_length=20,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Group 7: Repetition/gibberish guards (aim: fewer "looping" artifacts) - Variants 18-20
-        # Variant 18: no_repeat_ngram_size=3 (improve over #5)
+        # Variant 18: No context + beam 6 + patience 1.2
         Variant(
-            name="best_norepeat3_ns090_lp050",
+            name="hyb_v21_noctx_beam6_pat12",
             number=18,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                patience=1.2,
+                condition_on_previous_text=False,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=5,
-                no_repeat_ngram_size=3,
+                word_timestamps=True,
                 no_speech_threshold=0.90,
                 logprob_threshold=-0.50,
-                condition_on_previous_text=True,
-                word_timestamps=True,
             ),
         ),
-        # Variant 19: repetition_penalty=1.1 (improve over #5)
+        # C) Slightly gentler silence gate (aim: recover quiet speech if v5 is dropping it)
+        # Variant 19: Beam 6 + ns 0.88 + lp -0.50
         Variant(
-            name="best_reppen11_ns090_lp050",
+            name="hyb_gate_ns088_lp050_beam6",
             number=19,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                condition_on_previous_text=True,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=5,
-                repetition_penalty=1.1,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
-                condition_on_previous_text=True,
                 word_timestamps=True,
+                no_speech_threshold=0.88,
+                logprob_threshold=-0.50,
             ),
         ),
-        # Variant 20: compression_ratio_threshold=2.2 (stricter "this looks like garbage" filter) (improve over #5)
+        # Variant 20: Beam 6 + ns 0.90 + lp -0.55 (more conservative skip; may keep quiet speech)
         Variant(
-            name="best_comp22_ns090_lp050",
+            name="hyb_gate_ns090_lp055_beam6",
             number=20,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                condition_on_previous_text=True,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=5,
-                compression_ratio_threshold=2.2,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
-                condition_on_previous_text=True,
                 word_timestamps=True,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.55,
             ),
         ),
-        # Group 8: Context dependence (sometimes hurts quiet speech; sometimes helps coherence) - Variant 21
-        # Variant 21: condition_on_previous_text=False (improve over #5)
+        # Variant 21: No context + beam 6 + ns 0.88 + lp -0.50
         Variant(
-            name="best_noctx_ns090_lp050",
+            name="hyb_noctx_gate_ns088_lp050_beam6",
             number=21,
             preprocess_steps=[],
             transcription_config=create_minimal_config(
+                beam_size=6,
+                condition_on_previous_text=False,
                 vad_filter=False,
                 chunk_length=20,
-                beam_size=5,
-                condition_on_previous_text=False,
-                no_speech_threshold=0.90,
-                logprob_threshold=-0.50,
                 word_timestamps=True,
+                no_speech_threshold=0.88,
+                logprob_threshold=-0.50,
             ),
         ),
         # Variant 22: Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
@@ -389,8 +386,8 @@ def get_builtin_variants() -> list[Variant]:
     """
     all_variants = _get_all_variants()
     # Only return active variants for batch jobs:
-    # Variants 2-11: baseline_no_vad, diagnostic/config tuning (3-6), production VAD tuning (7-11)
-    # Variants 12-21: Improvements over variant 5 (beam search, chunking, repetition guards, context)
+    # Variants 2, 5: baseline_no_vad, diagnostic/config tuning
+    # Variants 12-21: Hybrid variants (2 + 5 + 21 combinations with more decoding power and gentler gates)
     active_variant_numbers = {2, 5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
     return [v for v in all_variants if v.number in active_variant_numbers]
 
