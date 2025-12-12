@@ -376,8 +376,13 @@ def transcribe_with_baseline_params(
         )
 
     # Only include language if it's set (language is not part of TranscriptionConfig)
+    # Note: Baseline forces language for Estonian presets, so it's not "pure defaults"
     if applied_language:
         transcribe_kwargs["language"] = applied_language
+
+    # Backward/forward compatible mapping: faster-whisper uses log_prob_threshold (underscore)
+    if "logprob_threshold" in transcribe_kwargs and "log_prob_threshold" not in transcribe_kwargs:
+        transcribe_kwargs["log_prob_threshold"] = transcribe_kwargs.pop("logprob_threshold")
 
     LOGGER.info("Calling model.transcribe() with baseline kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
@@ -609,6 +614,13 @@ def transcribe_with_baseline_params(
         metrics_dict["no_speech_skip_windows"] = metrics_payload.no_speech_skip_windows
     payload["metrics"] = metrics_dict
 
+    # Add transcribe_kwargs to payload so reports can see what was actually passed
+    # This is the source of truth after whitelist + VAD merge + language + key mapping
+    # Note: Baseline forces language for Estonian presets, so it's not "pure defaults"
+    payload["transcribe_kwargs"] = transcribe_kwargs.copy()
+    if applied_language:
+        payload["language_forced"] = applied_language
+
     preprocess_result.cleanup()
     return payload
 
@@ -681,7 +693,6 @@ def transcribe_with_minimal_params(
         "patience",
         "vad_filter",
         "vad_parameters",
-        "vad_threshold",
         "temperature",
         "temperature_increment_on_fallback",
         "best_of",
@@ -726,6 +737,13 @@ def transcribe_with_minimal_params(
                 vad_params,
             )
 
+    # Ensure we never pass vad_threshold directly (it's merged into vad_parameters)
+    transcribe_kwargs.pop("vad_threshold", None)
+
+    # Backward/forward compatible mapping: faster-whisper uses log_prob_threshold (underscore)
+    if "logprob_threshold" in transcribe_kwargs and "log_prob_threshold" not in transcribe_kwargs:
+        transcribe_kwargs["log_prob_threshold"] = transcribe_kwargs.pop("logprob_threshold")
+
     LOGGER.info("Calling model.transcribe() with minimal kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),
@@ -742,13 +760,13 @@ def transcribe_with_minimal_params(
     segment_payloads: list[dict[str, Any]] = []
     audio_processed = 0.0
     last_progress_log = transcribe_start
-    no_speech_skips = 0
-    no_speech_skip_windows: list[dict[str, Any]] = []
+    segments_matching_no_speech_rule = 0
+    segments_matching_no_speech_rule_windows: list[dict[str, Any]] = []
 
     # Derive thresholds from what was actually passed to model.transcribe()
-    # Only count skips if these thresholds were explicitly set
+    # Note: We check both logprob_threshold and log_prob_threshold for compatibility
     no_speech_threshold = transcribe_kwargs.get("no_speech_threshold")
-    logprob_threshold = transcribe_kwargs.get("logprob_threshold")
+    logprob_threshold = transcribe_kwargs.get("log_prob_threshold") or transcribe_kwargs.get("logprob_threshold")
 
     # Only track skip matches if both thresholds were explicitly passed
     can_track_skips = no_speech_threshold is not None and logprob_threshold is not None
@@ -756,8 +774,9 @@ def transcribe_with_minimal_params(
     for segment in segments:
         segment_payloads.append(segment_to_payload(segment))
 
-        # Track segments that match skip criteria (no_speech_prob > threshold AND avg_logprob <= threshold)
-        # Note: These are segments that passed but match skip criteria - truly skipped windows don't appear in output
+        # Track segments that match the no_speech rule (no_speech_prob > threshold AND avg_logprob <= threshold)
+        # Note: These are segments that PASSED but match the rule - truly skipped windows don't appear in output.
+        # This is NOT a skip count; it's a count of output segments matching the heuristic.
         # Only do this if we actually passed these thresholds to model.transcribe()
         if can_track_skips:
             no_speech_prob = getattr(segment, "no_speech_prob", None)
@@ -775,18 +794,18 @@ def transcribe_with_minimal_params(
                     and no_speech_val > no_speech_threshold
                     and avg_logprob_val <= logprob_threshold
                 ):
-                    no_speech_skips += 1
+                    segments_matching_no_speech_rule += 1
                     # Add to debug list
-                    skip_window = {
+                    rule_match_window = {
                         "start": float(seg_start) if seg_start is not None else None,
                         "end": float(seg_end) if seg_end is not None else None,
                         "no_speech_prob": no_speech_val,
                         "avg_logprob": avg_logprob_val,
                     }
                     # Remove None values
-                    skip_window = {k: v for k, v in skip_window.items() if v is not None}
-                    if skip_window:
-                        no_speech_skip_windows.append(skip_window)
+                    rule_match_window = {k: v for k, v in rule_match_window.items() if v is not None}
+                    if rule_match_window:
+                        segments_matching_no_speech_rule_windows.append(rule_match_window)
 
         # Track progress for logging
         end_time = getattr(segment, "end", None)
@@ -948,8 +967,18 @@ def transcribe_with_minimal_params(
         float_precision=FLOAT_PRECISION,
         # Segment statistics
         segment_count=len(segment_payloads),
-        no_speech_skips_count=no_speech_skips,  # Always record, even if 0
-        no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
+        # Note: segments_matching_no_speech_rule is NOT a skip count - it counts output segments
+        # that match the heuristic. Truly skipped windows produce no segments.
+        # Real skip counts would require window-level instrumentation.
+        segments_matching_no_speech_rule_count=segments_matching_no_speech_rule if can_track_skips else None,
+        segments_matching_no_speech_rule_windows=(
+            segments_matching_no_speech_rule_windows
+            if (can_track_skips and segments_matching_no_speech_rule_windows)
+            else None
+        ),
+        # Legacy fields for compatibility (set to None since we can't accurately count skips)
+        no_speech_skips_count=None,
+        no_speech_skip_windows=None,
     )
     if metrics_collector:
         metrics_collector(metrics_payload)
@@ -962,6 +991,13 @@ def transcribe_with_minimal_params(
     if metrics_payload.no_speech_skip_windows:
         metrics_dict["no_speech_skip_windows"] = metrics_payload.no_speech_skip_windows
     payload["metrics"] = metrics_dict
+
+    # Add transcribe_kwargs to payload so reports can see what was actually passed
+    # This is the source of truth after whitelist + VAD merge + language + key mapping
+    # Note: Baseline forces language for Estonian presets, so it's not "pure defaults"
+    payload["transcribe_kwargs"] = transcribe_kwargs.copy()
+    if applied_language:
+        payload["language_forced"] = applied_language
 
     preprocess_result.cleanup()
     return payload
