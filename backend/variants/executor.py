@@ -546,8 +546,11 @@ def transcribe_with_baseline_params(
         denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
         # SNR estimation
         snr_estimation_method="estimate_snr_db",  # Hardcoded method
-        # Transcription parameters (baseline uses library defaults, so most are None)
-        # Use values from transcribe_kwargs (what was actually passed)
+        # Transcription parameters
+        # Only use values from transcribe_kwargs (what was actually passed to model.transcribe)
+        # If a parameter is not in transcribe_kwargs, it means faster-whisper is using its own
+        # internal defaults, which we don't know. Setting it to None is more honest than
+        # using transcription_config defaults that weren't actually used.
         beam_size=transcribe_kwargs.get("beam_size"),
         patience=transcribe_kwargs.get("patience"),
         word_timestamps=transcribe_kwargs.get("word_timestamps"),
@@ -915,8 +918,11 @@ def transcribe_with_minimal_params(
         denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
         # SNR estimation
         snr_estimation_method="estimate_snr_db",  # Hardcoded method
-        # Transcription parameters - use actual values from transcribe_kwargs
-        # This ensures metrics reflect what was actually passed to model.transcribe()
+        # Transcription parameters
+        # Only use values from transcribe_kwargs (what was actually passed to model.transcribe)
+        # If a parameter is not in transcribe_kwargs, it means faster-whisper is using its own
+        # internal defaults, which we don't know. Setting it to None is more honest than
+        # using transcription_config defaults that weren't actually used.
         beam_size=transcribe_kwargs.get("beam_size"),
         patience=transcribe_kwargs.get("patience"),
         word_timestamps=transcribe_kwargs.get("word_timestamps"),
@@ -945,7 +951,6 @@ def transcribe_with_minimal_params(
             if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
             else None
         ),
-        # Use values from transcribe_kwargs (what was actually passed)
         temperature=transcribe_kwargs.get("temperature"),
         temperature_increment_on_fallback=transcribe_kwargs.get("temperature_increment_on_fallback"),
         best_of=transcribe_kwargs.get("best_of"),

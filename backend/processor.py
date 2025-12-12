@@ -538,9 +538,27 @@ class TranscriptionProcessor:
             target_sample_rate = sample_metric.target_sample_rate
             target_channels = sample_metric.target_channels
             loudnorm_preset = sample_metric.loudnorm_preset
+            # Preprocessing parameters used
+            volume_adjustment_db = sample_metric.volume_adjustment_db
+            resampler = sample_metric.resampler
+            sample_format = sample_metric.sample_format
+            loudnorm_target_i = sample_metric.loudnorm_target_i
+            loudnorm_target_tp = sample_metric.loudnorm_target_tp
+            loudnorm_target_lra = sample_metric.loudnorm_target_lra
+            loudnorm_backend = sample_metric.loudnorm_backend
+            denoise_method = sample_metric.denoise_method
+            denoise_library = sample_metric.denoise_library
+            rnnoise_model = sample_metric.rnnoise_model
+            rnnoise_mix = sample_metric.rnnoise_mix
+            snr_estimation_method = sample_metric.snr_estimation_method
             model_id = sample_metric.model_id
             device = sample_metric.device
             compute_type = sample_metric.compute_type
+            # Transcription parameters from metrics
+            # Note: For baseline/minimal variants, some parameters may be None because they weren't
+            # explicitly passed to model.transcribe(). In those cases, faster-whisper uses its own
+            # internal defaults, which we don't know. Setting these to None in the database is more
+            # honest than using TranscriptionConfig defaults that weren't actually used.
             beam_size = sample_metric.beam_size
             patience = sample_metric.patience
             word_timestamps = sample_metric.word_timestamps
@@ -570,6 +588,19 @@ class TranscriptionProcessor:
             target_sample_rate = config_snapshot.target_sample_rate
             target_channels = config_snapshot.target_channels
             loudnorm_preset = config_snapshot.loudnorm_preset
+            # Preprocessing parameters - None if no files processed
+            volume_adjustment_db = None
+            resampler = None
+            sample_format = None
+            loudnorm_target_i = None
+            loudnorm_target_tp = None
+            loudnorm_target_lra = None
+            loudnorm_backend = None
+            denoise_method = None
+            denoise_library = None
+            rnnoise_model = None
+            rnnoise_mix = None
+            snr_estimation_method = None
             model_id = None
             device = None
             compute_type = None
@@ -613,6 +644,18 @@ class TranscriptionProcessor:
             target_sample_rate=target_sample_rate,
             target_channels=target_channels,
             loudnorm_preset=loudnorm_preset,
+            volume_adjustment_db=volume_adjustment_db,
+            resampler=resampler,
+            sample_format=sample_format,
+            loudnorm_target_i=loudnorm_target_i,
+            loudnorm_target_tp=loudnorm_target_tp,
+            loudnorm_target_lra=loudnorm_target_lra,
+            loudnorm_backend=loudnorm_backend,
+            denoise_method=denoise_method,
+            denoise_library=denoise_library,
+            rnnoise_model=rnnoise_model,
+            rnnoise_mix=rnnoise_mix,
+            snr_estimation_method=snr_estimation_method,
             model_id=model_id,
             device=device,
             compute_type=compute_type,

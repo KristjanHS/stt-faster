@@ -72,6 +72,7 @@ def create_minimal_config(
     config.set("beam_size", beam_size)
     config.set("word_timestamps", word_timestamps)
     config.set("task", task)
+    config.set("vad_filter", False)  # Disable VAD by default
     # Apply any overrides
     for key, value in overrides.items():
         if hasattr(config, key) and not key.startswith("_"):
