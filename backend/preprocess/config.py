@@ -192,6 +192,42 @@ class PreprocessConfig:
         """Get the loudnorm preset configuration for a given preset name."""
         return _LOUDNORM_PRESETS.get(preset, _LOUDNORM_PRESETS[_LOUDNORM_PRESET_DEFAULT])
 
+    @staticmethod
+    def resolve_loudnorm_params(
+        target_i: float | None,
+        target_tp: float | None,
+        target_lra: float | None,
+        loudnorm_preset: str,
+    ) -> tuple[float, float, float]:
+        """Resolve loudnorm parameters from function args or preset config.
+
+        Args:
+            target_i: Explicit I parameter, or None to use preset
+            target_tp: Explicit TP parameter, or None to use preset
+            target_lra: Explicit LRA parameter, or None to use preset
+            loudnorm_preset: Preset name to use if parameters are None
+
+        Returns:
+            Tuple of (target_i, target_tp, target_lra) as floats.
+
+        Raises:
+            ValueError: If required parameters cannot be resolved from preset.
+        """
+        if target_i is None or target_tp is None or target_lra is None:
+            preset = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
+            try:
+                if target_i is None:
+                    target_i = float(preset["I"])
+                if target_tp is None:
+                    target_tp = float(preset.get("TP", -2.0))
+                if target_lra is None:
+                    target_lra = float(preset["LRA"])
+            except KeyError as e:
+                raise ValueError(f"Missing required loudnorm parameter in preset '{loudnorm_preset}': {e}") from e
+
+        # All parameters are guaranteed to be float at this point
+        return target_i, target_tp, target_lra
+
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> "PreprocessConfig":
         """Build configuration from environment variables or a provided mapping."""
@@ -224,7 +260,6 @@ class TranscriptionConfig:
 
     # Timestamp and task parameters
     word_timestamps: bool = False
-    word_timestamps_present: bool = False
     task: str = "transcribe"  # "transcribe" or "translate"
 
     # Chunk processing

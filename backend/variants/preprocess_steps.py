@@ -62,10 +62,9 @@ def _loudnorm_only(
 
     start = time.time()
     try:
-        preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-        target_i = preset_config["I"]
-        target_tp = preset_config.get("TP", -2.0)
-        target_lra = preset_config["LRA"]
+        from backend.preprocess.config import PreprocessConfig
+
+        target_i, target_tp, target_lra = PreprocessConfig.resolve_loudnorm_params(None, None, None, loudnorm_preset)
 
         # Build lightweight filter graph: only resample + loudnorm (no highpass, no RNNoise)
         filter_graph = (
@@ -358,6 +357,8 @@ def _resolve_loudnorm_params(
 ) -> tuple[float, float, float]:
     """Resolve loudnorm parameters from function args or preset config.
 
+    This is a wrapper around PreprocessConfig.resolve_loudnorm_params() for backward compatibility.
+
     Args:
         target_i: Explicit I parameter, or None to use preset
         target_tp: Explicit TP parameter, or None to use preset
@@ -372,21 +373,7 @@ def _resolve_loudnorm_params(
     """
     from backend.preprocess.config import PreprocessConfig
 
-    if target_i is None or target_tp is None or target_lra is None:
-        preset = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-        try:
-            if target_i is None:
-                target_i = float(preset["I"])
-            if target_tp is None:
-                target_tp = float(preset.get("TP", -2.0))
-            if target_lra is None:
-                target_lra = float(preset["LRA"])
-        except KeyError as e:
-            raise ValueError(f"Missing required loudnorm parameter in preset '{loudnorm_preset}': {e}") from e
-
-    # All parameters are guaranteed to be float at this point
-    # Type narrowing happens naturally - no explicit checks needed
-    return target_i, target_tp, target_lra
+    return PreprocessConfig.resolve_loudnorm_params(target_i, target_tp, target_lra, loudnorm_preset)
 
 
 def _loudnorm_2pass_linear(
@@ -907,7 +894,28 @@ def create_preprocess_runner(
             # Filter to only enabled steps
             enabled_steps = [s for s in validated_steps if s.enabled]
 
+            # Log preprocessing steps summary
+            if enabled_steps:
+                LOGGER.info("Preprocessing steps (%d enabled):", len(enabled_steps))
+                for idx, step in enumerate(enabled_steps, 1):
+                    step_info = f"  {idx}. {step.name} ({step.step_type})"
+                    if step.config:
+                        params = ", ".join(f"{k}={v}" for k, v in step.config.items())
+                        step_info += f" [params: {params}]"
+                    LOGGER.info(step_info)
+            else:
+                LOGGER.info("No preprocessing steps enabled")
+
             for step in enabled_steps:
+                # Log step execution with parameters
+                LOGGER.info("Running: %s (%s)", step.name, step.step_type)
+                if step.config:
+                    params_str = ", ".join(f"{k}={v}" for k, v in step.config.items())
+                    LOGGER.info("  Config params: %s", params_str)
+                LOGGER.info(
+                    "  Global params: sample_rate=%d, channels=%d", merged_config.target_sample_rate, resolved_channels
+                )
+
                 if step.step_type == "resample":
                     # Simple resample step (used before denoise when ffmpeg is not used)
                     resampled_path = Path(temp_dir.name) / f"resampled_{step_index}.wav"
@@ -936,6 +944,12 @@ def create_preprocess_runner(
                 elif step.step_type == "ffmpeg":
                     # FFmpeg pipeline step (includes resample, rnnoise, loudnorm)
                     intermediate_path = Path(temp_dir.name) / f"ffmpeg_{step_index}.wav"
+                    LOGGER.info(
+                        "  FFmpeg params: rnnoise_mix=%.2f, loudnorm_preset=%s, rnnoise_model=%s",
+                        merged_config.rnnoise_mix,
+                        merged_config.loudnorm_preset,
+                        merged_config.rnnoise_model or "default",
+                    )
                     step_metric = run_ffmpeg_pipeline(
                         input_path=current_path,
                         output_path=intermediate_path,
@@ -995,6 +1009,12 @@ def create_preprocess_runner(
                     noise_clip_duration_s = step.config.get("noise_clip_duration_s", 5.0) if step.config else 5.0
                     n_std_thresh_stationary = step.config.get("n_std_thresh_stationary", 0.75) if step.config else 0.75
                     prop_decrease = step.config.get("prop_decrease", 0.25) if step.config else 0.25
+                    LOGGER.info(
+                        "  Denoise params: noise_clip=%.2fs, n_std=%.2f, prop_decrease=%.2f",
+                        noise_clip_duration_s,
+                        n_std_thresh_stationary,
+                        prop_decrease,
+                    )
                     step_metric = apply_light_denoise(
                         input_path=current_path,
                         output_path=denoised_path,
@@ -1053,6 +1073,8 @@ def create_preprocess_runner(
                     custom_i = step.config.get("I") if step.config else None
                     custom_tp = step.config.get("TP") if step.config else None
                     custom_lra = step.config.get("LRA") if step.config else None
+                    if custom_i or custom_tp or custom_lra:
+                        LOGGER.info("  Loudnorm params: I=%s, TP=%s, LRA=%s", custom_i, custom_tp, custom_lra)
                     step_metric = _loudnorm_with_highpass(
                         input_path=current_path,
                         output_path=intermediate_path,
@@ -1296,6 +1318,7 @@ def create_preprocess_runner(
                     # Volume gain + limiter step (P2, P3)
                     intermediate_path = Path(temp_dir.name) / f"volume_limiter_{step_index}.wav"
                     volume_db = step.config.get("volume_db", 1.5) if step.config else 1.5
+                    LOGGER.info("  Volume limiter params: volume_db=%.1f", volume_db)
                     step_metric = _volume_with_limiter(
                         input_path=current_path,
                         output_path=intermediate_path,
@@ -1324,6 +1347,7 @@ def create_preprocess_runner(
                     intermediate_path = Path(temp_dir.name) / f"peak_normalize_2pass_{step_index}.wav"
                     target_db = step.config.get("target_db", -6.0) if step.config else -6.0
                     max_gain_db = step.config.get("max_gain_db", 6.0) if step.config else 6.0
+                    LOGGER.info("  Peak normalize params: target_db=%.1f, max_gain_db=%.1f", target_db, max_gain_db)
                     step_metric = _peak_normalize_2pass(
                         input_path=current_path,
                         output_path=intermediate_path,
@@ -1352,6 +1376,7 @@ def create_preprocess_runner(
                     # SoX peak normalization step (P7)
                     intermediate_path = Path(temp_dir.name) / f"sox_peak_normalize_{step_index}.wav"
                     target_db = step.config.get("target_db", -3.0) if step.config else -3.0
+                    LOGGER.info("  SoX peak normalize params: target_db=%.1f", target_db)
                     step_metric = _sox_peak_normalize(
                         input_path=current_path,
                         output_path=intermediate_path,
