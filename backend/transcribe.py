@@ -210,8 +210,12 @@ class TranscriptionMetrics:
 
     # Segment statistics
     segment_count: int | None = None
-    no_speech_skips_count: int | None = None
-    no_speech_skip_windows: list[dict[str, Any]] | None = None
+    no_speech_skips_count: int | None = None  # Legacy field - use segments_matching_no_speech_rule_count instead
+    no_speech_skip_windows: list[dict[str, Any]] | None = None  # Legacy field
+    # Note: segments_matching_no_speech_rule_count is NOT a skip count - it counts output segments
+    # that match the heuristic. Truly skipped windows produce no segments.
+    segments_matching_no_speech_rule_count: int | None = None
+    segments_matching_no_speech_rule_windows: list[dict[str, Any]] | None = None
 
 
 def _get_estonian_model_path(
