@@ -151,10 +151,8 @@ def run_ffmpeg_pipeline(
     if run_cmd is not None:
         LOGGER.warning("run_cmd parameter is deprecated; using ffmpeg-python library")
 
-    preset_config = PreprocessConfig.get_loudnorm_preset_config(loudnorm_preset)
-    target_i = preset_config["I"]
-    target_tp = preset_config.get("TP", -2.0)
-    target_lra = preset_config["LRA"]
+    # Resolve loudnorm parameters from preset
+    target_i, target_tp, target_lra = PreprocessConfig.resolve_loudnorm_params(None, None, None, loudnorm_preset)
 
     # Ensure RNNoise model exists if provided
     resolved_rnnoise_model = _ensure_rnnoise_model(rnnoise_model)
