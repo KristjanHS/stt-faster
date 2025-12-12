@@ -7,7 +7,7 @@ import json
 import logging
 import shutil
 import subprocess  # nosec B404
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -226,7 +226,7 @@ def _process_multi_variant(
         console.print("[dim]Using conservative sweep preset[/dim]")
 
     git_commit = _get_git_commit_hash()
-    timestamp = datetime.now(timezone.utc)
+    timestamp = datetime.now()
     timestamp_str = timestamp.isoformat()
     # Create timestamped folder name (filesystem-safe)
     timestamp_folder = timestamp.strftime("%Y-%m-%dT%H-%M-%S")
