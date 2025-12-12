@@ -6,7 +6,6 @@ from backend.variants.transcription_presets import (
     create_baseline_config,
     create_minimal_config,
     create_no_vad_baseline_config,
-    create_project_config,
 )
 from backend.variants.variant import PreprocessStep, Variant
 
@@ -21,11 +20,12 @@ def _get_all_variants() -> list[Variant]:
     - Variants 1-2: No preprocessing, baseline configs (simplest)
     - Variants 3-6: No preprocessing, diagnostic/config tuning
     - Variants 7-11: No preprocessing, production VAD tuning
-    - Variants 12-13: Single preprocessing step - ffmpeg pipeline
-    - Variants 14-15: Single preprocessing step - denoise
-    - Variants 16-18: Single normalization step
-    - Variant 19: Multiple preprocessing steps (ffmpeg + denoise)
-    - Variants 20-22: Complex normalization
+    - Variants 12-13: Beam search quality improvements (beam sizes 6-7)
+    - Variant 14: Patience tuning (patience=1.2)
+    - Variants 15-17: Chunking variations (15s, 25s, 30s)
+    - Variants 18-20: Repetition/gibberish guards (no_repeat_ngram, repetition_penalty, compression_ratio)
+    - Variant 21: Context dependence (condition_on_previous_text=False)
+    - Variant 22: Complex normalization
     """
     return [
         # Group 1: No preprocessing, baseline configs (simplest) - Variants 1-2
@@ -192,123 +192,164 @@ def _get_all_variants() -> list[Variant]:
                 ),
             ),
         ),
-        # Group 4: Single preprocessing step - ffmpeg pipeline - Variants 12-13
-        # Variant 12: Only normalization + minimal transcription parameters
+        # Group 4: Beam search quality improvements (often helps far/quiet speech) - Variants 12-13
+        # Variant 12: Beam size 6 (improve over #5)
         Variant(
-            name="normonly_noparamtrans",
+            name="best_beam6_ns090_lp050",
             number=12,
-            preprocess_steps=[
-                PreprocessStep(name="ffmpeg_pipeline", enabled=True, step_type="ffmpeg"),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=6,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Variant 13: Only ffmpeg pipeline + project defaults
+        # Variant 13: Beam size 7 (improve over #5)
         Variant(
-            name="ffmpeg_only",
+            name="best_beam7_ns090_lp050",
             number=13,
-            preprocess_steps=[
-                PreprocessStep(name="ffmpeg_pipeline", enabled=True, step_type="ffmpeg"),
-            ],
-            transcription_config=create_project_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=7,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Group 5: Single preprocessing step - denoise - Variants 14-15
-        # Variant 14: Only denoise_light + project defaults
+        # Group 5: Patience tuning (lets beam search explore more) - Variant 14
+        # Variant 14: Patience 1.2 (improve over #5)
         Variant(
-            name="denoise_only",
+            name="best_patience12_ns090_lp050",
             number=14,
-            preprocess_steps=[
-                PreprocessStep(name="resample", enabled=True, step_type="resample"),
-                PreprocessStep(name="denoise_light", enabled=True, step_type="denoise"),
-            ],
-            transcription_config=create_project_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
+                patience=1.2,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Variant 15: Only denoise + minimal transcription parameters
+        # Group 6: Chunking variations (changes boundary effects; can help quiet speech) - Variants 15-17
+        # Variant 15: Chunk 15s (improve over #5)
         Variant(
-            name="onlyden_noparamtrans",
+            name="best_chunk15_ns090_lp050",
             number=15,
-            preprocess_steps=[
-                PreprocessStep(name="resample", enabled=True, step_type="resample"),
-                PreprocessStep(name="denoise_light", enabled=True, step_type="denoise"),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=15,
+                beam_size=5,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Group 6: Single normalization step - Variants 16-18
-        # Variant 16: Loudness normalization + highpass + minimal params
+        # Variant 16: Chunk 25s (improve over #5)
         Variant(
-            name="norm_highp_noparamtrans",
+            name="best_chunk25_ns090_lp050",
             number=16,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="loudnorm_highpass",
-                    enabled=True,
-                    step_type="loudnorm_highpass",
-                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
-                ),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=25,
+                beam_size=5,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Variant 17: Dynamic audio normalization + minimal params
+        # Variant 17: Chunk 30s (improve over #5)
         Variant(
-            name="norm_dynaud_noparamtrans",
+            name="best_chunk30_ns090_lp050",
             number=17,
-            preprocess_steps=[
-                PreprocessStep(name="dynaudnorm", enabled=True, step_type="dynaudnorm"),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=30,
+                beam_size=5,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Variant 18: 2-pass loudnorm in linear mode (file-wide gain change) + minimal params
+        # Group 7: Repetition/gibberish guards (aim: fewer "looping" artifacts) - Variants 18-20
+        # Variant 18: no_repeat_ngram_size=3 (improve over #5)
         Variant(
-            name="loudnorm_2pass_linear_noparamtrans",
+            name="best_norepeat3_ns090_lp050",
             number=18,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="loudnorm_2pass_linear",
-                    enabled=True,
-                    step_type="loudnorm_2pass_linear",
-                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
-                ),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
+                no_repeat_ngram_size=3,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Group 7: Multiple preprocessing steps - Variant 19
-        # Variant 19: Full preprocessing (ffmpeg + denoise) + minimal defaults
+        # Variant 19: repetition_penalty=1.1 (improve over #5)
         Variant(
-            name="full_minimal",
+            name="best_reppen11_ns090_lp050",
             number=19,
-            preprocess_steps=[
-                PreprocessStep(name="ffmpeg_pipeline", enabled=True, step_type="ffmpeg"),
-                PreprocessStep(name="denoise_light", enabled=True, step_type="denoise"),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
+                repetition_penalty=1.1,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Group 8: Complex normalization - Variants 20-22
-        # Variant 20: Highpass + lowpass + aformat + loudness normalization + minimal params
+        # Variant 20: compression_ratio_threshold=2.2 (stricter "this looks like garbage" filter) (improve over #5)
         Variant(
-            name="lnorm_highlow_aform_noparamtrans",
+            name="best_comp22_ns090_lp050",
             number=20,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="highlow_aform_loudnorm",
-                    enabled=True,
-                    step_type="highlow_aform_loudnorm",
-                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
-                ),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
+                compression_ratio_threshold=2.2,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                condition_on_previous_text=True,
+                word_timestamps=True,
+            ),
         ),
-        # Variant 21: Highpass + lowpass + loudness normalization (no aformat) + minimal params
+        # Group 8: Context dependence (sometimes hurts quiet speech; sometimes helps coherence) - Variant 21
+        # Variant 21: condition_on_previous_text=False (improve over #5)
         Variant(
-            name="lnorm_highlow_nosampl_noparamtrans",
+            name="best_noctx_ns090_lp050",
             number=21,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="highlow_nosampl_loudnorm",
-                    enabled=True,
-                    step_type="highlow_nosampl_loudnorm",
-                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
-                ),
-            ],
-            transcription_config=create_minimal_config(),
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                chunk_length=20,
+                beam_size=5,
+                condition_on_previous_text=False,
+                no_speech_threshold=0.90,
+                logprob_threshold=-0.50,
+                word_timestamps=True,
+            ),
         ),
         # Variant 22: Aresample to 16kHz + loudness normalization (I=-24, LRA=15) + minimal params
         Variant(
@@ -349,7 +390,8 @@ def get_builtin_variants() -> list[Variant]:
     all_variants = _get_all_variants()
     # Only return active variants for batch jobs:
     # Variants 2-11: baseline_no_vad, diagnostic/config tuning (3-6), production VAD tuning (7-11)
-    active_variant_numbers = {2, 3, 4, 5, 6, 7, 8, 9, 10, 11}
+    # Variants 12-21: Improvements over variant 5 (beam search, chunking, repetition guards, context)
+    active_variant_numbers = {2, 5, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21}
     return [v for v in all_variants if v.number in active_variant_numbers]
 
 
