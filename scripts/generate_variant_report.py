@@ -12,6 +12,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import re
 import sys
@@ -137,6 +138,244 @@ def calculate_transcript_stats(segments: list[dict[str, Any]]) -> dict[str, Any]
     }
 
 
+def calculate_activation_potential(
+    segments: list[dict[str, Any]],
+    no_speech_threshold: float | None,
+    logprob_threshold: float | None,
+) -> dict[str, Any]:
+    """Calculate activation potential metrics for skip rule.
+
+    Args:
+        segments: List of segment dictionaries
+        no_speech_threshold: Threshold for no_speech_prob (None means no threshold)
+        logprob_threshold: Threshold for avg_logprob (None means no threshold)
+
+    Returns:
+        Dictionary with max_no_speech_prob, min_avg_logprob, count_ns_candidates, count_would_skip
+    """
+    no_speech_probs = []
+    avg_logprobs = []
+    count_ns_candidates = 0
+    count_would_skip = 0
+
+    for seg in segments:
+        no_speech_prob = seg.get("no_speech_prob")
+        avg_logprob = seg.get("avg_logprob")
+
+        if no_speech_prob is not None:
+            no_speech_probs.append(no_speech_prob)
+            if no_speech_threshold is not None and no_speech_prob > no_speech_threshold:
+                count_ns_candidates += 1
+
+        if avg_logprob is not None:
+            avg_logprobs.append(avg_logprob)
+
+        if no_speech_prob is not None and avg_logprob is not None:
+            if no_speech_threshold is not None and logprob_threshold is not None:
+                if no_speech_prob > no_speech_threshold and avg_logprob <= logprob_threshold:
+                    count_would_skip += 1
+
+    return {
+        "max_no_speech_prob": max(no_speech_probs) if no_speech_probs else None,
+        "min_avg_logprob": min(avg_logprobs) if avg_logprobs else None,
+        "count_ns_candidates": count_ns_candidates,
+        "count_would_skip": count_would_skip,
+    }
+
+
+def recalculate_no_speech_skips(
+    segments: list[dict[str, Any]],
+    no_speech_threshold: float | None,
+    logprob_threshold: float | None,
+) -> int:
+    """Recalculate how many segments would be skipped by the skip rule.
+
+    Rule: skip if no_speech_prob > no_speech_threshold AND avg_logprob <= logprob_threshold
+
+    Args:
+        segments: List of segment dictionaries
+        no_speech_threshold: Threshold for no_speech_prob (None means no threshold)
+        logprob_threshold: Threshold for avg_logprob (None means no threshold)
+
+    Returns:
+        Count of segments that would be skipped
+    """
+    if no_speech_threshold is None or logprob_threshold is None:
+        return 0
+
+    count = 0
+    for seg in segments:
+        no_speech_prob = seg.get("no_speech_prob")
+        avg_logprob = seg.get("avg_logprob")
+
+        if no_speech_prob is not None and avg_logprob is not None:
+            if no_speech_prob > no_speech_threshold and avg_logprob <= logprob_threshold:
+                count += 1
+
+    return count
+
+
+def calculate_words_in_range(
+    segments: list[dict[str, Any]],
+    start_s: float,
+    end_s: float,
+    min_overlap_s: float = 3.0,
+    min_overlap_ratio: float = 0.2,
+) -> dict[str, Any]:
+    """Calculate word-level statistics for a time range.
+
+    Uses the same overlap criteria as find_segments_in_range() to ensure consistency.
+    Only counts words from segments with meaningful overlap.
+
+    Returns:
+        Dictionary with words_in_range, chars_in_range, unique_words_in_range
+        Falls back to segment-level if word timestamps aren't available
+    """
+    # First, find segments with meaningful overlap (same criteria as excerpts)
+    overlapping_segments, _, _ = find_segments_in_range(segments, start_s, end_s, min_overlap_s, min_overlap_ratio)
+
+    words_in_range = []
+    chars_in_range = 0
+    unique_words = set()
+    text_source = "words"  # Track whether we're using word timestamps or fallback
+
+    for seg in overlapping_segments:
+        words = seg.get("words")
+        if words:
+            # Use word timestamps - but only count words that actually fall in the range
+            for word in words:
+                word_start = word.get("start")
+                word_end = word.get("end")
+                word_text = word.get("word", "").strip()
+
+                if word_start is not None and word_end is not None:
+                    # Word overlaps with range if it starts before end_s and ends after start_s
+                    if word_start < end_s and word_end > start_s:
+                        words_in_range.append(word_text)
+                        chars_in_range += len(word_text)
+                        # Normalize word for uniqueness (lowercase, remove punctuation)
+                        normalized = word_text.lower().strip(".,!?;:()[]{}")
+                        if normalized:
+                            unique_words.add(normalized)
+        else:
+            # Fallback: use segment text if word timestamps aren't available
+            text_source = "segment_fallback"
+            seg_text = seg.get("text", "").strip()
+            if seg_text:
+                # Approximate: count words in overlapping segment
+                # Note: this is approximate since we can't slice segment text by time
+                seg_words = seg_text.split()
+                words_in_range.extend(seg_words)
+                chars_in_range += len(seg_text)
+                for w in seg_words:
+                    normalized = w.lower().strip(".,!?;:()[]{}")
+                    if normalized:
+                        unique_words.add(normalized)
+
+    return {
+        "words_in_range": len(words_in_range),
+        "chars_in_range": chars_in_range,
+        "unique_words_in_range": len(unique_words),
+        "has_word_timestamps": any(seg.get("words") for seg in overlapping_segments),
+        "text_source": text_source,
+    }
+
+
+def calculate_silence_metrics(
+    segments: list[dict[str, Any]],
+    start_s: float,
+    end_s: float,
+    min_overlap_s: float = 3.0,
+    min_overlap_ratio: float = 0.2,
+) -> dict[str, Any]:
+    """Calculate judge-like metrics for silence range.
+
+    Uses the same overlap criteria as find_segments_in_range() to ensure consistency.
+    Only counts words/segments with meaningful overlap.
+
+    Returns:
+        Dictionary with silence_word_count, silence_segments_count,
+        silence_top_no_speech_prob, silence_avg_logprob_mean, silence_avg_logprob_min
+    """
+    # First, find segments with meaningful overlap (same criteria as excerpts)
+    silence_segments, _, _ = find_segments_in_range(segments, start_s, end_s, min_overlap_s, min_overlap_ratio)
+
+    silence_words = []
+    no_speech_probs = []
+    avg_logprobs = []
+    text_source = "words"  # Track whether we're using word timestamps or fallback
+
+    for seg in silence_segments:
+        no_speech_prob = seg.get("no_speech_prob")
+        avg_logprob = seg.get("avg_logprob")
+
+        if no_speech_prob is not None:
+            no_speech_probs.append(no_speech_prob)
+        if avg_logprob is not None:
+            avg_logprobs.append(avg_logprob)
+
+        # Count words in this segment that fall in range
+        words = seg.get("words")
+        if words:
+            for word in words:
+                word_start = word.get("start")
+                word_end = word.get("end")
+                if word_start is not None and word_end is not None:
+                    if word_start < end_s and word_end > start_s:
+                        silence_words.append(word.get("word", ""))
+        else:
+            # Fallback: approximate from segment text
+            text_source = "segment_fallback"
+            seg_text = seg.get("text", "").strip()
+            if seg_text:
+                silence_words.extend(seg_text.split())
+
+    return {
+        "silence_word_count": len(silence_words),
+        "silence_segments_count": len(silence_segments),
+        "silence_top_no_speech_prob": max(no_speech_probs) if no_speech_probs else None,
+        "silence_avg_logprob_mean": sum(avg_logprobs) / len(avg_logprobs) if avg_logprobs else None,
+        "silence_avg_logprob_min": min(avg_logprobs) if avg_logprobs else None,
+        "text_source": text_source,
+    }
+
+
+def simulate_counterfactual_skips(
+    reference_segments: list[dict[str, Any]],
+    no_speech_threshold: float,
+    logprob_threshold: float,
+) -> tuple[int, list[dict[str, Any]]]:
+    """Simulate how many reference segments would be skipped by a given threshold pair.
+
+    Args:
+        reference_segments: Segments from reference variant (e.g., Variant 90)
+        no_speech_threshold: Threshold for no_speech_prob
+        logprob_threshold: Threshold for avg_logprob
+
+    Returns:
+        Tuple of (count, list of segments that would be skipped with their details)
+    """
+    skipped_segments = []
+
+    for seg in reference_segments:
+        no_speech_prob = seg.get("no_speech_prob")
+        avg_logprob = seg.get("avg_logprob")
+
+        if no_speech_prob is not None and avg_logprob is not None:
+            if no_speech_prob > no_speech_threshold and avg_logprob <= logprob_threshold:
+                skipped_segments.append(
+                    {
+                        "start": seg.get("start"),
+                        "end": seg.get("end"),
+                        "text": seg.get("text", "").strip()[:80],
+                        "no_speech_prob": no_speech_prob,
+                        "avg_logprob": avg_logprob,
+                    }
+                )
+
+    return len(skipped_segments), skipped_segments
+
+
 def is_timestamp_folder(folder_name: str) -> bool:
     """Check if folder name matches timestamp pattern YYYY-MM-DDTHH-MM-SS."""
     pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$"
@@ -166,6 +405,90 @@ def load_run_meta(run_folder: Path) -> dict[str, Any] | None:
     except Exception as e:
         print(f"Error reading {run_meta_file}: {e}", file=sys.stderr)  # noqa: T201
         return None
+
+
+def find_best_reference_variant(
+    current_variant_meta: dict[str, Any],
+    all_variants: list[dict[str, Any]],
+    run_folder: Path,
+    default_reference: int = 90,
+) -> tuple[int, list[dict[str, Any]] | None]:
+    """Find the best reference variant for counterfactual analysis.
+
+    Prefers variants with same vad_filter and chunk_length as current variant.
+    Falls back to default_reference if no better match exists.
+
+    Args:
+        current_variant_meta: Metadata for the current variant
+        all_variants: List of all variant metadata dictionaries
+        run_folder: Path to run folder containing JSON files
+        default_reference: Default reference variant number to use as fallback
+
+    Returns:
+        Tuple of (reference_variant_number, reference_segments or None)
+    """
+    current_config = normalize_transcription_config(current_variant_meta.get("transcription_config", {}))
+    current_vad = current_config.get("vad_filter")
+    current_chunk = current_config.get("chunk_length")
+
+    # Try to find a variant with matching vad_filter and chunk_length
+    best_match = None
+    best_score = 0
+
+    for variant_meta in all_variants:
+        variant_num = variant_meta.get("variant_number")
+        if variant_num is None or variant_num == current_variant_meta.get("variant_number"):
+            continue
+
+        variant_config = normalize_transcription_config(variant_meta.get("transcription_config", {}))
+        variant_vad = variant_config.get("vad_filter")
+        variant_chunk = variant_config.get("chunk_length")
+
+        # Score: 2 for vad match, 1 for chunk match
+        score = 0
+        if current_vad is not None and variant_vad == current_vad:
+            score += 2
+        if current_chunk is not None and variant_chunk == current_chunk:
+            score += 1
+
+        if score > best_score:
+            best_score = score
+            best_match = variant_num
+
+    # Use best match if found, otherwise fall back to default
+    reference_num = best_match if best_match is not None else default_reference
+
+    # Load reference segments
+    reference_data = load_variant_data(run_folder, reference_num)
+    if reference_data:
+        return reference_num, reference_data["json_data"].get("segments", [])
+
+    return reference_num, None
+
+
+def normalize_transcription_config(transcription_config: dict[str, Any]) -> dict[str, Any]:
+    """Normalize transcription config to use consistent key names.
+
+    Handles both faster-whisper standard keys (log_prob_threshold) and legacy keys (logprob_threshold).
+
+    Args:
+        transcription_config: Raw config dictionary from variant metadata
+
+    Returns:
+        Normalized config dictionary with consistent keys
+    """
+    normalized = dict(transcription_config)
+
+    # Normalize logprob_threshold key
+    if "log_prob_threshold" in normalized:
+        normalized["logprob_threshold"] = normalized["log_prob_threshold"]
+    elif "logprob_threshold" in normalized:
+        # Already normalized
+        pass
+    else:
+        normalized["logprob_threshold"] = None
+
+    return normalized
 
 
 def load_variant_data(run_folder: Path, variant_number: int) -> dict[str, Any] | None:
@@ -225,42 +548,158 @@ def generate_variant_report(
     variant_data: dict[str, Any],
     far_speaker_range: tuple[float, float] | None = None,
     silence_range: tuple[float, float] | None = None,
+    reference_segments: list[dict[str, Any]] | None = None,
+    baseline_stats: dict[str, Any] | None = None,
+    reference_variant_number: int | None = None,
 ) -> str:
     """Generate a report for a single variant."""
     json_data = variant_data["json_data"]
     variant_number = variant_data.get("variant_number", "?")
     variant_name = variant_data.get("variant_name", "unknown")
+    variant_meta = variant_data.get("variant_meta", {})
 
     segments = json_data.get("segments", [])
     stats = calculate_transcript_stats(segments)
 
-    # Get skip count from JSON metrics (already calculated during transcription)
+    # Extract and normalize config from variant metadata
+    raw_config = variant_meta.get("transcription_config", {})
+    transcription_config = normalize_transcription_config(raw_config)
+    no_speech_threshold = transcription_config.get("no_speech_threshold")
+    logprob_threshold = transcription_config.get("logprob_threshold")
+    vad_filter = transcription_config.get("vad_filter")
+    chunk_length = transcription_config.get("chunk_length")
+    condition_on_previous_text = transcription_config.get("condition_on_previous_text")
+
+    # Check if word timestamps are present
+    word_timestamps_present = any(seg.get("words") for seg in segments)
+
+    # Get skip count from JSON metrics (for reference, but we'll recalculate)
     metrics = json_data.get("metrics", {})
-    no_speech_skips = metrics.get("no_speech_skips_count")
+    no_speech_skips_reported = metrics.get("no_speech_skips_count")
+
+    # Calculate activation potential metrics
+    activation = calculate_activation_potential(segments, no_speech_threshold, logprob_threshold)
+
+    # Always recalculate skip counts (segments meeting skip rule)
+    segments_meeting_skip_rule_in_output = recalculate_no_speech_skips(segments, no_speech_threshold, logprob_threshold)
 
     # Runtime - approximate from duration if not in metadata
     runtime_s = None  # Would need to be extracted from logs or database
 
     lines: list[str] = []
     lines.append(f"Variant {variant_number} ({variant_name}):")
+
+    # Configuration block
+    lines.append("- Configuration:")
+    lines.append(f"  vad_filter: {vad_filter}")
+    lines.append(f"  chunk_length: {chunk_length}")
+    lines.append(f"  no_speech_threshold: {no_speech_threshold}")
+    # Show which key was found (for debugging)
+    logprob_key_used = (
+        "log_prob_threshold" if transcription_config.get("log_prob_threshold") is not None else "logprob_threshold"
+    )
+    lines.append(f"  logprob_threshold ({logprob_key_used}): {logprob_threshold}")
+    lines.append(f"  condition_on_previous_text: {condition_on_previous_text}")
+
+    # Word timestamps flag (top-level)
+    lines.append(f"- word_timestamps_present: {word_timestamps_present}")
+    if not word_timestamps_present:
+        lines.append("  ⚠️  WARNING: Word timestamps missing - range word counts are approximate")
+
     lines.append(f"- runtime_s: {runtime_s if runtime_s is not None else 'N/A (check logs/db)'}")
     lines.append(f"- segments_count: {stats['segment_count']}")
     lines.append(f"- transcript_chars: {stats['total_chars']}")
     lines.append(f"- transcript_words: {stats['total_words']}")
     lines.append(f"- last_end_s: {stats['last_end_s']:.1f}" if stats["last_end_s"] else "- last_end_s: N/A")
-    if no_speech_skips is not None:
-        lines.append(f"- no_speech_skips_count: {no_speech_skips}")
-    else:
-        lines.append("- no_speech_skips_count: N/A")
+
+    # Diff from baseline (if provided)
+    if baseline_stats:
+        lines.append("- Diff from baseline:")
+        delta_segments = stats["segment_count"] - baseline_stats.get("segment_count", 0)
+        delta_words = stats["total_words"] - baseline_stats.get("total_words", 0)
+        lines.append(f"  Δsegments_count: {delta_segments:+d}")
+        lines.append(f"  Δwords_total: {delta_words:+d}")
+        if silence_range:
+            silence_word_stats = calculate_words_in_range(segments, silence_range[0], silence_range[1])
+            baseline_silence_words = baseline_stats.get("silence_word_count", 0)
+            delta_silence = silence_word_stats["words_in_range"] - baseline_silence_words
+            lines.append(f"  Δsilence_word_count: {delta_silence:+d}")
+        if far_speaker_range:
+            far_word_stats = calculate_words_in_range(segments, far_speaker_range[0], far_speaker_range[1])
+            baseline_far_words = baseline_stats.get("far_range_words", 0)
+            delta_far = far_word_stats["words_in_range"] - baseline_far_words
+            lines.append(f"  Δfar_range_words: {delta_far:+d}")
+
+    # Activation potential metrics
+    lines.append("- Activation potential:")
+    if activation["max_no_speech_prob"] is not None:
+        lines.append(f"  max_no_speech_prob: {activation['max_no_speech_prob']:.4f}")
+    if activation["min_avg_logprob"] is not None:
+        lines.append(f"  min_avg_logprob: {activation['min_avg_logprob']:.3f}")
+    ns_thresh_str = str(no_speech_threshold) if no_speech_threshold is not None else "N/A"
+    lines.append(
+        f"  count_ns_candidates (segments with no_speech_prob > {ns_thresh_str}): {activation['count_ns_candidates']}"
+    )
+    lines.append(f"  count_would_skip (meets skip rule): {activation['count_would_skip']}")
+
+    # No speech skips - always show all three metrics
+    lines.append("- No speech skips:")
+    reported_str = str(no_speech_skips_reported) if no_speech_skips_reported is not None else "N/A"
+    lines.append(f"  no_speech_skips_reported (from metrics): {reported_str}")
+
+    # Warn if thresholds are missing (one present but not the other)
+    if (no_speech_threshold is not None and logprob_threshold is None) or (
+        no_speech_threshold is None and logprob_threshold is not None
+    ):
+        lines.append(
+            f"  ⚠️  WARNING: Incomplete threshold config "
+            f"(no_speech={no_speech_threshold}, logprob={logprob_threshold}) - "
+            f"skip counts may be inaccurate"
+        )
+
+    lines.append(f"  segments_meeting_skip_rule_in_output (recalc): {segments_meeting_skip_rule_in_output}")
+    # Counterfactual skip simulation (if reference segments provided)
+    if reference_segments is not None and no_speech_threshold is not None and logprob_threshold is not None:
+        counterfactual_count, counterfactual_segments = simulate_counterfactual_skips(
+            reference_segments, no_speech_threshold, logprob_threshold
+        )
+        ref_label = f"Variant {reference_variant_number}" if reference_variant_number else "reference"
+        lines.append(f"  no_speech_skips_counterfactual_on_reference ({ref_label}): {counterfactual_count}")
+        if counterfactual_segments:
+            lines.append("  Counterfactual segments that would be skipped:")
+            for seg_info in counterfactual_segments[:10]:  # Limit to top 10
+                lines.append(
+                    f"    - t={seg_info['start']:.1f}-{seg_info['end']:.1f}s "
+                    f"no_speech={seg_info['no_speech_prob']:.4f} "
+                    f"avg_lp={seg_info['avg_logprob']:.3f} "
+                    f'text="{seg_info["text"]}..."'
+                )
+            if len(counterfactual_segments) > 10:
+                lines.append(f"    ... and {len(counterfactual_segments) - 10} more")
 
     # Far speaker excerpt
     if far_speaker_range:
         start_s, end_s = far_speaker_range
         range_duration = end_s - start_s
         far_overlapping, far_contained, far_coverage = find_segments_in_range(segments, start_s, end_s)
-        lines.append(f"- Far-speaker range — overlapping segments [{format_time(start_s)}–{format_time(end_s)}]:")
-        lines.append(f"  coverage_in_range: {far_coverage:.1f}s of {range_duration:.1f}s")
+
+        # Word-based range analysis (using same overlap criteria as segments)
+        word_stats = calculate_words_in_range(segments, start_s, end_s)
+
+        lines.append(f"- Far-speaker range [{format_time(start_s)}–{format_time(end_s)}]:")
+        if word_stats["has_word_timestamps"]:
+            lines.append(f"  words_in_range: {word_stats['words_in_range']} (text_source=words)")
+            lines.append(f"  chars_in_range: {word_stats['chars_in_range']}")
+            lines.append(f"  unique_words_in_range: {word_stats['unique_words_in_range']}")
+        else:
+            lines.append(f"  coverage_in_range (segment-based fallback): {far_coverage:.1f}s of {range_duration:.1f}s")
+            text_src = word_stats.get("text_source", "unknown")
+            lines.append(f"  words_in_range: {word_stats['words_in_range']} (text_source={text_src})")
+            lines.append(
+                "  ⚠️  WARNING: word timestamps not available - word counts are approximate (full segment text used)"
+            )
         if far_overlapping:
+            lines.append("  Segments overlapping:")
             for seg in far_overlapping:
                 start = seg.get("start", 0)
                 end = seg.get("end", 0)
@@ -268,16 +707,18 @@ def generate_variant_report(
                 no_speech = seg.get("no_speech_prob", "N/A")
                 # Use word timestamps for accurate text slicing
                 text = extract_text_in_range(seg, start_s, end_s)
+                text_source_marker = "words"
                 if not text:
                     # Fallback to full segment text if word extraction failed
                     text = seg.get("text", "").strip()
+                    text_source_marker = "segment_fallback"
                 # Truncate text to ~80 chars
                 text_truncated = text[:80] + "..." if len(text) > 80 else text
                 # Calculate overlap for this segment
                 overlap = max(0.0, min(end, end_s) - max(start, start_s))
                 lines.append(
-                    f"  - ({start:.1f}-{end:.1f}, overlap={overlap:.1f}s, "
-                    f"avg_lp={avg_lp}, no_speech={no_speech}) {text_truncated}"
+                    f"    - ({start:.1f}-{end:.1f}, overlap={overlap:.1f}s, "
+                    f"avg_lp={avg_lp}, no_speech={no_speech}, text_source={text_source_marker}) {text_truncated}"
                 )
         else:
             lines.append("  - (no segments with meaningful overlap in this range)")
@@ -290,9 +731,42 @@ def generate_variant_report(
         start_s, end_s = silence_range
         range_duration = end_s - start_s
         silence_overlapping, silence_contained, silence_coverage = find_segments_in_range(segments, start_s, end_s)
-        lines.append(f"- Silence range — overlapping segments [{format_time(start_s)}–{format_time(end_s)}]:")
-        lines.append(f"  coverage_in_range: {silence_coverage:.1f}s of {range_duration:.1f}s")
+
+        # Word-based range analysis (using same overlap criteria as segments)
+        word_stats = calculate_words_in_range(segments, start_s, end_s)
+
+        # Judge-like silence metrics (using same overlap criteria as segments)
+        silence_metrics = calculate_silence_metrics(segments, start_s, end_s)
+
+        lines.append(f"- Silence range [{format_time(start_s)}–{format_time(end_s)}]:")
+        if word_stats["has_word_timestamps"]:
+            lines.append(f"  words_in_range: {word_stats['words_in_range']} (text_source=words)")
+            lines.append(f"  chars_in_range: {word_stats['chars_in_range']}")
+            lines.append(f"  unique_words_in_range: {word_stats['unique_words_in_range']}")
+        else:
+            lines.append(
+                f"  coverage_in_range (segment-based fallback): {silence_coverage:.1f}s of {range_duration:.1f}s"
+            )
+            text_src = word_stats.get("text_source", "unknown")
+            lines.append(f"  words_in_range: {word_stats['words_in_range']} (text_source={text_src})")
+            lines.append(
+                "  ⚠️  WARNING: word timestamps not available - word counts are approximate (full segment text used)"
+            )
+        lines.append("  Silence metrics:")
+        silence_text_src = silence_metrics.get("text_source", "unknown")
+        lines.append(
+            f"    silence_word_count: {silence_metrics['silence_word_count']} (text_source={silence_text_src})"
+        )
+        lines.append(f"    silence_segments_count: {silence_metrics['silence_segments_count']}")
+        if silence_metrics["silence_top_no_speech_prob"] is not None:
+            lines.append(f"    silence_top_no_speech_prob: {silence_metrics['silence_top_no_speech_prob']:.4f}")
+        if silence_metrics["silence_avg_logprob_mean"] is not None:
+            lines.append(f"    silence_avg_logprob_mean: {silence_metrics['silence_avg_logprob_mean']:.3f}")
+        if silence_metrics["silence_avg_logprob_min"] is not None:
+            lines.append(f"    silence_avg_logprob_min: {silence_metrics['silence_avg_logprob_min']:.3f}")
+
         if silence_overlapping:
+            lines.append("  Segments overlapping:")
             for seg in silence_overlapping:
                 start = seg.get("start", 0)
                 end = seg.get("end", 0)
@@ -300,16 +774,18 @@ def generate_variant_report(
                 no_speech = seg.get("no_speech_prob", "N/A")
                 # Use word timestamps for accurate text slicing
                 text = extract_text_in_range(seg, start_s, end_s)
+                text_source_marker = "words"
                 if not text:
                     # Fallback to full segment text if word extraction failed
                     text = seg.get("text", "").strip()
+                    text_source_marker = "segment_fallback"
                 # Truncate text to ~80 chars
                 text_truncated = text[:80] + "..." if len(text) > 80 else text
                 # Calculate overlap for this segment
                 overlap = max(0.0, min(end, end_s) - max(start, start_s))
                 lines.append(
-                    f"  - ({start:.1f}-{end:.1f}, overlap={overlap:.1f}s, "
-                    f"avg_lp={avg_lp}, no_speech={no_speech}) {text_truncated}"
+                    f"    - ({start:.1f}-{end:.1f}, overlap={overlap:.1f}s, "
+                    f"avg_lp={avg_lp}, no_speech={no_speech}, text_source={text_source_marker}) {text_truncated}"
                 )
         else:
             lines.append("  - (no segments with meaningful overlap in this range)")
@@ -458,8 +934,30 @@ def main() -> int:
         requested_numbers = {int(v.strip()) for v in args.variants.split(",")}
         variants = [v for v in variants if v.get("variant_number") in requested_numbers]
 
+    # Load baseline variant (Variant 1) for diff calculations
+    baseline_stats = None
+    baseline_data = load_variant_data(run_folder, 1)
+    if baseline_data:
+        baseline_segments = baseline_data["json_data"].get("segments", [])
+        baseline_stats_calc = calculate_transcript_stats(baseline_segments)
+        baseline_stats = {
+            "segment_count": baseline_stats_calc["segment_count"],
+            "total_words": baseline_stats_calc["total_words"],
+        }
+        if silence_range:
+            baseline_silence_stats = calculate_words_in_range(baseline_segments, silence_range[0], silence_range[1])
+            baseline_stats["silence_word_count"] = baseline_silence_stats["words_in_range"]
+        if far_speaker_range:
+            baseline_far_stats = calculate_words_in_range(baseline_segments, far_speaker_range[0], far_speaker_range[1])
+            baseline_stats["far_range_words"] = baseline_far_stats["words_in_range"]
+        print("Loaded baseline variant 1 for diff calculations", file=sys.stderr)  # noqa: T201
+    else:
+        print("Warning: Could not load baseline variant 1 for diff calculations", file=sys.stderr)  # noqa: T201
+
     # Generate reports
     report_lines: list[str] = []
+    csv_rows: list[dict[str, Any]] = []
+
     report_lines.append("=" * 80)
     report_lines.append("Variant Comparison Report")
     report_lines.append("=" * 80)
@@ -478,9 +976,61 @@ def main() -> int:
             print(f"Warning: Could not load data for variant {variant_number}", file=sys.stderr)  # noqa: T201
             continue
 
-        report = generate_variant_report(variant_data, far_speaker_range, silence_range)
+        # Find best reference variant for counterfactual analysis (same vad_filter/chunk_length)
+        reference_num, reference_segments = find_best_reference_variant(
+            variant_meta, variants, run_folder, default_reference=90
+        )
+
+        # Use reference segments for counterfactual analysis (but not for the reference variant itself)
+        ref_segs_for_this_variant = reference_segments if variant_number != reference_num else None
+
+        report = generate_variant_report(
+            variant_data,
+            far_speaker_range,
+            silence_range,
+            ref_segs_for_this_variant,
+            baseline_stats,
+            reference_variant_number=reference_num if ref_segs_for_this_variant else None,
+        )
         report_lines.append(report)
         report_lines.append("")
+
+        # Collect data for CSV export
+        json_data = variant_data["json_data"]
+        segments = json_data.get("segments", [])
+        stats = calculate_transcript_stats(segments)
+        config = normalize_transcription_config(variant_meta.get("transcription_config", {}))
+        activation = calculate_activation_potential(
+            segments, config.get("no_speech_threshold"), config.get("logprob_threshold")
+        )
+
+        csv_row = {
+            "variant_number": variant_number,
+            "variant_name": variant_meta.get("variant_name", ""),
+            "segment_count": stats["segment_count"],
+            "total_words": stats["total_words"],
+            "vad_filter": config.get("vad_filter"),
+            "chunk_length": config.get("chunk_length"),
+            "no_speech_threshold": config.get("no_speech_threshold"),
+            "logprob_threshold": config.get("logprob_threshold"),
+            "max_no_speech_prob": activation["max_no_speech_prob"],
+            "min_avg_logprob": activation["min_avg_logprob"],
+            "count_ns_candidates": activation["count_ns_candidates"],
+            "count_would_skip": activation["count_would_skip"],
+            "word_timestamps_present": any(seg.get("words") for seg in segments),
+        }
+
+        if silence_range:
+            silence_stats = calculate_words_in_range(segments, silence_range[0], silence_range[1])
+            csv_row["silence_word_count"] = silence_stats["words_in_range"]
+        if far_speaker_range:
+            far_stats = calculate_words_in_range(segments, far_speaker_range[0], far_speaker_range[1])
+            csv_row["far_range_words"] = far_stats["words_in_range"]
+        if baseline_stats:
+            csv_row["delta_segments"] = stats["segment_count"] - baseline_stats.get("segment_count", 0)
+            csv_row["delta_words"] = stats["total_words"] - baseline_stats.get("total_words", 0)
+
+        csv_rows.append(csv_row)
 
     # Write to markdown file
     report_content = "\n".join(report_lines)
@@ -500,6 +1050,28 @@ def main() -> int:
     except Exception as e:
         print(f"Error writing report to {report_path}: {e}", file=sys.stderr)  # noqa: T201
         return 1
+
+    # Write CSV export
+    if csv_rows:
+        csv_filename = f"variant_report_{run_folder.name}.csv"
+        csv_path = output_dir / csv_filename
+
+        # Get all possible keys from all rows
+        all_keys = set()
+        for row in csv_rows:
+            all_keys.update(row.keys())
+
+        fieldnames = sorted(all_keys)
+
+        try:
+            with csv_path.open("w", encoding="utf-8", newline="") as f:
+                writer = csv.DictWriter(f, fieldnames=fieldnames)
+                writer.writeheader()
+                writer.writerows(csv_rows)
+            print(f"CSV export saved to: {csv_path}", file=sys.stderr)  # noqa: T201
+        except Exception as e:
+            print(f"Error writing CSV to {csv_path}: {e}", file=sys.stderr)  # noqa: T201
+            # Don't fail the whole script if CSV export fails
 
     return 0
 

@@ -49,7 +49,7 @@ exit /b 1
 echo Audio file: !AUDIO_FILE!
 echo.
 echo Variant details:
-echo   - Variant 1: Baseline (noprep_noparamtrans)
+echo   - Variant 1: Baseline (baseline_raw_defaults)
 echo   - Variant 6: condition_on_previous_text=False
 echo   - Variant 21: beam_size=4
 echo   - Variant 22: beam_size=6
@@ -78,7 +78,7 @@ echo All variants are in a single timestamped folder (e.g., 2024-01-15T10-30-45)
 echo Files are prefixed with variant number (e.g., variant_001_audio.wav.txt)
 echo A single run_meta.json contains metadata for all variants
 echo.
-echo   - Variant 1: Baseline (noprep_noparamtrans)
+echo   - Variant 1: Baseline (baseline_raw_defaults)
 echo   - Variant 6: condition_on_previous_text=False
 echo   - Variant 21: beam_size=4
 echo   - Variant 22: beam_size=6
