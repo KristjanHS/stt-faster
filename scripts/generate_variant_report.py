@@ -934,9 +934,9 @@ def main() -> int:
         requested_numbers = {int(v.strip()) for v in args.variants.split(",")}
         variants = [v for v in variants if v.get("variant_number") in requested_numbers]
 
-    # Load baseline variant (Variant 1) for diff calculations
+    # Load baseline variant (Variant 5) for diff calculations
     baseline_stats = None
-    baseline_data = load_variant_data(run_folder, 1)
+    baseline_data = load_variant_data(run_folder, 5)
     if baseline_data:
         baseline_segments = baseline_data["json_data"].get("segments", [])
         baseline_stats_calc = calculate_transcript_stats(baseline_segments)
@@ -950,9 +950,9 @@ def main() -> int:
         if far_speaker_range:
             baseline_far_stats = calculate_words_in_range(baseline_segments, far_speaker_range[0], far_speaker_range[1])
             baseline_stats["far_range_words"] = baseline_far_stats["words_in_range"]
-        print("Loaded baseline variant 1 for diff calculations", file=sys.stderr)  # noqa: T201
+        print("Loaded baseline variant 5 for diff calculations", file=sys.stderr)  # noqa: T201
     else:
-        print("Warning: Could not load baseline variant 1 for diff calculations", file=sys.stderr)  # noqa: T201
+        print("Warning: Could not load baseline variant 5 for diff calculations", file=sys.stderr)  # noqa: T201
 
     # Generate reports
     report_lines: list[str] = []
