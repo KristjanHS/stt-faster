@@ -5,6 +5,7 @@ from __future__ import annotations
 from backend.variants.transcription_presets import (
     create_baseline_config,
     create_minimal_config,
+    create_no_vad_baseline_config,
     create_project_config,
 )
 from backend.variants.variant import PreprocessStep, Variant
@@ -28,19 +29,19 @@ def _get_all_variants() -> list[Variant]:
     """
     return [
         # Group 1: No preprocessing (simplest) - Variants 1-7
-        # Variant 1: No preprocessing + raw decode baseline (no VAD by design)
+        # Variant 1: No preprocessing + true baseline (no overrides, uses library defaults)
         Variant(
-            name="baseline_no_vad_defaults",
+            name="baseline_true_defaults",
             number=1,
             preprocess_steps=[],
-            transcription_config=create_baseline_config(vad_filter=False),
+            transcription_config=create_baseline_config(),  # empty overrides
         ),
-        # Variant 2: No preprocessing + project defaults
+        # Variant 2: No preprocessing + raw decode baseline (no VAD by design)
         Variant(
-            name="no_preprocessing",
+            name="baseline_no_vad",
             number=2,
             preprocess_steps=[],
-            transcription_config=create_project_config(),
+            transcription_config=create_no_vad_baseline_config(),
         ),
         # Variant 3: No preprocessing + minimal defaults
         Variant(
@@ -392,7 +393,7 @@ def get_builtin_variants() -> list[Variant]:
     """
     all_variants = _get_all_variants()
     # Only return active variants:
-    # 1 (baseline_no_vad_defaults), 4 (noprep_minimal_no_speech_threshold), 7 (noprep_minimal_beam_size)
+    # 1 (baseline_true_defaults), 4 (noprep_minimal_no_speech_threshold), 7 (noprep_minimal_beam_size)
     active_variant_numbers = {1, 4, 7}
     return [v for v in all_variants if v.number in active_variant_numbers]
 
@@ -435,7 +436,7 @@ def get_conservative_sweep_variants() -> list[int]:
     """Return variant numbers for conservative sweep.
 
     Conservative sweep includes:
-    - Variant 1: Baseline (baseline_no_vad_defaults)
+    - Variant 1: Baseline (baseline_true_defaults)
     - Variant 6: condition_on_previous_text=False
     - Variants 21-26: Conservative sweep variants (no preprocessing, minimal config with small deltas)
 

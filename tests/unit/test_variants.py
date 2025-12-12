@@ -174,7 +174,7 @@ class TestVariantExecutor:
         # We'll use a variant that has no preprocessing to minimize dependencies
 
         # Get a real variant that we can test with minimal setup
-        variant = get_variant_by_number(1)  # baseline_raw_defaults - simplest variant
+        variant = get_variant_by_number(1)  # baseline_true_defaults - simplest variant
         assert variant is not None
 
         # Note: This test would require actual model loading, so we'll skip it
@@ -378,6 +378,60 @@ class TestVariantPresets:
             and v.transcription_config.task == minimal_ref.task
         ]
         assert len(active_minimal) > 0, "At least one active variant should use minimal config"
+
+    def test_baseline_config_to_kwargs_is_empty(self) -> None:
+        """Test that baseline config returns empty kwargs (true baseline)."""
+        from backend.variants.transcription_presets import create_baseline_config
+
+        baseline = create_baseline_config()
+        kwargs = baseline.to_kwargs()
+
+        # True baseline should have no explicit fields
+        assert kwargs == {}, f"Baseline config should return empty kwargs, got {kwargs}"
+
+    def test_no_vad_baseline_config_to_kwargs_has_only_vad_filter(self) -> None:
+        """Test that no-VAD baseline config only has vad_filter=False."""
+        from backend.variants.transcription_presets import create_no_vad_baseline_config
+
+        baseline = create_no_vad_baseline_config()
+        kwargs = baseline.to_kwargs()
+
+        # No-VAD baseline should only have vad_filter=False
+        assert kwargs == {"vad_filter": False}, (
+            f"No-VAD baseline config should only have vad_filter=False, got {kwargs}"
+        )
+
+    def test_minimal_config_to_kwargs_has_expected_keys(self) -> None:
+        """Test that minimal config returns expected kwargs."""
+        from backend.variants.transcription_presets import create_minimal_config
+
+        minimal = create_minimal_config()
+        kwargs = minimal.to_kwargs()
+
+        # Minimal config should have at least beam_size, word_timestamps, task
+        assert "beam_size" in kwargs, "Minimal config should have beam_size"
+        assert "word_timestamps" in kwargs, "Minimal config should have word_timestamps"
+        assert "task" in kwargs, "Minimal config should have task"
+        assert kwargs["beam_size"] == 5, "Minimal config beam_size should be 5"
+        assert kwargs["word_timestamps"] is True, "Minimal config word_timestamps should be True"
+        assert kwargs["task"] == "transcribe", "Minimal config task should be 'transcribe'"
+
+    def test_baseline_config_guard_in_executor(self) -> None:
+        """Test that baseline configs are correctly identified and guarded."""
+        from backend.variants.executor import is_baseline_config
+        from backend.variants.transcription_presets import create_baseline_config, create_no_vad_baseline_config
+
+        # True baseline (empty)
+        baseline = create_baseline_config()
+        assert is_baseline_config(baseline), "True baseline should be identified as baseline"
+
+        # No-VAD baseline (only vad_filter=False)
+        no_vad_baseline = create_no_vad_baseline_config()
+        assert is_baseline_config(no_vad_baseline), "No-VAD baseline should be identified as baseline"
+
+        # Verify to_kwargs() works correctly
+        assert baseline.to_kwargs() == {}, "True baseline should have empty kwargs"
+        assert no_vad_baseline.to_kwargs() == {"vad_filter": False}, "No-VAD baseline should have vad_filter=False"
 
 
 class TestVariantCompatibility:

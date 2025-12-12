@@ -22,7 +22,6 @@ from backend.transcribe import (
     segment_to_payload,
 )
 from backend.variants.preprocess_steps import create_preprocess_runner
-from backend.variants.transcription_presets import get_minimal_config
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
@@ -96,9 +95,9 @@ def create_variant_transcribe_config(variant: Variant) -> Any:  # TranscriptionC
 def is_baseline_config(config: Any) -> bool:  # TranscriptionConfig
     """Check if a TranscriptionConfig is a true baseline (uses library defaults).
 
-    A baseline config should only have vad_filter set (typically False for raw baseline).
-    All other parameters should match TranscriptionConfig defaults, meaning they
-    will be filtered out and faster-whisper will use its own defaults.
+    A baseline config uses _explicit_fields to track which parameters are set.
+    For baseline, either no fields are explicitly set (true baseline) or
+    only vad_filter is explicitly set (no-VAD baseline).
 
     Args:
         config: TranscriptionConfig to check
@@ -106,38 +105,21 @@ def is_baseline_config(config: Any) -> bool:  # TranscriptionConfig
     Returns:
         True if config is a baseline config, False otherwise
     """
-    from dataclasses import fields  # noqa: PLC0415
+    # Check if config has _explicit_fields tracking
+    if not hasattr(config, "_explicit_fields"):
+        return False
 
-    default_config = type(config)()  # Create default instance
-    config_fields = {f.name for f in fields(config)}
-
-    # For baseline, we allow only vad_filter to differ from defaults
-    # All other fields must match defaults
-    for field_name in config_fields:
-        if field_name == "vad_filter":
-            continue  # vad_filter is allowed to differ for baseline
-
-        config_value = getattr(config, field_name)
-        default_value = getattr(default_config, field_name)
-
-        # Compare values (handle dict and list specially)
-        if isinstance(config_value, dict) and isinstance(default_value, dict):
-            if config_value != default_value:
-                return False
-        elif isinstance(config_value, list) and isinstance(default_value, list):
-            if config_value != default_value:
-                return False
-        elif config_value != default_value:
-            return False
-
-    return True
+    explicit = config._explicit_fields
+    # Baseline: empty explicit fields, or only vad_filter
+    return len(explicit) == 0 or (len(explicit) == 1 and "vad_filter" in explicit)
 
 
 def is_minimal_config(config: Any) -> bool:  # TranscriptionConfig
-    """Check if a TranscriptionConfig is minimal (only essential params set).
+    """Check if a TranscriptionConfig is a minimal config.
 
-    A minimal config only has beam_size, word_timestamps, task, and maybe a few
-    allowed overrides set. All other parameters should use TranscriptionConfig defaults.
+    A minimal config uses _explicit_fields to track which parameters are set.
+    For minimal configs, only a small set of allowed parameters should be
+    explicitly set (beam_size, word_timestamps, task, plus optional overrides).
 
     Args:
         config: TranscriptionConfig to check
@@ -145,46 +127,18 @@ def is_minimal_config(config: Any) -> bool:  # TranscriptionConfig
     Returns:
         True if config is minimal, False otherwise
     """
-    # Parameters that are allowed in minimal config
-    allowed_minimal_params = {
-        "beam_size",
-        "word_timestamps",
-        "task",
-        "chunk_length",
-        "no_speech_threshold",
-        "condition_on_previous_text",
-    }
+    # Check if config has _explicit_fields tracking
+    if not hasattr(config, "_explicit_fields"):
+        return False
 
-    # Create a minimal config and a default config for comparison
-    minimal_ref = get_minimal_config()
-    minimal_ref.beam_size = 5  # Minimal config also sets beam_size
-    default_config = type(config)()  # Create default instance
+    explicit = config._explicit_fields
+    # Minimal configs can have beam_size, word_timestamps, task, and various overrides
+    # If it's a baseline (empty or only vad_filter), it's not minimal
+    if len(explicit) == 0 or (len(explicit) == 1 and "vad_filter" in explicit):
+        return False
 
-    # Get all field names from the dataclass
-    from dataclasses import fields  # noqa: PLC0415
-
-    config_fields = {f.name for f in fields(config)}
-
-    # Check each field - it should either:
-    # 1. Be in allowed_minimal_params (can differ from defaults)
-    # 2. Match the default value (not explicitly set)
-    for field_name in config_fields:
-        if field_name in allowed_minimal_params:
-            continue  # This field is allowed to differ from defaults
-
-        config_value = getattr(config, field_name)
-        default_value = getattr(default_config, field_name)
-
-        # Compare values (handle dict and list specially)
-        if isinstance(config_value, dict) and isinstance(default_value, dict):
-            if config_value != default_value:
-                return False
-        elif isinstance(config_value, list) and isinstance(default_value, list):
-            if config_value != default_value:
-                return False
-        elif config_value != default_value:
-            return False
-
+    # Minimal configs are identified by having explicit fields tracked
+    # The executor will use to_kwargs() to get only explicitly set fields
     return True
 
 
@@ -401,25 +355,31 @@ def transcribe_with_baseline_params(
     else:
         LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
 
-    # For baseline, only pass language and vad_filter (if explicitly set)
+    # For baseline, use to_kwargs() to get only explicitly set fields
     # Everything else uses faster-whisper library defaults
     LOGGER.info("🔄 Starting transcription with baseline config (library defaults)...")
     transcribe_start = time.time()
 
-    transcribe_kwargs: dict[str, Any] = {}
+    # Get only explicitly set parameters from config
+    transcribe_kwargs = transcription_config.to_kwargs()
 
-    # Only include language if it's set
+    # Guard: baseline should only have vad_filter (or be empty)
+    # If it has other keys, log a warning
+    baseline_allowed_keys = {"vad_filter"}
+    unexpected_keys = set(transcribe_kwargs.keys()) - baseline_allowed_keys
+    if unexpected_keys:
+        LOGGER.warning(
+            "Baseline config has unexpected explicit fields: %s. "
+            "Baseline should only have vad_filter or be empty. "
+            "This may indicate a misconfigured baseline config.",
+            unexpected_keys,
+        )
+
+    # Only include language if it's set (language is not part of TranscriptionConfig)
     if applied_language:
         transcribe_kwargs["language"] = applied_language
 
-    # Only include vad_filter if it's explicitly set in config
-    if hasattr(transcription_config, "vad_filter"):
-        vad_filter_value = getattr(transcription_config, "vad_filter")
-        if vad_filter_value is not None:
-            transcribe_kwargs["vad_filter"] = vad_filter_value
-            LOGGER.debug("Including vad_filter: %s (from baseline config)", vad_filter_value)
-
-    LOGGER.debug("Calling model.transcribe() with baseline kwargs: %s", transcribe_kwargs)
+    LOGGER.info("Calling model.transcribe() with baseline kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),
         **transcribe_kwargs,
@@ -435,39 +395,42 @@ def transcribe_with_baseline_params(
     segment_payloads: list[dict[str, Any]] = []
     audio_processed = 0.0
     last_progress_log = transcribe_start
-    no_speech_skips = 0
-    no_speech_skip_windows: list[dict[str, Any]] = []
+    # For baseline, we don't know the actual thresholds used by faster-whisper
+    # so we can't accurately count "skips". Set to None to indicate unknown.
+    segments_matching_skip_rule_guess = 0
+    segments_matching_skip_rule_guess_windows: list[dict[str, Any]] = []
 
-    # For baseline, use faster-whisper defaults (we don't know what they are, so we'll use None)
-    # These are just for tracking, not for filtering
+    # For baseline, we don't know the actual thresholds used by the library
+    # We could guess (0.5 and -1.0 are common defaults), but that's misleading
+    # Instead, we'll collect segment data but not claim it's "skips"
 
     for segment in segments:
         segment_payloads.append(segment_to_payload(segment))
 
-        # Track segments that match skip criteria (no_speech_prob > threshold AND avg_logprob <= threshold)
-        # Note: These are segments that passed but match skip criteria - truly skipped windows don't appear in output
+        # Collect segment metadata for potential analysis, but don't claim these are "skips"
+        # since we don't know the actual thresholds used by faster-whisper
         no_speech_prob = getattr(segment, "no_speech_prob", None)
         avg_logprob = getattr(segment, "avg_logprob", None)
         seg_start = getattr(segment, "start", None)
         seg_end = getattr(segment, "end", None)
 
-        # For baseline, we can't track skips accurately since we don't know the thresholds used
-        # But we'll still collect the data for metrics
+        # Optional: collect segments matching a guessed rule for analysis
+        # but this is NOT accurate skip counting
         if no_speech_prob is not None and avg_logprob is not None:
             no_speech_val = float(no_speech_prob)
             avg_logprob_val = float(avg_logprob)
-            # Use default thresholds for tracking (0.5 and -1.0 are common defaults)
+            # Use guessed thresholds (0.5 and -1.0 are common defaults, but not guaranteed)
             if no_speech_val > 0.5 and avg_logprob_val <= -1.0:
-                no_speech_skips += 1
-                skip_window = {
+                segments_matching_skip_rule_guess += 1
+                guess_window = {
                     "start": float(seg_start) if seg_start is not None else None,
                     "end": float(seg_end) if seg_end is not None else None,
                     "no_speech_prob": no_speech_val,
                     "avg_logprob": avg_logprob_val,
                 }
-                skip_window = {k: v for k, v in skip_window.items() if v is not None}
-                if skip_window:
-                    no_speech_skip_windows.append(skip_window)
+                guess_window = {k: v for k, v in guess_window.items() if v is not None}
+                if guess_window:
+                    segments_matching_skip_rule_guess_windows.append(guess_window)
 
         # Track progress for logging
         end_time = getattr(segment, "end", None)
@@ -579,29 +542,47 @@ def transcribe_with_baseline_params(
         # SNR estimation
         snr_estimation_method="estimate_snr_db",  # Hardcoded method
         # Transcription parameters (baseline uses library defaults, so most are None)
-        beam_size=None,  # Using library default
-        patience=None,  # Using library default
-        word_timestamps=None,  # Using library default
-        task=None,  # Using library default
-        chunk_length=None,  # Using library default
-        vad_filter=(getattr(transcription_config, "vad_filter", None) if transcription_config else None),
-        vad_threshold=None,  # Using library default
-        vad_min_speech_duration_ms=None,  # Using library default
-        vad_max_speech_duration_s=None,  # Using library default
-        vad_min_silence_duration_ms=None,  # Using library default
-        vad_speech_pad_ms=None,  # Using library default
-        temperature=None,  # Using library default
-        temperature_increment_on_fallback=None,  # Using library default
-        best_of=None,  # Using library default
-        compression_ratio_threshold=None,  # Using library default
-        logprob_threshold=None,  # Using library default
-        no_speech_threshold=None,  # Using library default
-        length_penalty=None,  # Using library default
-        repetition_penalty=None,  # Using library default
-        no_repeat_ngram_size=None,  # Using library default
-        suppress_tokens=None,  # Using library default
-        condition_on_previous_text=None,  # Using library default
-        initial_prompt=None,  # Using library default
+        # Use values from transcribe_kwargs (what was actually passed)
+        beam_size=transcribe_kwargs.get("beam_size"),
+        patience=transcribe_kwargs.get("patience"),
+        word_timestamps=transcribe_kwargs.get("word_timestamps"),
+        task=transcribe_kwargs.get("task"),
+        chunk_length=transcribe_kwargs.get("chunk_length"),
+        vad_filter=transcribe_kwargs.get("vad_filter"),
+        vad_threshold=transcribe_kwargs.get("vad_threshold"),
+        # Extract VAD parameters from vad_parameters dict if present
+        vad_min_speech_duration_ms=(
+            transcribe_kwargs.get("vad_parameters", {}).get("min_speech_duration_ms")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
+            else None
+        ),
+        vad_max_speech_duration_s=(
+            transcribe_kwargs.get("vad_parameters", {}).get("max_speech_duration_s")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
+            else None
+        ),
+        vad_min_silence_duration_ms=(
+            transcribe_kwargs.get("vad_parameters", {}).get("min_silence_duration_ms")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
+            else None
+        ),
+        vad_speech_pad_ms=(
+            transcribe_kwargs.get("vad_parameters", {}).get("speech_pad_ms")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
+            else None
+        ),
+        temperature=transcribe_kwargs.get("temperature"),
+        temperature_increment_on_fallback=transcribe_kwargs.get("temperature_increment_on_fallback"),
+        best_of=transcribe_kwargs.get("best_of"),
+        compression_ratio_threshold=transcribe_kwargs.get("compression_ratio_threshold"),
+        logprob_threshold=transcribe_kwargs.get("logprob_threshold"),
+        no_speech_threshold=transcribe_kwargs.get("no_speech_threshold"),
+        length_penalty=transcribe_kwargs.get("length_penalty"),
+        repetition_penalty=transcribe_kwargs.get("repetition_penalty"),
+        no_repeat_ngram_size=transcribe_kwargs.get("no_repeat_ngram_size"),
+        suppress_tokens=transcribe_kwargs.get("suppress_tokens"),
+        condition_on_previous_text=transcribe_kwargs.get("condition_on_previous_text"),
+        initial_prompt=transcribe_kwargs.get("initial_prompt"),
         # Model parameters
         model_id=preset_config.model_id,
         device=preset_config.device,
@@ -611,8 +592,10 @@ def transcribe_with_baseline_params(
         float_precision=FLOAT_PRECISION,
         # Segment statistics
         segment_count=len(segment_payloads),
-        no_speech_skips_count=no_speech_skips,  # Always record, even if 0
-        no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
+        # For baseline, we don't know actual skip thresholds used by faster-whisper,
+        # so we can't accurately count skips. Set to None to indicate unknown.
+        no_speech_skips_count=None,
+        no_speech_skip_windows=None,
     )
     if metrics_collector:
         metrics_collector(metrics_payload)
@@ -682,40 +665,55 @@ def transcribe_with_minimal_params(
     LOGGER.info("🔄 Starting transcription...")
     transcribe_start = time.time()
 
-    # This set defines which parameters can be included in minimal preset
-    allowed_minimal_params = {
+    # Use to_kwargs() to get only explicitly set parameters from config
+    transcribe_kwargs = transcription_config.to_kwargs()
+
+    # Whitelist: only allow specific parameters for minimal configs
+    # This prevents accidentally passing unexpected parameters
+    ALLOWED_MINIMAL_KEYS = {
         "beam_size",
+        "word_timestamps",
+        "task",
         "chunk_length",
         "no_speech_threshold",
+        "logprob_threshold",
         "condition_on_previous_text",
         "patience",
         "vad_filter",
+        "vad_parameters",
+        "vad_threshold",
+        "temperature",
+        "temperature_increment_on_fallback",
+        "best_of",
+        "compression_ratio_threshold",
+        "length_penalty",
+        "repetition_penalty",
+        "no_repeat_ngram_size",
+        "suppress_tokens",
+        "initial_prompt",
     }
 
-    # Start with base minimal parameters
-    transcribe_kwargs: dict[str, Any] = {
-        "beam_size": getattr(transcription_config, "beam_size", 5),
-        "word_timestamps": getattr(transcription_config, "word_timestamps", False),
-        "language": applied_language,
-        "task": getattr(transcription_config, "task", "transcribe"),
-    }
+    # Filter to only allowed keys
+    filtered_kwargs: dict[str, Any] = {}
+    for key, value in transcribe_kwargs.items():
+        if key in ALLOWED_MINIMAL_KEYS:
+            filtered_kwargs[key] = value
+        else:
+            LOGGER.warning(
+                "Minimal config has unexpected parameter '%s' (not in ALLOWED_MINIMAL_KEYS). "
+                "This parameter will be omitted to prevent contamination.",
+                key,
+            )
 
-    # Add any allowed parameters from config that differ from defaults
-    for param_name in allowed_minimal_params:
-        if hasattr(transcription_config, param_name):
-            param_value = getattr(transcription_config, param_name)
-            # Only include if it's not None and not the default
-            if param_value is not None:
-                transcribe_kwargs[param_name] = param_value
-                LOGGER.debug(
-                    "Including minimal param: %s = %s (from transcription_config)",
-                    param_name,
-                    param_value,
-                )
+    transcribe_kwargs = filtered_kwargs
+
+    # Language is not part of TranscriptionConfig, add it separately if set
+    if applied_language:
+        transcribe_kwargs["language"] = applied_language
 
     # Handle VAD parameters specially (vad_threshold is merged into vad_parameters)
     # Only include vad_parameters if vad_filter is True (or not explicitly False)
-    if hasattr(transcription_config, "vad_filter") and transcription_config.vad_filter:
+    if transcribe_kwargs.get("vad_filter") is True:
         # Merge vad_threshold into vad_parameters dict (like in transcribe.py)
         vad_params = dict(getattr(transcription_config, "vad_parameters", {}))
         if hasattr(transcription_config, "vad_threshold") and transcription_config.vad_threshold is not None:
@@ -727,7 +725,8 @@ def transcribe_with_minimal_params(
                 "Including VAD parameters: %s (vad_filter=True)",
                 vad_params,
             )
-    LOGGER.debug("Calling model.transcribe() with kwargs: %s", transcribe_kwargs)
+
+    LOGGER.info("Calling model.transcribe() with minimal kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),
         **transcribe_kwargs,
@@ -746,36 +745,48 @@ def transcribe_with_minimal_params(
     no_speech_skips = 0
     no_speech_skip_windows: list[dict[str, Any]] = []
 
-    # Track segments that would have been skipped due to no_speech_threshold
-    no_speech_threshold = getattr(transcription_config, "no_speech_threshold", 0.5)  # Default from TranscriptionConfig
-    logprob_threshold = getattr(transcription_config, "logprob_threshold", -1.0)  # Default from TranscriptionConfig
+    # Derive thresholds from what was actually passed to model.transcribe()
+    # Only count skips if these thresholds were explicitly set
+    no_speech_threshold = transcribe_kwargs.get("no_speech_threshold")
+    logprob_threshold = transcribe_kwargs.get("logprob_threshold")
+
+    # Only track skip matches if both thresholds were explicitly passed
+    can_track_skips = no_speech_threshold is not None and logprob_threshold is not None
 
     for segment in segments:
         segment_payloads.append(segment_to_payload(segment))
 
         # Track segments that match skip criteria (no_speech_prob > threshold AND avg_logprob <= threshold)
         # Note: These are segments that passed but match skip criteria - truly skipped windows don't appear in output
-        no_speech_prob = getattr(segment, "no_speech_prob", None)
-        avg_logprob = getattr(segment, "avg_logprob", None)
-        seg_start = getattr(segment, "start", None)
-        seg_end = getattr(segment, "end", None)
+        # Only do this if we actually passed these thresholds to model.transcribe()
+        if can_track_skips:
+            no_speech_prob = getattr(segment, "no_speech_prob", None)
+            avg_logprob = getattr(segment, "avg_logprob", None)
+            seg_start = getattr(segment, "start", None)
+            seg_end = getattr(segment, "end", None)
 
-        if no_speech_prob is not None and avg_logprob is not None:
-            no_speech_val = float(no_speech_prob)
-            avg_logprob_val = float(avg_logprob)
-            if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
-                no_speech_skips += 1
-                # Add to debug list
-                skip_window = {
-                    "start": float(seg_start) if seg_start is not None else None,
-                    "end": float(seg_end) if seg_end is not None else None,
-                    "no_speech_prob": no_speech_val,
-                    "avg_logprob": avg_logprob_val,
-                }
-                # Remove None values
-                skip_window = {k: v for k, v in skip_window.items() if v is not None}
-                if skip_window:
-                    no_speech_skip_windows.append(skip_window)
+            if no_speech_prob is not None and avg_logprob is not None:
+                no_speech_val = float(no_speech_prob)
+                avg_logprob_val = float(avg_logprob)
+                # Only compare if thresholds are not None (they were explicitly passed)
+                if (
+                    no_speech_threshold is not None
+                    and logprob_threshold is not None
+                    and no_speech_val > no_speech_threshold
+                    and avg_logprob_val <= logprob_threshold
+                ):
+                    no_speech_skips += 1
+                    # Add to debug list
+                    skip_window = {
+                        "start": float(seg_start) if seg_start is not None else None,
+                        "end": float(seg_end) if seg_end is not None else None,
+                        "no_speech_prob": no_speech_val,
+                        "avg_logprob": avg_logprob_val,
+                    }
+                    # Remove None values
+                    skip_window = {k: v for k, v in skip_window.items() if v is not None}
+                    if skip_window:
+                        no_speech_skip_windows.append(skip_window)
 
         # Track progress for logging
         end_time = getattr(segment, "end", None)
@@ -885,67 +896,49 @@ def transcribe_with_minimal_params(
         denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
         # SNR estimation
         snr_estimation_method="estimate_snr_db",  # Hardcoded method
-        # Transcription parameters (minimal preset uses defaults/hardcoded values)
-        # Use values from transcription_config if provided, otherwise None
-        beam_size=5,  # Hardcoded in minimal preset
-        patience=getattr(transcription_config, "patience", None) if transcription_config else None,
-        word_timestamps=False,  # Hardcoded in minimal preset
-        task="transcribe",  # Hardcoded in minimal preset
-        chunk_length=(getattr(transcription_config, "chunk_length", None) if transcription_config else None),
-        vad_filter=(getattr(transcription_config, "vad_filter", None) if transcription_config else None),
-        vad_threshold=(getattr(transcription_config, "vad_threshold", None) if transcription_config else None),
+        # Transcription parameters - use actual values from transcribe_kwargs
+        # This ensures metrics reflect what was actually passed to model.transcribe()
+        beam_size=transcribe_kwargs.get("beam_size"),
+        patience=transcribe_kwargs.get("patience"),
+        word_timestamps=transcribe_kwargs.get("word_timestamps"),
+        task=transcribe_kwargs.get("task"),
+        chunk_length=transcribe_kwargs.get("chunk_length"),
+        vad_filter=transcribe_kwargs.get("vad_filter"),
+        vad_threshold=transcribe_kwargs.get("vad_threshold"),
+        # Extract VAD parameters from vad_parameters dict if present
         vad_min_speech_duration_ms=(
-            transcription_config.vad_parameters.get("min_speech_duration_ms")
-            if transcription_config
-            and hasattr(transcription_config, "vad_parameters")
-            and transcription_config.vad_parameters
+            transcribe_kwargs.get("vad_parameters", {}).get("min_speech_duration_ms")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
             else None
         ),
         vad_max_speech_duration_s=(
-            transcription_config.vad_parameters.get("max_speech_duration_s")
-            if transcription_config
-            and hasattr(transcription_config, "vad_parameters")
-            and transcription_config.vad_parameters
+            transcribe_kwargs.get("vad_parameters", {}).get("max_speech_duration_s")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
             else None
         ),
         vad_min_silence_duration_ms=(
-            transcription_config.vad_parameters.get("min_silence_duration_ms")
-            if transcription_config
-            and hasattr(transcription_config, "vad_parameters")
-            and transcription_config.vad_parameters
+            transcribe_kwargs.get("vad_parameters", {}).get("min_silence_duration_ms")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
             else None
         ),
         vad_speech_pad_ms=(
-            transcription_config.vad_parameters.get("speech_pad_ms")
-            if transcription_config
-            and hasattr(transcription_config, "vad_parameters")
-            and transcription_config.vad_parameters
+            transcribe_kwargs.get("vad_parameters", {}).get("speech_pad_ms")
+            if isinstance(transcribe_kwargs.get("vad_parameters"), dict)
             else None
         ),
-        temperature=(getattr(transcription_config, "temperature", None) if transcription_config else None),
-        temperature_increment_on_fallback=(
-            getattr(transcription_config, "temperature_increment_on_fallback", None) if transcription_config else None
-        ),
-        best_of=(getattr(transcription_config, "best_of", None) if transcription_config else None),
-        compression_ratio_threshold=(
-            getattr(transcription_config, "compression_ratio_threshold", None) if transcription_config else None
-        ),
-        logprob_threshold=(getattr(transcription_config, "logprob_threshold", None) if transcription_config else None),
-        no_speech_threshold=(
-            getattr(transcription_config, "no_speech_threshold", None) if transcription_config else None
-        ),
-        length_penalty=(getattr(transcription_config, "length_penalty", None) if transcription_config else None),
-        repetition_penalty=(
-            getattr(transcription_config, "repetition_penalty", None) if transcription_config else None
-        ),
-        no_repeat_ngram_size=(
-            getattr(transcription_config, "no_repeat_ngram_size", None) if transcription_config else None
-        ),
-        suppress_tokens=(getattr(transcription_config, "suppress_tokens", None) if transcription_config else None),
-        condition_on_previous_text=(
-            getattr(transcription_config, "condition_on_previous_text", None) if transcription_config else None
-        ),
-        initial_prompt=(getattr(transcription_config, "initial_prompt", None) if transcription_config else None),
+        # Use values from transcribe_kwargs (what was actually passed)
+        temperature=transcribe_kwargs.get("temperature"),
+        temperature_increment_on_fallback=transcribe_kwargs.get("temperature_increment_on_fallback"),
+        best_of=transcribe_kwargs.get("best_of"),
+        compression_ratio_threshold=transcribe_kwargs.get("compression_ratio_threshold"),
+        logprob_threshold=transcribe_kwargs.get("logprob_threshold"),
+        no_speech_threshold=transcribe_kwargs.get("no_speech_threshold"),
+        length_penalty=transcribe_kwargs.get("length_penalty"),
+        repetition_penalty=transcribe_kwargs.get("repetition_penalty"),
+        no_repeat_ngram_size=transcribe_kwargs.get("no_repeat_ngram_size"),
+        suppress_tokens=transcribe_kwargs.get("suppress_tokens"),
+        condition_on_previous_text=transcribe_kwargs.get("condition_on_previous_text"),
+        initial_prompt=transcribe_kwargs.get("initial_prompt"),
         # Model parameters
         model_id=preset_config.model_id,
         device=preset_config.device,

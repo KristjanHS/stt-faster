@@ -61,22 +61,21 @@ def create_minimal_config(
 
     Args:
         beam_size: Beam search size (default: 5)
-        word_timestamps: Enable word-level timestamps (default: False)
+        word_timestamps: Enable word-level timestamps (default: True)
         task: Transcription task ("transcribe" or "translate", default: "transcribe")
         **overrides: Any additional TranscriptionConfig parameters to override
 
     Returns:
         TranscriptionConfig with only specified parameters set
     """
-    config = TranscriptionConfig(
-        beam_size=beam_size,
-        word_timestamps=word_timestamps,
-        task=task,
-    )
+    config = TranscriptionConfig()
+    config.set("beam_size", beam_size)
+    config.set("word_timestamps", word_timestamps)
+    config.set("task", task)
     # Apply any overrides
     for key, value in overrides.items():
-        if hasattr(config, key):
-            setattr(config, key, value)
+        if hasattr(config, key) and not key.startswith("_"):
+            config.set(key, value)
     return config
 
 
@@ -96,26 +95,29 @@ def create_project_config(**overrides: Any) -> TranscriptionConfig:
     return config
 
 
-def create_baseline_config(vad_filter: bool = False) -> TranscriptionConfig:
-    """Create a true baseline config that uses faster-whisper library defaults.
+def create_baseline_config() -> TranscriptionConfig:
+    """Create a true baseline config with no overrides.
 
-    This creates a TranscriptionConfig with minimal overrides, allowing
-    faster-whisper to use its own internal defaults for most parameters.
-    Only vad_filter is set to False for raw whisper behavior (Baseline A).
-
-    Args:
-        vad_filter: Whether to enable VAD filtering (default: False for raw baseline)
+    Returns a TranscriptionConfig with empty _explicit_fields, meaning
+    no parameters will be passed to model.transcribe(), allowing
+    faster-whisper to use its own internal defaults for all parameters.
 
     Returns:
-        TranscriptionConfig with only vad_filter set (or empty if vad_filter uses library default)
+        TranscriptionConfig with no explicitly set fields
     """
-    # For a true baseline, we only set vad_filter=False to get raw whisper behavior
-    # All other parameters will use TranscriptionConfig defaults, but the executor
-    # will filter them out so faster-whisper uses its own defaults
+    return TranscriptionConfig()
+
+
+def create_no_vad_baseline_config() -> TranscriptionConfig:
+    """Create a baseline config with only vad_filter=False set.
+
+    This config explicitly disables VAD filtering, allowing raw whisper
+    behavior while still using faster-whisper library defaults for all
+    other parameters.
+
+    Returns:
+        TranscriptionConfig with only vad_filter=False explicitly set
+    """
     config = TranscriptionConfig()
-    # Override only vad_filter to disable VAD for raw baseline
-    config.vad_filter = vad_filter
-    # Set other fields to None-like values that the executor can detect and skip
-    # Note: We can't actually set them to None (dataclass doesn't allow it),
-    # but we'll mark this config as "baseline" by only setting vad_filter
+    config.set("vad_filter", False)
     return config
