@@ -64,7 +64,7 @@ REM Environment variables:
 REM   HF_HOME - Hugging Face cache location
 REM   HF_HUB_CACHE - Hugging Face hub cache
 REM Output: Both txt and json formats
-REM Output structure: variant_outputs/variant_XXX_name/processed/
+REM Output structure: timestamped folder (e.g., 2024-01-15T10-30-45) directly under input directory
 REM Note: transcribe_manager.py processes folders, so we pass the directory containing the file
 wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --preset et-large --language et --output-format both --variant-sweep conservative"
 
@@ -73,21 +73,19 @@ echo ========================================
 echo Processing Complete!
 echo ========================================
 echo.
-echo Outputs are organized in: %~dp0variant_outputs\
-echo Each variant has its own folder:
-echo   - variant_001_noprep_noparamtrans/
-echo   - variant_006_noprep_minimal_condition_on_previous_text/
-echo   - variant_021_noprep_minimal_beam_size_4/
-echo   - variant_022_noprep_minimal_beam_size_6/
-echo   - variant_023_noprep_minimal_chunk_length_18/
-echo   - variant_024_noprep_minimal_chunk_length_22/
-echo   - variant_025_noprep_minimal_no_speech_045/
-echo   - variant_026_noprep_minimal_no_speech_055/
+echo Outputs are organized in timestamped folders directly under: %~dp0
+echo All variants are in a single timestamped folder (e.g., 2024-01-15T10-30-45)
+echo Files are prefixed with variant number (e.g., variant_001_audio.wav.txt)
+echo A single run_meta.json contains metadata for all variants
 echo.
-echo Each variant folder contains:
-echo   - processed/ (transcript outputs)
-echo   - failed/ (failed files if any)
-echo   - run_meta.json (metadata for the run)
+echo   - Variant 1: Baseline (noprep_noparamtrans)
+echo   - Variant 6: condition_on_previous_text=False
+echo   - Variant 21: beam_size=4
+echo   - Variant 22: beam_size=6
+echo   - Variant 23: chunk_length=18
+echo   - Variant 24: chunk_length=22
+echo   - Variant 25: no_speech_threshold=0.45
+echo   - Variant 26: no_speech_threshold=0.55
 echo.
 
 pause

@@ -231,10 +231,8 @@ def _process_multi_variant(
     # Create timestamped folder name (filesystem-safe)
     timestamp_folder = timestamp.strftime("%Y-%m-%dT%H-%M-%S")
 
-    # Create single timestamped output directory
-    output_root = input_folder / "variant_outputs"
-    output_root.mkdir(exist_ok=True)
-    run_folder = output_root / timestamp_folder
+    # Create single timestamped output directory directly under input folder
+    run_folder = input_folder / timestamp_folder
     run_folder.mkdir(exist_ok=True)
 
     # Collect all variant metadata

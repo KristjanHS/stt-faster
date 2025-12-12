@@ -22,7 +22,7 @@ class RecordingModel:
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
-        self._segments = []
+        self._segments: list[Any] = []
         self._info = MagicMock(language="et", language_probability=0.95, duration=10.0)
 
     def transcribe(self, *args: Any, **kwargs: Any) -> tuple[list, Any]:

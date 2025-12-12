@@ -50,7 +50,7 @@ def get_transcription_config(preset: str) -> TranscriptionConfig:
 
 def create_minimal_config(
     beam_size: int = 5,
-    word_timestamps: bool = False,
+    word_timestamps: bool = True,  # Enable by default for accurate text slicing in reports
     task: str = "transcribe",
     **overrides: Any,
 ) -> TranscriptionConfig:
