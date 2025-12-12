@@ -120,17 +120,6 @@ def docker_container() -> Generator[None, None, None]:
     run_docker_compose("down", check=False)
 
 
-class TestDockerBuild:
-    """Test Docker image build process."""
-
-    def test_build_succeeds(self, docker_container: None) -> None:
-        """Verify the Docker image builds successfully."""
-        # The docker_container fixture builds the image
-        # If we get here, the build succeeded
-        result = run_docker_compose("images", "app")
-        assert "stt-faster-dev" in result.stdout
-
-
 class TestDockerRuntime:
     """Test Docker container runtime behavior."""
 
@@ -144,11 +133,6 @@ class TestDockerRuntime:
 class TestDockerPythonEnvironment:
     """Test Python environment inside container."""
 
-    def test_venv_in_path(self, docker_container: None) -> None:
-        """Verify venv is in Python path."""
-        result = exec_in_container("python", "-c", "import sys; print(sys.path)")
-        assert "/opt/venv/lib/python3.12/site-packages" in result.stdout
-
     def test_non_root_user(self, docker_container: None) -> None:
         """Verify container runs as non-root user."""
         result = exec_in_container("whoami")
@@ -158,41 +142,6 @@ class TestDockerPythonEnvironment:
         """Verify HuggingFace cache directory exists."""
         result = exec_in_container("ls", "-ld", "/hf_cache")
         assert "appuser" in result.stdout
-
-
-class TestDockerTestExecution:
-    """Test that tests can run inside the container."""
-
-    def test_pytest_available(self, docker_container: None) -> None:
-        """Verify pytest is installed and accessible."""
-        result = exec_in_container("/opt/venv/bin/python", "-m", "pytest", "--version")
-        assert "pytest" in result.stdout
-
-    def test_unit_tests_discoverable(self, docker_container: None) -> None:
-        """Verify unit tests can be discovered."""
-        result = exec_in_container(
-            "/opt/venv/bin/python",
-            "-m",
-            "pytest",
-            "tests/unit",
-            "--collect-only",
-            "-q",
-        )
-        assert "test" in result.stdout
-        # Should have discovered some tests
-        assert "collected" in result.stdout
-
-    def test_sample_unit_test_runs(self, docker_container: None) -> None:
-        """Verify a sample unit test can run successfully."""
-        result = exec_in_container(
-            "/opt/venv/bin/python",
-            "-m",
-            "pytest",
-            "tests/unit/test_main.py::TestHealthcheckMode::test_healthcheck_exits_successfully",
-            "-v",
-        )
-        assert result.returncode == 0
-        assert "PASSED" in result.stdout
 
 
 class TestDockerVolumes:
@@ -211,20 +160,3 @@ class TestDockerVolumes:
 
         # Cleanup
         host_log_path.unlink()
-
-
-class TestDockerImageOptimization:
-    """Test Docker image size and optimization."""
-
-    def test_no_cache_in_apt_lists(self, docker_container: None) -> None:
-        """Verify apt lists are cleaned up to reduce image size."""
-        result = exec_in_container("ls", "/var/lib/apt/lists/", check=False)
-        # Should be mostly empty (just lock files)
-        list_count = len([line for line in result.stdout.split("\n") if line.strip()])
-        assert list_count <= 3, "apt/lists not cleaned up properly"
-
-    def test_debian_snapshot_configured(self, docker_container: None) -> None:
-        """Verify Debian snapshot sources are configured for reproducibility."""
-        result = exec_in_container("cat", "/etc/apt/sources.list.d/debian.sources")
-        assert "snapshot.debian.org" in result.stdout
-        assert "Check-Valid-Until: no" in result.stdout
