@@ -538,15 +538,15 @@ def _get_all_variants() -> list[Variant]:
                 word_timestamps=True,
             ),
         ),
-        # Variant 33: Same as variant 2 but with word_timestamps_present=True
+        # Variant 33: Same as variant 2 but with word_timestamps=True
         Variant(
-            name="baseline_no_vad_word_timestamps_present",
+            name="baseline_no_vad_word_timestamps",
             number=33,
             preprocess_steps=[],
             transcription_config=(
                 lambda: (
                     config := create_no_vad_baseline_config(),
-                    config.set("word_timestamps_present", True),
+                    config.set("word_timestamps", True),
                     config,
                 )[2]
             )(),

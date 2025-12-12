@@ -110,11 +110,11 @@ def is_baseline_config(config: Any) -> bool:  # TranscriptionConfig
         return False
 
     explicit = config._explicit_fields
-    # Baseline: empty explicit fields, or only vad_filter, or vad_filter + word_timestamps_present
+    # Baseline: empty explicit fields, or only vad_filter, or vad_filter + word_timestamps
     return (
         len(explicit) == 0
         or (len(explicit) == 1 and "vad_filter" in explicit)
-        or (len(explicit) == 2 and "vad_filter" in explicit and "word_timestamps_present" in explicit)
+        or (len(explicit) == 2 and "vad_filter" in explicit and "word_timestamps" in explicit)
     )
 
 
@@ -369,7 +369,7 @@ def transcribe_with_baseline_params(
 
     # Guard: baseline should only have vad_filter (or be empty)
     # If it has other keys, log a warning
-    baseline_allowed_keys = {"vad_filter", "word_timestamps_present"}
+    baseline_allowed_keys = {"vad_filter", "word_timestamps"}
     unexpected_keys = set(transcribe_kwargs.keys()) - baseline_allowed_keys
     if unexpected_keys:
         LOGGER.warning(
@@ -691,7 +691,6 @@ def transcribe_with_minimal_params(
     ALLOWED_MINIMAL_KEYS = {
         "beam_size",
         "word_timestamps",
-        "word_timestamps_present",
         "task",
         "chunk_length",
         "no_speech_threshold",
