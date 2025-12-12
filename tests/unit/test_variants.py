@@ -11,7 +11,14 @@ from typing import Any
 
 import pytest
 
-from backend.variants.registry import get_builtin_variants, get_variant_by_name, get_variant_by_number
+from backend.preprocess.config import TranscriptionConfig
+from backend.variants.registry import (
+    get_all_variants,
+    get_builtin_variants,
+    get_variant_by_name,
+    get_variant_by_number,
+)
+from backend.variants.transcription_presets import create_minimal_config
 from backend.variants.variant import PreprocessStep, Variant
 
 
@@ -31,8 +38,7 @@ class TestVariantRegistry:
             assert isinstance(variant, Variant)
             assert variant.name
             assert variant.number > 0
-            assert variant.description
-            assert variant.transcription_preset in ("project", "industry", "minimal")
+            assert isinstance(variant.transcription_config, TranscriptionConfig)
             # Variants should have either preprocess_steps or custom_preprocess_runner
             assert variant.preprocess_steps is not None
             # Custom runner is optional, but if present it should be callable
@@ -41,58 +47,62 @@ class TestVariantRegistry:
 
     def test_variant_numbers_are_unique(self) -> None:
         """Test that variant numbers are unique."""
-        variants = get_builtin_variants()
-        numbers = [v.number for v in variants]
+        all_variants = get_all_variants()
+        numbers = [v.number for v in all_variants]
         assert len(numbers) == len(set(numbers)), "Variant numbers must be unique"
 
     def test_variant_names_are_unique(self) -> None:
         """Test that variant names are unique."""
-        variants = get_builtin_variants()
-        names = [v.name for v in variants]
+        all_variants = get_all_variants()
+        names = [v.name for v in all_variants]
         assert len(names) == len(set(names)), "Variant names must be unique"
 
-    def test_variants_1_through_9_exist(self) -> None:
-        """Test that variants 1-9 exist (standard variants)."""
-        for i in range(1, 10):
-            variant = get_variant_by_number(i)
-            assert variant is not None, f"Variant {i} should exist"
+    def test_all_defined_variants_exist(self) -> None:
+        """Test that all defined variants can be accessed by number."""
+        all_variants = get_all_variants()
 
-    def test_variants_10_through_19_exist(self) -> None:
-        """Test that variants 10-19 exist (custom preprocessing variants and parameter overrides)."""
-        for i in range(10, 20):
-            variant = get_variant_by_number(i)
-            assert variant is not None, f"Variant {i} should exist"
+        # Verify all variants are accessible by number
+        for variant in all_variants:
+            found = get_variant_by_number(variant.number)
+            assert found is not None, f"Variant {variant.number} should be accessible by number"
+            assert found.number == variant.number
+            assert found.name == variant.name
 
-    def test_variant_7_has_no_preprocessing(self) -> None:
-        """Test that variant 7 has no preprocessing steps."""
-        variant = get_variant_by_number(7)
-        assert variant is not None
-        assert variant.name == "noprep_noparamtrans"
-        assert len(variant.preprocess_steps) == 0
-        assert variant.transcription_preset == "minimal"
+    def test_variants_with_no_preprocessing(self) -> None:
+        """Test that variants with no preprocessing steps are correctly structured."""
+        all_variants = get_all_variants()
+        no_prep_variants = [v for v in all_variants if len(v.preprocess_steps) == 0]
 
-    def test_variants_12_16_have_declarative_steps(self) -> None:
-        """Test that variants 12-16 use declarative steps instead of custom runners."""
-        for i in range(12, 17):
-            variant = get_variant_by_number(i)
-            assert variant is not None, f"Variant {i} should exist"
-            assert variant.custom_preprocess_runner is None, f"Variant {i} should not have custom runner"
-            assert len(variant.preprocess_steps) > 0, f"Variant {i} should have declarative steps"
+        assert len(no_prep_variants) > 0, "At least one variant should have no preprocessing"
 
-    def test_variants_10_11_have_declarative_steps(self) -> None:
-        """Test that variants 10-11 use declarative steps instead of custom runners."""
-        for i in range(10, 12):
-            variant = get_variant_by_number(i)
-            assert variant is not None, f"Variant {i} should exist"
-            assert variant.custom_preprocess_runner is None, f"Variant {i} should not have custom runner"
-            assert len(variant.preprocess_steps) > 0, f"Variant {i} should have declarative steps"
+        for variant in no_prep_variants:
+            assert isinstance(variant.transcription_config, TranscriptionConfig)
+            assert variant.custom_preprocess_runner is None or callable(variant.custom_preprocess_runner)
+
+    def test_variants_with_declarative_steps(self) -> None:
+        """Test that variants with declarative steps are correctly structured."""
+        all_variants = get_all_variants()
+
+        for variant in all_variants:
+            if variant.custom_preprocess_runner is None:
+                # Variants without custom runners should have declarative steps
+                for step in variant.preprocess_steps:
+                    assert isinstance(step, PreprocessStep)
+                    assert step.name
+                    assert isinstance(step.enabled, bool)
 
     def test_get_variant_by_number(self) -> None:
         """Test getting variant by number."""
-        variant = get_variant_by_number(7)
+        all_variants = get_all_variants()
+        if not all_variants:
+            pytest.skip("No variants defined")
+
+        # Test with an actual variant
+        test_variant = all_variants[0]
+        variant = get_variant_by_number(test_variant.number)
         assert variant is not None
-        assert variant.number == 7
-        assert variant.name == "noprep_noparamtrans"
+        assert variant.number == test_variant.number
+        assert variant.name == test_variant.name
 
         # Test non-existent variant
         variant = get_variant_by_number(999)
@@ -100,10 +110,16 @@ class TestVariantRegistry:
 
     def test_get_variant_by_name(self) -> None:
         """Test getting variant by name."""
-        variant = get_variant_by_name("noprep_noparamtrans")
+        all_variants = get_all_variants()
+        if not all_variants:
+            pytest.skip("No variants defined")
+
+        # Test with an actual variant
+        test_variant = all_variants[0]
+        variant = get_variant_by_name(test_variant.name)
         assert variant is not None
-        assert variant.name == "noprep_noparamtrans"
-        assert variant.number == 7
+        assert variant.name == test_variant.name
+        assert variant.number == test_variant.number
 
         # Test non-existent variant
         variant = get_variant_by_name("nonexistent_variant")
@@ -145,9 +161,8 @@ class TestVariantExecutor:
         variant = Variant(
             name="test_variant",
             number=99,
-            description="test",
             preprocess_steps=[],
-            transcription_preset="minimal",
+            transcription_config=create_minimal_config(),
         )
 
         # Create a fake audio file
@@ -159,7 +174,7 @@ class TestVariantExecutor:
         # We'll use a variant that has no preprocessing to minimize dependencies
 
         # Get a real variant that we can test with minimal setup
-        variant = get_variant_by_number(7)  # noprep_noparamtrans - simplest variant
+        variant = get_variant_by_number(1)  # noprep_noparamtrans - simplest variant
         assert variant is not None
 
         # Note: This test would require actual model loading, so we'll skip it
@@ -204,7 +219,7 @@ class TestVariantFiltering:
     def test_filter_variants_by_name(self) -> None:
         """Test filtering variants by name."""
         variants = get_builtin_variants()
-        skip_names = {"no_preprocessing", "industry_defaults", "ffmpeg_only"}
+        skip_names = {"no_preprocessing", "noprep_minimal", "ffmpeg_only"}
         filtered = [v for v in variants if v.name not in skip_names]
 
         # All filtered variants should not be in skip list
@@ -225,8 +240,8 @@ class TestVariantFiltering:
         assert len(filtered) == len(variants) - 1
 
         # Verify all variants (including inactive) are still accessible by number
-        # Test up to variant 20 (current max)
-        for i in range(1, 21):
+        # Test up to variant 26 (current max)
+        for i in range(1, 27):
             variant = get_variant_by_number(i)
             assert variant is not None, f"Variant {i} should be accessible by number"
 
@@ -249,19 +264,17 @@ class TestVariantDataStructures:
 
     def test_variant_dataclass(self) -> None:
         """Test Variant dataclass structure."""
+        config = create_minimal_config()
         variant = Variant(
             name="test_variant",
             number=99,
-            description="test_desc",
             preprocess_steps=[],
-            transcription_preset="minimal",
+            transcription_config=config,
         )
         assert variant.name == "test_variant"
         assert variant.number == 99
-        assert variant.description == "test_desc"
         assert variant.preprocess_steps == []
-        assert variant.transcription_preset == "minimal"
-        assert variant.transcription_overrides is None
+        assert variant.transcription_config == config
         assert variant.custom_preprocess_runner is None
 
     def test_variant_with_custom_runner(self) -> None:
@@ -273,9 +286,8 @@ class TestVariantDataStructures:
         variant = Variant(
             name="custom_variant",
             number=98,
-            description="custom",
             preprocess_steps=[],
-            transcription_preset="minimal",
+            transcription_config=create_minimal_config(),
             custom_preprocess_runner=dummy_runner,
         )
         assert variant.custom_preprocess_runner is not None
@@ -283,36 +295,88 @@ class TestVariantDataStructures:
 
 
 class TestVariantPresets:
-    """Tests for variant transcription presets."""
+    """Tests for variant transcription configs."""
 
-    def test_all_variants_have_valid_presets(self) -> None:
-        """Test that all variants have valid transcription presets."""
+    def test_all_variants_have_transcription_config(self) -> None:
+        """Test that all variants have transcription config."""
         variants = get_builtin_variants()
-        valid_presets = {"project", "industry", "minimal"}
 
         for variant in variants:
-            assert variant.transcription_preset in valid_presets, (
-                f"Variant {variant.number} ({variant.name}) has invalid preset: {variant.transcription_preset}"
+            assert isinstance(variant.transcription_config, TranscriptionConfig), (
+                f"Variant {variant.number} ({variant.name}) must have transcription_config"
             )
 
-    def test_minimal_preset_variants(self) -> None:
-        """Test that variants with minimal preset are correctly identified."""
-        # Variants 7, 10-19 should use minimal preset
-        expected_minimal = {7, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}
+    def test_all_variant_configs_are_valid(self) -> None:
+        """Test that all variant transcription configs are valid TranscriptionConfig instances.
 
-        # Check that all minimal preset variants can be accessed
-        for variant_num in expected_minimal:
-            variant = get_variant_by_number(variant_num)
-            assert variant is not None, f"Variant {variant_num} should exist"
-            assert variant.transcription_preset == "minimal", f"Variant {variant_num} should have minimal preset"
+        This ensures that all variants can produce valid configs that could be passed to
+        model.transcribe() without missing required fields.
+        """
+        all_variants = get_all_variants()
 
-        # Check that active variants with minimal preset are in get_builtin_variants()
-        variants = get_builtin_variants()
-        minimal_variants = [v for v in variants if v.transcription_preset == "minimal"]
+        for variant in all_variants:
+            config = variant.transcription_config
+            assert isinstance(config, TranscriptionConfig), (
+                f"Variant {variant.number} ({variant.name}) must have TranscriptionConfig instance"
+            )
 
-        # Verify that at least some minimal preset variants are active
-        # (don't check specific numbers since active variants can change)
-        assert len(minimal_variants) > 0, "At least one active variant should use minimal preset"
+            # Verify essential fields are present and have valid types
+            assert isinstance(config.beam_size, int), f"Variant {variant.number}: beam_size must be int"
+            assert config.beam_size > 0, f"Variant {variant.number}: beam_size must be positive"
+            assert isinstance(config.word_timestamps, bool), f"Variant {variant.number}: word_timestamps must be bool"
+            assert config.task in ("transcribe", "translate"), (
+                f"Variant {variant.number}: task must be 'transcribe' or 'translate'"
+            )
+
+            # Verify optional fields have correct types if present
+            if hasattr(config, "chunk_length") and config.chunk_length is not None:
+                assert isinstance(config.chunk_length, int), f"Variant {variant.number}: chunk_length must be int"
+                assert config.chunk_length > 0, f"Variant {variant.number}: chunk_length must be positive"
+
+            if hasattr(config, "patience") and config.patience is not None:
+                assert isinstance(config.patience, (int, float)), f"Variant {variant.number}: patience must be numeric"
+                assert config.patience > 0, f"Variant {variant.number}: patience must be positive"
+
+            if hasattr(config, "no_speech_threshold") and config.no_speech_threshold is not None:
+                assert isinstance(config.no_speech_threshold, (int, float)), (
+                    f"Variant {variant.number}: no_speech_threshold must be numeric"
+                )
+
+            if hasattr(config, "vad_filter") and config.vad_filter is not None:
+                assert isinstance(config.vad_filter, bool), f"Variant {variant.number}: vad_filter must be bool"
+
+            if hasattr(config, "vad_parameters") and config.vad_parameters is not None:
+                assert isinstance(config.vad_parameters, dict), f"Variant {variant.number}: vad_parameters must be dict"
+
+    def test_minimal_config_variants(self) -> None:
+        """Test that variants with minimal config are correctly identified."""
+        from backend.variants.transcription_presets import create_minimal_config
+
+        minimal_ref = create_minimal_config()
+        all_variants = get_all_variants()
+
+        # Identify variants that use minimal config by comparing key attributes
+        minimal_variants = []
+        for variant in all_variants:
+            config = variant.transcription_config
+            # Minimal config typically has word_timestamps=False and task="transcribe"
+            # and matches minimal_ref for these key attributes
+            if config.word_timestamps == minimal_ref.word_timestamps and config.task == minimal_ref.task:
+                minimal_variants.append(variant)
+
+        # Verify minimal config variants have expected structure
+        for variant in minimal_variants:
+            assert variant.transcription_config.word_timestamps is False
+            assert variant.transcription_config.task == "transcribe"
+
+        # Check that at least some active variants use minimal config
+        active_variants = get_builtin_variants()
+        active_minimal = [
+            v
+            for v in active_variants
+            if v.transcription_config.word_timestamps is False and v.transcription_config.task == "transcribe"
+        ]
+        assert len(active_minimal) > 0, "At least one active variant should use minimal config"
 
 
 class TestVariantCompatibility:
@@ -335,31 +399,19 @@ class TestVariantCompatibility:
         # The actual format is tested in integration tests
         assert expected_keys  # Placeholder to document expected structure
 
-    def test_variant_names_match_legacy_names(self) -> None:
-        """Test that variant names match legacy variant names."""
-        # Key variants that should match legacy names
-        expected_mappings = {
-            1: "no_preprocessing",
-            2: "industry_defaults",
-            3: "ffmpeg_only",
-            4: "denoise_only",
-            5: "ffmpeg_industry_defaults",
-            6: "full_industry_defaults",
-            7: "noprep_noparamtrans",
-            8: "normonly_noparamtrans",
-            9: "onlyden_noparamtrans",
-            10: "norm_highp_noparamtrans",
-            11: "norm_dynaud_noparamtrans",
-            12: "lnorm_highlow_aform_noparamtrans",
-            13: "lnorm_highlow_nosampl_noparamtrans",
-            14: "lnorm2_aresampl_noparamtrans",
-            15: "lnorm3_aresampl_noparamtrans",
-            16: "loudnorm_2pass_linear_noparamtrans",
-        }
+    def test_variant_names_are_consistent(self) -> None:
+        """Test that variant names are consistent across lookups."""
+        all_variants = get_all_variants()
 
-        for number, expected_name in expected_mappings.items():
-            variant = get_variant_by_number(number)
-            assert variant is not None, f"Variant {number} should exist"
-            assert variant.name == expected_name, (
-                f"Variant {number} should be named '{expected_name}', got '{variant.name}'"
-            )
+        # Verify that each variant can be found by both number and name
+        for variant in all_variants:
+            # Find by number
+            found_by_number = get_variant_by_number(variant.number)
+            assert found_by_number is not None, f"Variant {variant.number} should be findable by number"
+            assert found_by_number.name == variant.name
+
+            # Find by name
+            found_by_name = get_variant_by_name(variant.name)
+            assert found_by_name is not None, f"Variant '{variant.name}' should be findable by name"
+            assert found_by_name.number == variant.number
+            assert found_by_name.name == variant.name

@@ -22,7 +22,7 @@ from backend.transcribe import (
     segment_to_payload,
 )
 from backend.variants.preprocess_steps import create_preprocess_runner
-from backend.variants.transcription_presets import get_transcription_config
+from backend.variants.transcription_presets import get_minimal_config
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def create_variant_preprocess_runner(
                 path,
                 cfg,
                 variant_number=variant.number,
-                variant_description=variant.description,
+                variant_description=variant.name,
                 base_name=base_name,
                 datetime_suffix=datetime_suffix,
                 output_dir=output_dir,
@@ -73,7 +73,7 @@ def create_variant_preprocess_runner(
             variant.preprocess_steps,
             preprocess_config,
             variant_number=variant.number,
-            variant_description=variant.description,
+            variant_description=variant.name,
             base_name=base_name,
             datetime_suffix=datetime_suffix,
             output_dir=output_dir,
@@ -90,13 +90,62 @@ def create_variant_transcribe_config(variant: Variant) -> Any:  # TranscriptionC
     Returns:
         TranscriptionConfig instance
     """
-    transcription_config = get_transcription_config(variant.transcription_preset)
-    # Apply any overrides
-    if variant.transcription_overrides:
-        for key, value in variant.transcription_overrides.items():
-            if hasattr(transcription_config, key):
-                setattr(transcription_config, key, value)
-    return transcription_config
+    return variant.transcription_config
+
+
+def is_minimal_config(config: Any) -> bool:  # TranscriptionConfig
+    """Check if a TranscriptionConfig is minimal (only essential params set).
+
+    A minimal config only has beam_size, word_timestamps, task, and maybe a few
+    allowed overrides set. All other parameters should use TranscriptionConfig defaults.
+
+    Args:
+        config: TranscriptionConfig to check
+
+    Returns:
+        True if config is minimal, False otherwise
+    """
+    # Parameters that are allowed in minimal config
+    allowed_minimal_params = {
+        "beam_size",
+        "word_timestamps",
+        "task",
+        "chunk_length",
+        "no_speech_threshold",
+        "condition_on_previous_text",
+    }
+
+    # Create a minimal config and a default config for comparison
+    minimal_ref = get_minimal_config()
+    minimal_ref.beam_size = 5  # Minimal config also sets beam_size
+    default_config = type(config)()  # Create default instance
+
+    # Get all field names from the dataclass
+    from dataclasses import fields  # noqa: PLC0415
+
+    config_fields = {f.name for f in fields(config)}
+
+    # Check each field - it should either:
+    # 1. Be in allowed_minimal_params (can differ from defaults)
+    # 2. Match the default value (not explicitly set)
+    for field_name in config_fields:
+        if field_name in allowed_minimal_params:
+            continue  # This field is allowed to differ from defaults
+
+        config_value = getattr(config, field_name)
+        default_value = getattr(default_config, field_name)
+
+        # Compare values (handle dict and list specially)
+        if isinstance(config_value, dict) and isinstance(default_value, dict):
+            if config_value != default_value:
+                return False
+        elif isinstance(config_value, list) and isinstance(default_value, list):
+            if config_value != default_value:
+                return False
+        elif config_value != default_value:
+            return False
+
+    return True
 
 
 def execute_variant(
@@ -154,13 +203,17 @@ def execute_variant(
             copy_intermediate=copy_intermediate,
         )
 
-        # Get transcription config based on preset
+        # Get transcription config
         transcription_config = create_variant_transcribe_config(variant)
 
+        # Determine if we should use minimal params (only pass essential params to model.transcribe)
+        # A config is "minimal" if it only has the essential parameters set (beam_size, word_timestamps, task)
+        # plus maybe a few allowed overrides
+        is_minimal = is_minimal_config(transcription_config)
+
         # Run transcription
-        if variant.transcription_preset == "minimal":
-            # Use minimal params transcription (omits parameters)
-            # Pass transcription_config for metrics and transcription_overrides for actual overrides
+        if is_minimal:
+            # Use minimal params transcription (omits parameters to let faster-whisper use defaults)
             result = transcribe_with_minimal_params(
                 path=audio_path,
                 preset=preset,
@@ -168,7 +221,6 @@ def execute_variant(
                 preprocess_config=preprocess_config,
                 preprocess_runner=preprocess_runner,
                 transcription_config=transcription_config,
-                transcription_overrides=variant.transcription_overrides,
             )
         else:
             # Use standard transcription with full config
@@ -187,9 +239,9 @@ def execute_variant(
         output_files = {}
         if output_base_path and datetime_suffix:
             base_name = output_base_path.stem
-            variant_desc = variant.description
-            txt_path = output_base_path.parent / f"{variant.number}_{variant_desc}_{base_name}_{datetime_suffix}.txt"
-            json_path = output_base_path.parent / f"{variant.number}_{variant_desc}_{base_name}_{datetime_suffix}.json"
+            variant_name = variant.name
+            txt_path = output_base_path.parent / f"{variant.number}_{variant_name}_{base_name}_{datetime_suffix}.txt"
+            json_path = output_base_path.parent / f"{variant.number}_{variant_name}_{base_name}_{datetime_suffix}.json"
 
             # Save text file
             segments = result.get("segments", [])
@@ -259,14 +311,14 @@ def transcribe_with_minimal_params(
     language: str | None,
     preprocess_config: PreprocessConfig,
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult],
-    transcription_config: Any | None = None,  # TranscriptionConfig
-    transcription_overrides: dict[str, Any] | None = None,
+    transcription_config: Any,  # TranscriptionConfig (required now)
     metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
 ) -> dict[str, Any]:
     """Transcribe with minimal parameters, omitting those that differ between defaults.
 
     This allows faster-whisper to use its own internal defaults for omitted parameters.
-    Only parameters explicitly set in transcription_overrides will be included.
+    Only parameters explicitly set in transcription_config that are in the allowed set
+    will be included.
 
     Args:
         path: Path to audio file
@@ -274,8 +326,7 @@ def transcribe_with_minimal_params(
         language: Optional language code
         preprocess_config: PreprocessConfig instance
         preprocess_runner: Function to run preprocessing
-        transcription_config: Optional TranscriptionConfig (used for metrics)
-        transcription_overrides: Optional dict of parameter overrides to include
+        transcription_config: TranscriptionConfig with parameters (only allowed ones will be used)
         metrics_collector: Optional metrics collector callback
     """
     overall_start = time.time()
@@ -300,35 +351,57 @@ def transcribe_with_minimal_params(
         LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
 
     # Call model.transcribe with only essential parameters
-    # Omit: patience, chunk_length, vad_threshold, vad_parameters,
-    # temperature, no_speech_threshold, no_repeat_ngram_size
-    # But include any overrides from transcription_overrides
+    # Only include parameters from config that are in the allowed set
+    # Allowed: beam_size, chunk_length, no_speech_threshold, condition_on_previous_text,
+    #          patience, vad_filter, vad_parameters (with vad_threshold merged in)
     LOGGER.info("🔄 Starting transcription...")
     transcribe_start = time.time()
-    transcribe_kwargs: dict[str, Any] = {
-        "beam_size": 5,  # Keep beam_size as it's commonly used
-        "word_timestamps": False,
-        "language": applied_language,
-        "task": "transcribe",
-    }
-    # Apply overrides from transcription_overrides if provided
-    # Only include parameters that were explicitly overridden and are allowed
-    # This set defines which parameters can be overridden in minimal preset
-    allowed_override_params = {
+
+    # This set defines which parameters can be included in minimal preset
+    allowed_minimal_params = {
         "beam_size",
         "chunk_length",
         "no_speech_threshold",
         "condition_on_previous_text",
+        "patience",
+        "vad_filter",
     }
-    if transcription_overrides:
-        for param_name, param_value in transcription_overrides.items():
-            if param_name in allowed_override_params:
+
+    # Start with base minimal parameters
+    transcribe_kwargs: dict[str, Any] = {
+        "beam_size": getattr(transcription_config, "beam_size", 5),
+        "word_timestamps": getattr(transcription_config, "word_timestamps", False),
+        "language": applied_language,
+        "task": getattr(transcription_config, "task", "transcribe"),
+    }
+
+    # Add any allowed parameters from config that differ from defaults
+    for param_name in allowed_minimal_params:
+        if hasattr(transcription_config, param_name):
+            param_value = getattr(transcription_config, param_name)
+            # Only include if it's not None and not the default
+            if param_value is not None:
                 transcribe_kwargs[param_name] = param_value
                 LOGGER.debug(
-                    "Applied override: %s = %s (from transcription_overrides)",
+                    "Including minimal param: %s = %s (from transcription_config)",
                     param_name,
                     param_value,
                 )
+
+    # Handle VAD parameters specially (vad_threshold is merged into vad_parameters)
+    # Only include vad_parameters if vad_filter is True (or not explicitly False)
+    if hasattr(transcription_config, "vad_filter") and transcription_config.vad_filter:
+        # Merge vad_threshold into vad_parameters dict (like in transcribe.py)
+        vad_params = dict(getattr(transcription_config, "vad_parameters", {}))
+        if hasattr(transcription_config, "vad_threshold") and transcription_config.vad_threshold is not None:
+            vad_params["threshold"] = transcription_config.vad_threshold
+        # Include vad_parameters if we have any (even if just from vad_threshold)
+        if vad_params:
+            transcribe_kwargs["vad_parameters"] = vad_params
+            LOGGER.debug(
+                "Including VAD parameters: %s (vad_filter=True)",
+                vad_params,
+            )
     LOGGER.debug("Calling model.transcribe() with kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),

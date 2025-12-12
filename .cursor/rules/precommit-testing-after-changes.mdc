@@ -7,5 +7,6 @@ alwaysApply: true
 ---
 - **MANDATORY**: After any Python code changes, run `make pre-commit` then `make unit` then `make integration` then `make e2e` before considering the task done.
 - On failures: Fix issues and re-run until both pass. Do not skip these validation steps.
+- fix ALL pre-commit and test errors, even the ones not related to current changes
 - after fixing error(s) in test(s), re-run `make pre-commit`
 - Avoid using `print` (Ruff rule T201). Prefer `logging` for application and tests.

@@ -5,8 +5,10 @@ import os
 import time
 from pathlib import Path
 from typing import Callable
+from urllib.parse import urlparse
 
 import ffmpeg  # type: ignore[import-untyped, unused-ignore]
+import httpx
 
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import StepExecutionError
@@ -34,15 +36,20 @@ def _ensure_rnnoise_model(rnnoise_model: str | None) -> str | None:
     model_path.parent.mkdir(parents=True, exist_ok=True)
     LOGGER.info("RNNoise model not found at %s, downloading from %s", model_path, url)
     try:
-        from urllib.request import urlopen
+        # Validate URL scheme - only allow http/https for security
+        parsed = urlparse(url)
+        if parsed.scheme not in ("http", "https"):
+            raise ValueError(f"Unsafe URL scheme '{parsed.scheme}' in URL: {url}. Only http/https allowed.")
+        # Prefer HTTPS for secure downloads
+        if parsed.scheme == "http":
+            LOGGER.warning("Using HTTP instead of HTTPS for URL: %s", url)
 
-        with urlopen(url) as resp, open(model_path, "wb") as out:  # nosec B310 - controlled download URL
-            chunk_size = 16_384
-            while True:
-                chunk = resp.read(chunk_size)
-                if not chunk:
-                    break
-                out.write(chunk)
+        # Use httpx with SSL verification enabled by default for secure downloads
+        with httpx.stream("GET", url, follow_redirects=True) as resp:
+            resp.raise_for_status()
+            with open(model_path, "wb") as out:
+                for chunk in resp.iter_bytes(chunk_size=16_384):
+                    out.write(chunk)
     except Exception as exc:  # pragma: no cover - network I/O
         raise StepExecutionError("ffmpeg_pipeline", f"failed to download rnnoise model: {exc}") from exc
 

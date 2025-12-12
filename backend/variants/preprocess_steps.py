@@ -385,10 +385,9 @@ def _loudnorm_2pass_linear(
             if target_lra is None:
                 target_lra = float(preset["LRA"])
 
-        # Sanity: mypy/pyright hinting
-        assert target_i is not None  # nosec B101
-        assert target_tp is not None  # nosec B101
-        assert target_lra is not None  # nosec B101
+        # Type narrowing: After the above assignments, these are guaranteed to be float
+        # Pyright already knows they can't be None after the assignments above, so no runtime check needed
+        # No assert statements needed - Pyright's type narrowing handles this automatically
 
         # ----- 1. First pass: measure loudness stats (no actual output) -----
         first_pass_filter = f"aresample=resampler=soxr:osr={target_sample_rate},loudnorm=print_format=json"

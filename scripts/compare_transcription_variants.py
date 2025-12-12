@@ -180,14 +180,14 @@ def main() -> int:
     LOGGER.info("=" * 80)
     LOGGER.info("Will process %d variant(s):", len(builtin_variants))
     for variant in builtin_variants:
-        LOGGER.info("  • Variant %d: %s (%s)", variant.number, variant.name, variant.description)
+        LOGGER.info("  • Variant %d: %s", variant.number, variant.name)
     LOGGER.info("=" * 80)
     LOGGER.info("")
 
     for variant in builtin_variants:
         # Log which variant is starting BEFORE processing begins
         LOGGER.info("")
-        LOGGER.info("▶️  Starting Variant %d: %s (%s)", variant.number, variant.name, variant.description)
+        LOGGER.info("▶️  Starting Variant %d: %s", variant.number, variant.name)
         LOGGER.info("   Processing: %s", audio_path.name)
         result = execute_variant(
             variant=variant,

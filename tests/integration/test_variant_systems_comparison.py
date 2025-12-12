@@ -45,29 +45,29 @@ class TestVariantSystemsComparison:
         """Output directory for new system results."""
         return tmp_path / "new_system"
 
-    def test_variant_7_outputs_match(self, test_audio_file: Path, output_dir_old: Path, output_dir_new: Path) -> None:
-        """Test that variant 7 produces consistent outputs.
+    def test_variant_1_outputs_match(self, test_audio_file: Path, output_dir_old: Path, output_dir_new: Path) -> None:
+        """Test that variant 1 produces consistent outputs.
 
-        Variant 7 (noprep_noparamtrans) is the simplest variant and should
+        Variant 1 (noprep_noparamtrans) is the simplest variant and should
         produce consistent results across multiple runs. This test validates that
         the variant system produces reproducible transcription results.
         """
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run variant 7 in first output directory (skip all other active variants: 17, 18, 19)
+        # Run variant 1 in first output directory (skip all other active variants: 4, 7)
         result_old = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "1",
                 "2",
                 "3",
                 "4",
                 "5",
                 "6",
+                "7",
                 "8",
                 "9",
                 "10",
@@ -92,19 +92,19 @@ class TestVariantSystemsComparison:
         # Verify first run succeeded
         assert result_old.returncode == 0, f"First run failed: {result_old.stderr}\n{result_old.stdout}"
 
-        # Run variant 7 in second output directory (skip all other active variants: 17, 18, 19)
+        # Run variant 1 in second output directory (skip all other active variants: 4, 7)
         result_new = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "1",
                 "2",
                 "3",
                 "4",
                 "5",
                 "6",
+                "7",
                 "8",
                 "9",
                 "10",
@@ -150,9 +150,9 @@ class TestVariantSystemsComparison:
         old_result = old_results[0]
         new_result = new_results[0]
 
-        # Verify both are variant 7
-        assert old_result["variant_number"] == 7, "First run should be variant 7"
-        assert new_result["variant_number"] == 7, "Second run should be variant 7"
+        # Verify both are variant 1
+        assert old_result["variant_number"] == 1, "First run should be variant 1"
+        assert new_result["variant_number"] == 1, "Second run should be variant 1"
         assert old_result["variant"] == "noprep_noparamtrans", "First run should be noprep_noparamtrans"
         assert new_result["variant"] == "noprep_noparamtrans", "Second run should be noprep_noparamtrans"
 
@@ -202,21 +202,19 @@ class TestVariantSystemsComparison:
             )
 
     def test_all_active_variants_execute_successfully(self, test_audio_file: Path, output_dir_new: Path) -> None:
-        """Test that all active variants (7, 17, 18, 19) execute successfully."""
+        """Test that all active variants (1, 4, 7) execute successfully."""
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with active variants only (skip all inactive variants: 1-6, 8-16, 20)
+        # Run with active variants only (skip all inactive variants: 2-3, 5-6, 8-20)
         result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "1",
                 "2",
                 "3",
-                "4",
                 "5",
                 "6",
                 "8",
@@ -228,6 +226,9 @@ class TestVariantSystemsComparison:
                 "14",
                 "15",
                 "16",
+                "17",
+                "18",
+                "19",
                 "20",
                 "--output-dir",
                 str(output_dir_new),
@@ -248,12 +249,12 @@ class TestVariantSystemsComparison:
         with json_files[0].open() as f:
             results = json.load(f)
 
-        # Should have 4 variants: 7, 17, 18, 19 (current active variants)
-        assert len(results) == 4, f"Should have 4 variant results, got {len(results)}"
+        # Should have 3 variants: 1, 4, 7 (current active variants)
+        assert len(results) == 3, f"Should have 3 variant results, got {len(results)}"
 
         # Verify all variants succeeded
         variant_numbers = {r["variant_number"] for r in results}
-        expected_numbers = {7, 17, 18, 19}
+        expected_numbers = {1, 4, 7}
         assert variant_numbers == expected_numbers, f"Expected variants {expected_numbers}, got {variant_numbers}"
 
         # Verify all have success status
@@ -268,19 +269,19 @@ class TestVariantSystemsComparison:
         project_root = Path(__file__).parent.parent.parent
         script_path = project_root / "scripts" / "compare_transcription_variants.py"
 
-        # Run with only variant 7 (skip all other active variants: 17, 18, 19)
+        # Run with only variant 1 (skip all other active variants: 4, 7)
         result = subprocess.run(
             [
                 sys.executable,
                 str(script_path),
                 str(test_audio_file),
                 "--skip-variants",
-                "1",
                 "2",
                 "3",
                 "4",
                 "5",
                 "6",
+                "7",
                 "8",
                 "9",
                 "10",
@@ -304,7 +305,7 @@ class TestVariantSystemsComparison:
 
         assert result.returncode == 0, f"Filtering failed: {result.stderr}"
 
-        # Verify only variant 7 was executed
+        # Verify only variant 1 was executed
         json_files = list(output_dir_new.glob("**/*_comparison_*.json"))
         assert len(json_files) > 0
 
@@ -312,4 +313,4 @@ class TestVariantSystemsComparison:
             results = json.load(f)
 
         assert len(results) == 1, "Should have exactly one variant result"
-        assert results[0]["variant_number"] == 7, "Should be variant 7 only"
+        assert results[0]["variant_number"] == 1, "Should be variant 1 only"

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from backend.preprocess.config import TranscriptionConfig
 
 
@@ -12,49 +14,6 @@ def get_project_defaults() -> TranscriptionConfig:
     This is the standard configuration used by the project.
     """
     return TranscriptionConfig.from_env()
-
-
-def get_industry_defaults() -> TranscriptionConfig:
-    """Get TranscriptionConfig with industry-standard faster-whisper defaults.
-
-    These are the defaults from the faster-whisper library itself,
-    not the project's custom defaults.
-    """
-    return TranscriptionConfig(
-        # Beam search - industry defaults
-        beam_size=5,
-        patience=1.0,  # Industry default is 1.0, not 1.1
-        # Timestamp and task
-        word_timestamps=False,
-        task="transcribe",
-        # Chunk processing - industry default is 30s
-        chunk_length=30,  # Industry default is 30, not 20
-        # VAD parameters - industry defaults
-        vad_filter=True,
-        vad_threshold=0.5,  # Industry default is 0.5, not 0.30
-        vad_parameters={
-            "min_speech_duration_ms": 250,  # Industry default
-            "max_speech_duration_s": float("inf"),  # Industry default (unlimited)
-            "min_silence_duration_ms": 800,  # Industry default
-            "speech_pad_ms": 300,  # Industry default
-        },
-        # Temperature - industry default is [0.0, 0.2, 0.4, 0.6, 0.8, 1.0] or just 0.0
-        temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
-        temperature_increment_on_fallback=0.2,
-        best_of=5,
-        # Quality thresholds - industry defaults
-        compression_ratio_threshold=2.4,
-        logprob_threshold=-1.0,
-        no_speech_threshold=0.6,  # Industry default is 0.6, not 0.5
-        # Decoding parameters
-        length_penalty=1.0,
-        repetition_penalty=1.0,
-        no_repeat_ngram_size=0,  # Industry default is 0 (disabled), not 3
-        suppress_tokens="-1",
-        condition_on_previous_text=True,
-        # Prompting
-        initial_prompt=None,
-    )
 
 
 def get_minimal_config() -> TranscriptionConfig:
@@ -74,7 +33,7 @@ def get_transcription_config(preset: str) -> TranscriptionConfig:
     """Get transcription config by preset name.
 
     Args:
-        preset: One of "project", "industry", or "minimal"
+        preset: One of "project" or "minimal"
 
     Returns:
         TranscriptionConfig instance
@@ -84,8 +43,54 @@ def get_transcription_config(preset: str) -> TranscriptionConfig:
     """
     if preset == "project":
         return get_project_defaults()
-    if preset == "industry":
-        return get_industry_defaults()
     if preset == "minimal":
         return get_minimal_config()
     raise ValueError(f"Unknown transcription preset: {preset}")
+
+
+def create_minimal_config(
+    beam_size: int = 5,
+    word_timestamps: bool = False,
+    task: str = "transcribe",
+    **overrides: Any,
+) -> TranscriptionConfig:
+    """Create minimal config with only essential params set.
+
+    This creates a TranscriptionConfig with only the minimal parameters set,
+    allowing faster-whisper to use its own internal defaults for omitted parameters.
+
+    Args:
+        beam_size: Beam search size (default: 5)
+        word_timestamps: Enable word-level timestamps (default: False)
+        task: Transcription task ("transcribe" or "translate", default: "transcribe")
+        **overrides: Any additional TranscriptionConfig parameters to override
+
+    Returns:
+        TranscriptionConfig with only specified parameters set
+    """
+    config = TranscriptionConfig(
+        beam_size=beam_size,
+        word_timestamps=word_timestamps,
+        task=task,
+    )
+    # Apply any overrides
+    for key, value in overrides.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+    return config
+
+
+def create_project_config(**overrides: Any) -> TranscriptionConfig:
+    """Create config with project defaults, allowing overrides.
+
+    Args:
+        **overrides: Any TranscriptionConfig parameters to override
+
+    Returns:
+        TranscriptionConfig with project defaults and any overrides applied
+    """
+    config = TranscriptionConfig.from_env()
+    for key, value in overrides.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+    return config

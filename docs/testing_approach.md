@@ -77,6 +77,59 @@ GPU tests validate system setup and actual GPU functionality (behavior tests):
 5. **Behavior-Focused Testing**: Test business logic and user-facing behavior, not implementation details
 6. **Folder-Based Organization**: Use `tests/unit/`, `tests/integration/`, `tests/e2e/` folders to indicate test type - do not use test-type markers
 7. **Avoid Trivial Tests**: Don't test file existence, help text, version strings, or implementation details - test what the code does, not how
+8. **Data-Driven Tests with Dynamic Discovery**: Prefer dynamic discovery over hardcoded values to make tests sustainable and resilient to changes
+
+## Data-Driven Testing with Dynamic Discovery
+
+**Goal**: Make tests sustainable and resilient to changes by using dynamic discovery instead of hardcoded values.
+
+### Principles
+
+1. **Discover, Don't Hardcode**: Use dynamic discovery to find test subjects (variants, configs, etc.) rather than hardcoding specific IDs, names, or ranges
+2. **Derive Expected Values**: Calculate expected values from actual configurations and reference implementations, not hardcoded constants
+3. **Compare Against References**: Use reference implementations (e.g., minimal config, project defaults) to validate behavior dynamically
+4. **Validate Structure, Not Identity**: Test that structures are correct and behaviors match, not that specific variant #3 has a specific name
+
+### Examples
+
+**❌ Bad - Hardcoded values:**
+```python
+def test_variants_1_through_9_exist(self):
+    for i in range(1, 10):
+        variant = get_variant_by_number(i)
+        assert variant.name == expected_names[i]  # Hardcoded mapping
+```
+
+**✅ Good - Dynamic discovery:**
+```python
+def test_all_defined_variants_exist(self):
+    all_variants = get_all_variants()  # Discover dynamically
+    for variant in all_variants:
+        found = get_variant_by_number(variant.number)
+        assert found is not None
+        assert found.name == variant.name  # Validate consistency
+```
+
+**❌ Bad - Hardcoded expected values:**
+```python
+def test_minimal_config(self):
+    expected = {"beam_size": 5, "word_timestamps": False}  # Hardcoded
+    assert config.beam_size == expected["beam_size"]
+```
+
+**✅ Good - Derive from reference:**
+```python
+def test_minimal_config(self):
+    minimal_ref = create_minimal_config()  # Reference implementation
+    assert config.beam_size == minimal_ref.beam_size  # Compare dynamically
+```
+
+### Benefits
+
+- **Sustainable**: Tests adapt automatically when code changes (variants added/removed, configs modified)
+- **Maintainable**: No need to update tests when implementation details change
+- **Comprehensive**: Tests validate structure and behavior across all instances, not just specific ones
+- **Resilient**: Tests continue to work even when IDs, names, or ranges change
 
 ## What NOT to Test
 
@@ -89,6 +142,7 @@ These are examples of low-value tests that should be avoided:
 - **Implementation details** - Test behavior, not specific IDs, paths, or internal structure
 - **Trivial defaults** - Test that defaults work, not every single default value
 - **Code inspection** - Don't test if strings exist in source files
+- **Hardcoded mappings** - Use dynamic discovery instead of hardcoding variant numbers, names, or expected value mappings
 
 ---
 

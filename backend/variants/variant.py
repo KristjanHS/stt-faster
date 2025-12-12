@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
+from backend.preprocess.config import TranscriptionConfig
+
 
 @dataclass(slots=True)
 class PreprocessStep:
@@ -51,18 +53,14 @@ class Variant:
 
     Args:
         name: Unique identifier for the variant (e.g., "no_preprocessing")
-        number: Display number for the variant (1-15)
-        description: Short description for filenames (e.g., "nopre_projdef")
+        number: Display number for the variant (1-25)
         preprocess_steps: List of preprocessing steps to execute (used if custom_preprocess_runner is None)
-        transcription_preset: Preset name ("project", "industry", "minimal")
-        transcription_overrides: Optional dict to override specific transcription parameters
+        transcription_config: TranscriptionConfig with all parameters for this variant
         custom_preprocess_runner: Optional custom preprocessing function (takes path, config, **kwargs)
     """
 
     name: str
     number: int
-    description: str
     preprocess_steps: list[PreprocessStep] = field(default_factory=list)  # type: ignore[assignment]
-    transcription_preset: str = "project"  # "project", "industry", "minimal"
-    transcription_overrides: dict[str, Any] | None = None
+    transcription_config: TranscriptionConfig = field(default_factory=TranscriptionConfig)
     custom_preprocess_runner: Callable[..., Any] | None = None  # type: ignore[type-arg]
