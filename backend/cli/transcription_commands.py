@@ -276,11 +276,17 @@ def _process_multi_variant(
                 results = processor.process_folder()
                 all_results[variant.number] = results
 
+                # Find JSON file(s) created for this variant
+                # Pattern: variant_{number:03d}_{name}_*.json
+                json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
+                json_filename = json_files[0].name if json_files else None
+
                 # Collect variant metadata
                 transcription_config = variant.transcription_config
                 variant_meta = {
                     "variant_number": variant.number,
                     "variant_name": variant.name,
+                    "json_filename": json_filename,  # Store exact filename for easy lookup
                     "transcription_config": {
                         "beam_size": getattr(transcription_config, "beam_size", None),
                         "chunk_length": getattr(transcription_config, "chunk_length", None),

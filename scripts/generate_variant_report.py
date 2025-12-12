@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -69,6 +70,37 @@ def calculate_transcript_stats(segments: list[dict[str, Any]]) -> dict[str, Any]
     }
 
 
+def is_timestamp_folder(folder_name: str) -> bool:
+    """Check if folder name matches timestamp pattern YYYY-MM-DDTHH-MM-SS."""
+    pattern = r"^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}$"
+    return bool(re.match(pattern, folder_name))
+
+
+def load_run_meta(run_folder: Path) -> dict[str, Any] | None:
+    """Load and validate run_meta.json.
+
+    Args:
+        run_folder: Path to the run folder containing run_meta.json
+
+    Returns:
+        Parsed run_meta dictionary or None if not found/invalid
+    """
+    run_meta_file = run_folder / "run_meta.json"
+    if not run_meta_file.exists():
+        return None
+
+    try:
+        with run_meta_file.open("r", encoding="utf-8") as f:
+            run_meta = json.load(f)
+        variants = run_meta.get("variants", [])
+        if not variants:
+            return None
+        return run_meta
+    except Exception as e:
+        print(f"Error reading {run_meta_file}: {e}", file=sys.stderr)  # noqa: T201
+        return None
+
+
 def load_variant_data(run_folder: Path, variant_number: int) -> dict[str, Any] | None:
     """Load variant data from JSON files and run_meta.json.
 
@@ -79,16 +111,8 @@ def load_variant_data(run_folder: Path, variant_number: int) -> dict[str, Any] |
     Returns:
         Dictionary with variant data or None if not found
     """
-    # Load run_meta.json which contains all variants
-    run_meta_file = run_folder / "run_meta.json"
-    if not run_meta_file.exists():
-        return None
-
-    try:
-        with run_meta_file.open("r", encoding="utf-8") as f:
-            run_meta = json.load(f)
-    except Exception as e:
-        print(f"Error reading {run_meta_file}: {e}", file=sys.stderr)  # noqa: T201
+    run_meta = load_run_meta(run_folder)
+    if not run_meta:
         return None
 
     # Find variant metadata
@@ -97,13 +121,23 @@ def load_variant_data(run_folder: Path, variant_number: int) -> dict[str, Any] |
     if not variant_meta:
         return None
 
-    # Find JSON files for this variant (prefixed with variant_XXX_)
-    json_files = list(run_folder.glob(f"variant_{variant_number:03d}_*.json"))
-    if not json_files:
+    # Use stored JSON filename if available, otherwise fall back to globbing (backward compatibility)
+    json_filename = variant_meta.get("json_filename")
+    if json_filename:
+        json_file = run_folder / json_filename
+    else:
+        # Fallback: try to find JSON file by pattern (for old run_meta.json without json_filename)
+        json_files = list(run_folder.glob(f"variant_{variant_number:03d}_*.json"))
+        if not json_files:
+            json_files = list(run_folder.glob(f"{variant_number}_*.json"))
+            json_files = [f for f in json_files if "_comparison_" not in f.name]
+        if not json_files:
+            return None
+        json_file = json_files[0]
+
+    if not json_file.exists():
         return None
 
-    # Use the first JSON file (assuming single audio file per variant)
-    json_file = json_files[0]
     try:
         with json_file.open("r", encoding="utf-8") as f:
             data = json.load(f)
@@ -134,24 +168,26 @@ def generate_variant_report(
     segments = json_data.get("segments", [])
     stats = calculate_transcript_stats(segments)
 
-    # Get skip count from segments (count where no_speech_prob > threshold AND avg_logprob <= threshold)
-    # We'll approximate this from the segments themselves
-    no_speech_skips = 0
-    config = variant_meta.get("transcription_config", {})
-    no_speech_threshold = config.get("no_speech_threshold")
-    logprob_threshold = config.get("logprob_threshold")
-
-    if no_speech_threshold is not None and logprob_threshold is not None:
-        for seg in segments:
-            no_speech_prob = seg.get("no_speech_prob")
-            avg_logprob = seg.get("avg_logprob")
-            if (
-                no_speech_prob is not None
-                and avg_logprob is not None
-                and no_speech_prob > no_speech_threshold
-                and avg_logprob <= logprob_threshold
-            ):
-                no_speech_skips += 1
+    # Get skip count from JSON metrics (already calculated during transcription)
+    metrics = json_data.get("metrics", {})
+    no_speech_skips = metrics.get("no_speech_skips_count")
+    if no_speech_skips is None:
+        # Fallback: recalculate if not in metrics (backward compatibility)
+        no_speech_skips = 0
+        config = variant_meta.get("transcription_config", {})
+        no_speech_threshold = config.get("no_speech_threshold") if config else None
+        logprob_threshold = config.get("logprob_threshold") if config else None
+        if no_speech_threshold is not None and logprob_threshold is not None:
+            for seg in segments:
+                no_speech_prob = seg.get("no_speech_prob")
+                avg_logprob = seg.get("avg_logprob")
+                if (
+                    no_speech_prob is not None
+                    and avg_logprob is not None
+                    and no_speech_prob > no_speech_threshold
+                    and avg_logprob <= logprob_threshold
+                ):
+                    no_speech_skips += 1
 
     # Runtime - approximate from duration if not in metadata
     runtime_s = None  # Would need to be extracted from logs or database
@@ -226,7 +262,7 @@ def main() -> int:
         type=Path,
         nargs="?",
         default=None,
-        help="Path to variant_outputs directory containing timestamped run folders (default: auto-detect)",
+        help="Path to timestamped folder (YYYY-MM-DDTHH-MM-SS) or parent directory (default: auto-detect)",
     )
     parser.add_argument(
         "--far-speaker-range",
@@ -249,49 +285,30 @@ def main() -> int:
     # Auto-detect variant_outputs_dir if not provided
     variant_outputs_dir = args.variant_outputs_dir
     if variant_outputs_dir is None:
-        # Default: Look for latest Alt_timestamp/ folder in C:\Users\PC\Downloads\transcribe\
-        # Convert Windows path to WSL path
+        # Default: Look for latest timestamped folder (YYYY-MM-DDTHH-MM-SS) in C:\Users\PC\Downloads\transcribe\
         default_transcribe_dir = Path("/mnt/c/Users/PC/Downloads/transcribe")
-
         if default_transcribe_dir.exists() and default_transcribe_dir.is_dir():
-            # Find all Alt_* folders
-            alt_folders = [f for f in default_transcribe_dir.iterdir() if f.is_dir() and f.name.startswith("Alt_")]
-            if alt_folders:
-                # Sort by modification time (most recent first)
-                alt_folders.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-                latest_alt = alt_folders[0]
-                variant_outputs_dir = latest_alt
-                print(f"Auto-detected latest Alt folder: {variant_outputs_dir}", file=sys.stderr)  # noqa: T201
+            # Find folders matching timestamp pattern
+            timestamp_folders = [
+                f
+                for f in default_transcribe_dir.iterdir()
+                if f.is_dir() and is_timestamp_folder(f.name) and (f / "run_meta.json").exists()
+            ]
+            if timestamp_folders:
+                # Sort by name (timestamp) descending to get latest
+                timestamp_folders.sort(key=lambda p: p.name, reverse=True)
+                variant_outputs_dir = timestamp_folders[0]
+                print(f"Auto-detected latest timestamp folder: {variant_outputs_dir}", file=sys.stderr)  # noqa: T201
             else:
                 print(  # noqa: T201
-                    f"Error: No Alt_* folders found in {default_transcribe_dir}",
+                    f"Error: No timestamp folders (YYYY-MM-DDTHH-MM-SS) found in {default_transcribe_dir}",
                     file=sys.stderr,
-                )
+                )  # noqa: T201
                 return 1
         else:
-            # Fallback: Try common locations: current directory, parent directories
-            current_dir = Path.cwd()
-            possible_locations = [
-                current_dir / "variant_outputs",
-                current_dir.parent / "variant_outputs",
-                current_dir / ".." / "variant_outputs",
-            ]
-            for loc in possible_locations:
-                loc_resolved = loc.resolve()
-                if loc_resolved.exists() and loc_resolved.is_dir():
-                    variant_outputs_dir = loc_resolved
-                    print(f"Auto-detected variant_outputs directory: {variant_outputs_dir}", file=sys.stderr)  # noqa: T201
-                    break
-            else:
-                print(  # noqa: T201
-                    "Error: variant_outputs directory not found. Please specify it as an argument.",
-                    file=sys.stderr,
-                )
-                print(f"Default location checked: {default_transcribe_dir}", file=sys.stderr)  # noqa: T201
-                print("Searched in:", file=sys.stderr)  # noqa: T201
-                for loc in possible_locations:
-                    print(f"  - {loc.resolve()}", file=sys.stderr)  # noqa: T201
-                return 1
+            print(f"Error: Default directory not found: {default_transcribe_dir}", file=sys.stderr)  # noqa: T201
+            print("Please specify variant_outputs_dir as an argument.", file=sys.stderr)  # noqa: T201
+            return 1
 
     if not variant_outputs_dir.exists():
         print(f"Error: Directory not found: {variant_outputs_dir}", file=sys.stderr)  # noqa: T201
@@ -301,7 +318,9 @@ def main() -> int:
     far_speaker_range = None
     if args.far_speaker_range:
         try:
-            start, end = map(float, args.far_speaker_range.split("-"))
+            # Strip quotes if present (defensive)
+            range_str = args.far_speaker_range.strip("\"'")
+            start, end = map(float, range_str.split("-"))
             far_speaker_range = (start, end)
         except ValueError:
             print(f"Error: Invalid far-speaker-range format: {args.far_speaker_range}", file=sys.stderr)  # noqa: T201
@@ -310,41 +329,39 @@ def main() -> int:
     silence_range = None
     if args.silence_range:
         try:
-            start, end = map(float, args.silence_range.split("-"))
+            # Strip quotes if present (defensive)
+            range_str = args.silence_range.strip("\"'")
+            start, end = map(float, range_str.split("-"))
             silence_range = (start, end)
         except ValueError:
             print(f"Error: Invalid silence-range format: {args.silence_range}", file=sys.stderr)  # noqa: T201
             return 1
 
-    # Check if this is an Alt_* folder directly (from compare_transcription_variants.py)
-    # or a variant_outputs directory with timestamped subfolders
-    if variant_outputs_dir.name.startswith("Alt_") and (variant_outputs_dir / "run_meta.json").exists():
-        # This is an Alt_* folder with run_meta.json - use it directly
+    # Determine run folder: timestamp folder directly or search for timestamped subfolders
+    if is_timestamp_folder(variant_outputs_dir.name) and (variant_outputs_dir / "run_meta.json").exists():
+        # This is a timestamp folder with run_meta.json - use it directly
         run_folder = variant_outputs_dir
-        print(f"Using Alt folder directly: {run_folder.name}")  # noqa: T201
-        print()  # noqa: T201
+        print(f"Using timestamp folder directly: {run_folder.name}")  # noqa: T201
     else:
         # Find timestamped run folders (format: YYYY-MM-DDTHH-MM-SS) inside variant_outputs_dir
-        run_folders = sorted(variant_outputs_dir.glob("*"), key=lambda p: p.name, reverse=True)
-        # Filter to only timestamped folders (simple heuristic: contains run_meta.json)
-        run_folders = [rf for rf in run_folders if rf.is_dir() and (rf / "run_meta.json").exists()]
-
+        run_folders = [
+            rf
+            for rf in variant_outputs_dir.iterdir()
+            if rf.is_dir() and is_timestamp_folder(rf.name) and (rf / "run_meta.json").exists()
+        ]
         if not run_folders:
-            print(f"Error: No run folders found in {variant_outputs_dir}", file=sys.stderr)  # noqa: T201
+            print(f"Error: No timestamp folders (YYYY-MM-DDTHH-MM-SS) found in {variant_outputs_dir}", file=sys.stderr)  # noqa: T201
             return 1
-
-        # Use the most recent run folder
+        # Sort by name (timestamp) descending to get latest
+        run_folders.sort(key=lambda p: p.name, reverse=True)
         run_folder = run_folders[0]
-        print(f"Using run folder: {run_folder.name}")  # noqa: T201
-        print()  # noqa: T201
+        print(f"Using timestamp folder: {run_folder.name}")  # noqa: T201
+    print()  # noqa: T201
 
-    # Load run_meta.json to get variant list
-    run_meta_file = run_folder / "run_meta.json"
-    try:
-        with run_meta_file.open("r", encoding="utf-8") as f:
-            run_meta = json.load(f)
-    except Exception as e:
-        print(f"Error reading {run_meta_file}: {e}", file=sys.stderr)  # noqa: T201
+    # Load run_meta.json using unified helper
+    run_meta = load_run_meta(run_folder)
+    if not run_meta:
+        print(f"Error: Could not load run_meta.json from {run_folder}", file=sys.stderr)  # noqa: T201
         return 1
 
     variants = run_meta.get("variants", [])
