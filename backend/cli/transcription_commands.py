@@ -18,6 +18,7 @@ from backend.cli.ui import (
     display_processing_summary,
     display_run_statistics,
 )
+from backend.config import setup_logging
 from backend.processor import TranscriptionProcessor
 from backend.services.factory import ServiceFactory
 from backend.variants.registry import get_variant_by_number
@@ -82,6 +83,10 @@ def _configure_logging(verbose: bool) -> None:
     Args:
         verbose: If True, show DEBUG logs. If False, show only WARNING+ for noisy modules.
     """
+    # First, setup base logging from config
+    setup_logging()
+
+    # Then apply CLI-specific overrides
     if verbose:
         level = logging.DEBUG
     else:
@@ -95,7 +100,7 @@ def _configure_logging(verbose: bool) -> None:
         logging.getLogger("backend.variants.executor").setLevel(logging.INFO)
         logging.getLogger("backend.variants.preprocess_steps").setLevel(logging.INFO)
 
-    # Configure root logger
+    # Configure root logger with CLI-specific format
     logging.basicConfig(
         level=level,
         format="[%(asctime)s] %(levelname)s [%(name)s] %(message)s",
