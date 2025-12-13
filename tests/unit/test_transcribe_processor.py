@@ -8,18 +8,55 @@ import pytest
 
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
+from backend.services.factory import ServiceFactory
+from backend.services.interfaces import TranscriptionResult
 from backend.transcribe import TranscriptionMetrics
+
+
+def _create_test_processor(
+    temp_db: TranscriptionDatabase,
+    temp_folder: Path,
+    preset: str = "et-large",
+    language: str | None = None,
+    output_format: str = "txt",
+    variant=None,
+    disable_file_moving: bool = False,
+) -> TranscriptionProcessor:
+    """Helper function to create a processor with services for testing."""
+    transcription_service = ServiceFactory.create_transcription_service(
+        variant=variant,
+        preset=preset,
+        language=language,
+        output_format=output_format,
+    )
+    # Use the provided temp_db instead of creating a new one to avoid conflicts
+    state_store = ServiceFactory.create_state_store(db_path=temp_db.db_path)
+    file_mover = ServiceFactory.create_file_mover()
+    output_writer = ServiceFactory.create_output_writer()
+
+    return TranscriptionProcessor(
+        transcription_service=transcription_service,
+        state_store=state_store,
+        file_mover=file_mover,
+        output_writer=output_writer,
+        input_folder=temp_folder,
+        preset=preset,
+        language=language,
+        output_format=output_format,
+        variant=variant,
+        disable_file_moving=disable_file_moving,
+    )
 
 
 def test_processor_custom_preset(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
     """Test processor with custom preset."""
-    processor = TranscriptionProcessor(temp_db, temp_folder, preset="turbo")
+    processor = _create_test_processor(temp_db, temp_folder, preset="turbo")
     assert processor.preset == "turbo"
 
 
 def test_scan_folder_empty(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
     """Test scanning an empty folder."""
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_db, temp_folder)
     files = processor.scan_folder()
     assert len(files) == 0
 
@@ -32,7 +69,7 @@ def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folde
     (temp_folder / "audio3.m4a").touch()
     (temp_folder / "not_audio.txt").touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_db, temp_folder)
     files = processor.scan_folder()
 
     assert len(files) == 3
@@ -52,7 +89,7 @@ def test_scan_folder_ignores_subdirectories(temp_db: TranscriptionDatabase, temp
     subfolder.mkdir()
     (subfolder / "audio2.wav").touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_db, temp_folder)
     files = processor.scan_folder()
 
     assert len(files) == 1
@@ -65,7 +102,7 @@ def test_get_files_to_process(temp_db: TranscriptionDatabase, temp_folder: Path)
     (temp_folder / "audio1.wav").touch()
     (temp_folder / "audio2.wav").touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_db, temp_folder)
     files = processor.get_files_to_process()
 
     assert len(files) == 2
@@ -81,7 +118,7 @@ def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, 
     # Mark file as completed in database
     temp_db.add_file(str(audio_file), "completed")
 
-    processor = TranscriptionProcessor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_db, temp_folder)
     files = processor.get_files_to_process()
 
     # File should still be returned - file location is source of truth
@@ -167,13 +204,47 @@ def test_process_file_success(
     # Register file in database
     temp_db.add_file(str(audio_file), "pending")
 
-    transcribe = RecordingTranscribe()
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+    # Create mock transcription service
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.return_value = TranscriptionResult(
+        metrics=TranscriptionMetrics(
+            audio_path=str(audio_file),
+            preset="test-preset",
+            requested_language=None,
+            applied_language="en",
+            detected_language="en",
+            language_probability=0.95,
+            audio_duration=60.0,
+            total_processing_time=1.1,
+            transcribe_duration=1.0,
+            preprocess_duration=0.1,
+            speed_ratio=120.0,
+            preprocess_enabled=True,
+            preprocess_profile="default",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=-10.0,
+            preprocess_snr_after=-5.0,
+            preprocess_steps=[],
+        ),
+        payload={"segments": [{"text": "test transcription"}]},
+    )
+
+    # Create processor with mock service
+    processor = TranscriptionProcessor(
+        transcription_service=mock_transcription_service,
+        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        input_folder=temp_folder,
+    )
     result = processor.process_file(str(audio_file))
 
     assert result.status == "completed"
     assert result.metrics is not None
-    assert len(transcribe.calls) == 1
+    mock_transcription_service.transcribe.assert_called_once()
 
     # Verify status updated
     status = temp_db.get_status(str(audio_file))
@@ -202,12 +273,21 @@ def test_process_file_failure(
     # Register file in database
     temp_db.add_file(str(audio_file), "pending")
 
-    # Make transcription fail
-    transcribe = RecordingTranscribe(should_fail=True)
+    # Create mock transcription service that fails
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.side_effect = RuntimeError("Mock transcription failure")
 
     # Capture logs at ERROR level to verify expected error logging
     with caplog.at_level(logging.ERROR, logger="backend.processor"):
-        processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+        processor = TranscriptionProcessor(
+            transcription_service=mock_transcription_service,
+            state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+            file_mover=ServiceFactory.create_file_mover(),
+            output_writer=ServiceFactory.create_output_writer(),
+            input_folder=temp_folder,
+        )
         result = processor.process_file(str(audio_file))
 
     # Verify expected error was logged (this is intentional for this test)
@@ -246,7 +326,7 @@ def test_process_file_not_found(
 
     # Capture logs at ERROR level to verify expected error logging
     with caplog.at_level(logging.ERROR, logger="backend.processor"):
-        processor = TranscriptionProcessor(temp_db, temp_folder)
+        processor = _create_test_processor(temp_db, temp_folder)
         result = processor.process_file(str(audio_file))
 
     # Verify expected error was logged (this is intentional for this test)
@@ -275,13 +355,48 @@ def test_process_all_files(
     audio1.touch()
     audio2.touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=RecordingTranscribe())
+    # Create mock transcription service
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.return_value = TranscriptionResult(
+        metrics=TranscriptionMetrics(
+            audio_path="",
+            preset="test-preset",
+            requested_language=None,
+            applied_language="en",
+            detected_language="en",
+            language_probability=0.95,
+            audio_duration=60.0,
+            total_processing_time=1.1,
+            transcribe_duration=1.0,
+            preprocess_duration=0.1,
+            speed_ratio=120.0,
+            preprocess_enabled=True,
+            preprocess_profile="default",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=-10.0,
+            preprocess_snr_after=-5.0,
+            preprocess_steps=[],
+        ),
+        payload={"segments": [{"text": "test transcription"}]},
+    )
+
+    processor = TranscriptionProcessor(
+        transcription_service=mock_transcription_service,
+        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        input_folder=temp_folder,
+    )
     results = processor.process_all_files([str(audio1), str(audio2)])
 
     assert results["succeeded"] == 2
     assert results["failed"] == 0
     assert len(results["file_stats"]) == 2
     assert all(stat.status == "completed" for stat in results["file_stats"])
+    assert mock_transcription_service.transcribe.call_count == 2
 
 
 def test_process_folder(
@@ -295,7 +410,41 @@ def test_process_folder(
     audio1.touch()
     audio2.touch()
 
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=RecordingTranscribe())
+    # Create mock transcription service
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.return_value = TranscriptionResult(
+        metrics=TranscriptionMetrics(
+            audio_path="",
+            preset="test-preset",
+            requested_language=None,
+            applied_language="en",
+            detected_language="en",
+            language_probability=0.95,
+            audio_duration=60.0,
+            total_processing_time=1.1,
+            transcribe_duration=0.5,
+            preprocess_duration=0.1,
+            speed_ratio=120.0,
+            preprocess_enabled=True,
+            preprocess_profile="default",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=-10.0,
+            preprocess_snr_after=-5.0,
+            preprocess_steps=[],
+        ),
+        payload={"segments": [{"text": "test transcription"}]},
+    )
+
+    processor = TranscriptionProcessor(
+        transcription_service=mock_transcription_service,
+        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        input_folder=temp_folder,
+    )
     results = processor.process_folder()
 
     assert results["files_found"] == 2
@@ -304,6 +453,7 @@ def test_process_folder(
     stats = results["run_statistics"]
     assert stats["updated_db"] is True
     assert stats["run_id"] is not None
+    assert mock_transcription_service.transcribe.call_count == 2
     # Verify statistics are correctly calculated and returned
     # For 2 files with default metrics: preprocess=0.1, transcribe=0.5 each
     assert stats["total_processing_time"] > 0
@@ -332,13 +482,47 @@ def test_process_file_move_failure_keeps_pending_status(
     # Register file
     temp_db.add_file(str(audio_file), "pending")
 
-    # Mock transcribe to succeed but move to fail
-    transcribe = RecordingTranscribe()
-    failing_move = RecordingMover(should_fail=True)
+    # Create mock transcription service
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.return_value = TranscriptionResult(
+        metrics=TranscriptionMetrics(
+            audio_path=str(audio_file),
+            preset="test-preset",
+            requested_language=None,
+            applied_language="en",
+            detected_language="en",
+            language_probability=0.95,
+            audio_duration=60.0,
+            total_processing_time=1.1,
+            transcribe_duration=1.0,
+            preprocess_duration=0.1,
+            speed_ratio=120.0,
+            preprocess_enabled=True,
+            preprocess_profile="default",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=-10.0,
+            preprocess_snr_after=-5.0,
+            preprocess_steps=[],
+        ),
+        payload={"segments": [{"text": "test transcription"}]},
+    )
+
+    # Create mock file mover that fails
+    mock_file_mover = Mock()
+    mock_file_mover.move.side_effect = Exception("Permission denied")
 
     # Capture logs at WARNING and ERROR levels to verify expected error logging
     with caplog.at_level(logging.WARNING, logger="backend.processor"):
-        processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, move_fn=failing_move)
+        processor = TranscriptionProcessor(
+            transcription_service=mock_transcription_service,
+            state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+            file_mover=mock_file_mover,
+            output_writer=ServiceFactory.create_output_writer(),
+            input_folder=temp_folder,
+        )
         result = processor.process_file(str(audio_file))
 
     # Verify expected errors/warnings were logged (these are intentional for this test)
@@ -390,8 +574,43 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
     output_base = temp_folder / "outputs"
     output_base.mkdir()
 
-    transcribe = RecordingTranscribe()
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, disable_file_moving=True)
+    # Create mock transcription service
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.return_value = TranscriptionResult(
+        metrics=TranscriptionMetrics(
+            audio_path="",
+            preset="test-preset",
+            requested_language=None,
+            applied_language="en",
+            detected_language="en",
+            language_probability=0.95,
+            audio_duration=60.0,
+            total_processing_time=1.1,
+            transcribe_duration=1.0,
+            preprocess_duration=0.1,
+            speed_ratio=120.0,
+            preprocess_enabled=True,
+            preprocess_profile="default",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=-10.0,
+            preprocess_snr_after=-5.0,
+            preprocess_steps=[],
+        ),
+        payload={"segments": [{"text": "test transcription"}]},
+    )
+
+    processor = TranscriptionProcessor(
+        transcription_service=mock_transcription_service,
+        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        input_folder=temp_folder,
+        disable_file_moving=True,
+        output_format="both",
+    )
     processor._output_base_dir = output_base
 
     # Process both files
@@ -431,8 +650,43 @@ def test_process_file_root_level_file_with_output_base_dir(
     output_base = temp_folder / "outputs"
     output_base.mkdir()
 
-    transcribe = RecordingTranscribe()
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe, disable_file_moving=True)
+    # Create mock transcription service
+    from unittest.mock import Mock
+
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.return_value = TranscriptionResult(
+        metrics=TranscriptionMetrics(
+            audio_path=str(audio_file),
+            preset="test-preset",
+            requested_language=None,
+            applied_language="en",
+            detected_language="en",
+            language_probability=0.95,
+            audio_duration=60.0,
+            total_processing_time=1.1,
+            transcribe_duration=1.0,
+            preprocess_duration=0.1,
+            speed_ratio=120.0,
+            preprocess_enabled=True,
+            preprocess_profile="default",
+            target_sample_rate=16000,
+            target_channels=1,
+            preprocess_snr_before=-10.0,
+            preprocess_snr_after=-5.0,
+            preprocess_steps=[],
+        ),
+        payload={"segments": [{"text": "test transcription"}]},
+    )
+
+    processor = TranscriptionProcessor(
+        transcription_service=mock_transcription_service,
+        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        input_folder=temp_folder,
+        disable_file_moving=True,
+        output_format="both",
+    )
     processor._output_base_dir = output_base
 
     result = processor.process_file(str(audio_file))
