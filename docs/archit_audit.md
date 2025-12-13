@@ -15,13 +15,13 @@ I want to keep the pipeline working after each step!
    * **Evidence:** Processor tests validate move + status update behavior tightly coupled to processor behavior.
    * **Fix direction:** Split into (a) folder scanner, (b) per-file worker, (c) output writer, (d) run summarizer, (e) "move/archive" policy.
 
-- [ ] **3. Import-time side effects (logging config runs on import)**
+- [x] **3. Import-time side effects (logging config runs on import)**
 
    * **Impact:** Surprising behavior in tests/tools, hard to embed as a library, hard to control logging.
    * **Evidence:** `_setup_logging()` is executed at module import time in `backend/config.py`.
    * **Fix direction:** Make logging setup explicit in entrypoints only (CLI `main()`), never at import time.
 
-- [ ] **4. Configuration is scattered and weakly validated**
+- [x] **4. Configuration is scattered and weakly validated**
 
    * **Impact:** You're mixing env-driven config + default constructors + variant overrides; invalid combos slip through silently.
    * **Evidence:** Variants store arbitrary `config: dict[str, Any]`, plus separate `PreprocessConfig` + `TranscriptionConfig` usage paths.
