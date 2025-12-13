@@ -3,17 +3,678 @@
 from __future__ import annotations
 
 import logging
+import subprocess  # nosec B404 - sox invocation with fixed arguments
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Protocol, TypeVar
+
+import ffmpeg  # type: ignore[import-untyped]
 
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import StepExecutionError
 from backend.preprocess.metrics import StepMetrics
 
 LOGGER = logging.getLogger(__name__)
+
+
+class StepExecutor(Protocol):
+    """Protocol for step execution with standardized metrics and error handling."""
+
+    def resample(
+        self,
+        input_path: Path,
+        output_path: Path,
+        global_config: PreprocessConfig,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute resampling step."""
+        ...
+
+    def loudnorm_only(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        loudnorm_preset: str,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute loudness normalization only."""
+        ...
+
+    def volume_with_limiter(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        volume_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute volume adjustment with limiter."""
+        ...
+
+    def peak_normalize_2pass(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        max_gain_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute two-pass peak normalization."""
+        ...
+
+    def sox_peak_normalize(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute SoX peak normalization."""
+        ...
+
+    def apply_light_denoise(
+        self,
+        input_path: Path,
+        output_path: Path,
+        sample_rate: int,
+        step_name: str,
+        *,
+        noise_clip_duration_s: float | None = None,
+        n_std_thresh_stationary: float | None = None,
+        prop_decrease: float | None = None,
+    ) -> StepMetrics:
+        """Execute light denoising."""
+        ...
+
+    def run_ffmpeg_pipeline(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        rnnoise_mix: float,
+        loudnorm_preset: str,
+        rnnoise_model: str | None,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute FFmpeg pipeline with RNNoise and loudness normalization."""
+        ...
+
+
+class FFmpegExecutor:
+    """Executor for FFmpeg-based audio processing steps."""
+
+    def resample(
+        self,
+        input_path: Path,
+        output_path: Path,
+        global_config: PreprocessConfig,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute resampling step."""
+        start = time.time()
+
+        try:
+            stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+            stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                str(output_path),
+                ac=1,  # Force mono for Whisper/faster-whisper
+                ar=global_config.target_sample_rate,
+                acodec="pcm_s16le",
+            )
+            ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+
+        except Exception as exc:
+            raise StepExecutionError(step_name, f"ffmpeg resample error: {exc}") from exc
+
+        duration = time.time() - start
+        return StepMetrics(name=step_name, backend="ffmpeg", duration=duration)
+
+    def loudnorm_only(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        loudnorm_preset: str,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute loudness normalization only."""
+        from backend.preprocess.config import PreprocessConfig
+
+        start = time.time()
+
+        try:
+            target_i, target_tp, target_lra = PreprocessConfig.resolve_loudnorm_params(
+                None, None, None, loudnorm_preset
+            )
+
+            # Build lightweight filter graph: only resample + loudnorm
+            filter_graph = (
+                f"aresample=resampler=soxr:osr={target_sample_rate},"
+                f"loudnorm=I={target_i}:TP={target_tp}:LRA={target_lra}"
+            )
+
+            stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+            stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                str(output_path),
+                ac=1,  # Force mono for Whisper/faster-whisper
+                af=filter_graph,
+                ar=target_sample_rate,
+                sample_fmt="s16",
+            )
+            ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+
+        except Exception as exc:
+            raise StepExecutionError(step_name, f"ffmpeg loudnorm error: {exc}") from exc
+
+        duration = time.time() - start
+        return StepMetrics(name=step_name, backend="ffmpeg", duration=duration)
+
+    def volume_with_limiter(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        volume_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute volume adjustment with limiter."""
+        start = time.time()
+
+        try:
+            filter_graph = f"volume={volume_db}dB,alimiter=limit=0.98"
+
+            stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+            stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                str(output_path),
+                ac=1,  # Force mono
+                af=filter_graph,
+                ar=target_sample_rate,
+                acodec="pcm_s16le",
+            )
+            ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+
+        except Exception as exc:
+            raise StepExecutionError(step_name, f"ffmpeg volume limiter error: {exc}") from exc
+
+        duration = time.time() - start
+        return StepMetrics(name=step_name, backend="ffmpeg", duration=duration)
+
+    def peak_normalize_2pass(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        max_gain_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute two-pass peak normalization."""
+        import re
+
+        start = time.time()
+
+        try:
+            # Pass 1: volumedetect
+            stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+            stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                "null",
+                af="volumedetect",
+                f="null",
+            )
+            _, stderr = ffmpeg.run(  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                overwrite_output=True,
+                quiet=True,
+                capture_stdout=True,
+                capture_stderr=True,
+            )
+
+            # Parse max_volume from stderr
+            stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr  # type: ignore[reportUnnecessaryIsInstance]
+            match = re.search(r"max_volume:\s*([-\d.]+)\s*dB", stderr_str)
+            if not match:
+                raise StepExecutionError(step_name, "Could not find max_volume in volumedetect output")
+
+            max_volume_db = float(match.group(1))
+
+            # Compute gain: clamp((-target_db - max_volume_db), 0.0, max_gain_db)
+            gain_db = max(0.0, min(-target_db - max_volume_db, max_gain_db))
+
+            LOGGER.info(
+                "Peak normalize: max_volume=%.2f dBFS, target=%.2f dBFS, applying gain=%.2f dB",
+                max_volume_db,
+                target_db,
+                gain_db,
+            )
+
+            # Pass 2: Apply gain + limiter
+            if gain_db > 0.0:
+                filter_graph = f"volume={gain_db}dB,alimiter=limit=0.98"
+            else:
+                # No gain needed, just apply limiter
+                filter_graph = "alimiter=limit=0.98"
+
+            stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
+            stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                str(output_path),
+                ac=1,  # Force mono
+                af=filter_graph,
+                ar=target_sample_rate,
+                acodec="pcm_s16le",
+            )
+            ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+
+        except Exception as exc:
+            raise StepExecutionError(step_name, f"ffmpeg peak normalize error: {exc}") from exc
+
+        duration = time.time() - start
+        return StepMetrics(
+            name=step_name,
+            backend="ffmpeg",
+            duration=duration,
+            metadata={"target_db": target_db, "max_gain_db": max_gain_db, "applied_gain_db": gain_db},
+        )
+
+    def apply_light_denoise(
+        self,
+        input_path: Path,
+        output_path: Path,
+        sample_rate: int,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute light denoising."""
+        raise NotImplementedError("Light denoising should use PythonExecutor")
+
+    def run_ffmpeg_pipeline(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        rnnoise_mix: float,
+        loudnorm_preset: str,
+        rnnoise_model: str | None,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute FFmpeg pipeline with RNNoise and loudness normalization."""
+        raise NotImplementedError("FFmpeg pipeline should use PythonExecutor")
+
+    def sox_peak_normalize(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute SoX peak normalization."""
+        raise NotImplementedError("SoX operations should use SoxExecutor")
+
+
+class SoxExecutor:
+    """Executor for SoX-based audio processing steps."""
+
+    def sox_peak_normalize(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute SoX peak normalization."""
+        import shutil
+
+        start = time.time()
+
+        # Check if sox is available
+        sox_path = shutil.which("sox")
+        if not sox_path:
+            raise StepExecutionError(step_name, "sox is required but not found on PATH")
+
+        try:
+            # sox in.wav out.wav gain -n -3
+            # -n means normalize to the given level
+            cmd = [
+                sox_path,
+                str(input_path),
+                "-r",
+                str(target_sample_rate),
+                "-c",
+                "1",  # Force mono
+                str(output_path),
+                "gain",
+                "-n",
+                str(target_db),
+            ]
+            subprocess.run(cmd, check=True, capture_output=True, text=True)  # nosec B603 - fixed command list, no shell
+
+            # Apply limiter after SoX (as per user note about intersample overs)
+            import ffmpeg  # type: ignore[import-untyped]
+
+            stream = ffmpeg.input(str(output_path))  # type: ignore[reportUnknownMemberType]
+            temp_output = output_path.with_suffix(output_path.suffix + ".tmp")
+            stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                str(temp_output),
+                af="alimiter=limit=0.98",
+                acodec="pcm_s16le",
+            )
+            ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
+
+            # Replace original file
+            temp_output.replace(output_path)
+
+        except subprocess.CalledProcessError as exc:
+            raise StepExecutionError(step_name, f"sox failed: {exc.stderr}") from exc
+        except Exception as exc:
+            raise StepExecutionError(step_name, f"Error: {exc}") from exc
+
+        duration = time.time() - start
+        return StepMetrics(name=step_name, backend="sox+ffmpeg", duration=duration)
+
+    # Implement other methods with NotImplementedError
+    def resample(
+        self, input_path: Path, output_path: Path, global_config: PreprocessConfig, step_name: str
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Resample should use FFmpegExecutor")
+
+    def loudnorm_only(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        loudnorm_preset: str,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Loudnorm should use FFmpegExecutor")
+
+    def volume_with_limiter(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        volume_db: float,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Volume limiter should use FFmpegExecutor")
+
+    def peak_normalize_2pass(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        max_gain_db: float,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Peak normalize should use FFmpegExecutor")
+
+    def apply_light_denoise(
+        self,
+        input_path: Path,
+        output_path: Path,
+        sample_rate: int,
+        step_name: str,
+        *,
+        noise_clip_duration_s: float | None = None,
+        n_std_thresh_stationary: float | None = None,
+        prop_decrease: float | None = None,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Denoise should use PythonExecutor")
+
+    def run_ffmpeg_pipeline(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        rnnoise_mix: float,
+        loudnorm_preset: str,
+        rnnoise_model: str | None,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("FFmpeg pipeline should use PythonExecutor")
+
+
+class PreprocessStepsExecutor:
+    """Executor for complex preprocessing functions that need special handling."""
+
+    def loudnorm_only(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        loudnorm_preset: str,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute loudness normalization only."""
+        from backend.variants import preprocess_steps
+
+        return preprocess_steps.loudnorm_only(  # type: ignore[reportUnknownMemberType]
+            input_path=input_path,
+            output_path=output_path,
+            target_sample_rate=target_sample_rate,
+            target_channels=target_channels,
+            loudnorm_preset=loudnorm_preset,
+        )
+
+    def volume_with_limiter(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        volume_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute volume adjustment with limiter."""
+        from backend.variants import preprocess_steps
+
+        return preprocess_steps.volume_with_limiter(  # type: ignore[reportUnknownMemberType]
+            input_path=input_path,
+            output_path=output_path,
+            target_sample_rate=target_sample_rate,
+            target_channels=target_channels,
+            volume_db=volume_db,
+        )
+
+    def peak_normalize_2pass(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        max_gain_db: float,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute two-pass peak normalization."""
+        from backend.variants import preprocess_steps
+
+        return preprocess_steps.peak_normalize_2pass(  # type: ignore[reportUnknownMemberType]
+            input_path=input_path,
+            output_path=output_path,
+            target_sample_rate=target_sample_rate,
+            target_channels=target_channels,
+            target_db=target_db,
+            max_gain_db=max_gain_db,
+        )
+
+    # Implement other methods with NotImplementedError
+    def resample(
+        self, input_path: Path, output_path: Path, global_config: PreprocessConfig, step_name: str
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Resample should use FFmpegExecutor")
+
+    def apply_light_denoise(
+        self,
+        input_path: Path,
+        output_path: Path,
+        sample_rate: int,
+        step_name: str,
+        *,
+        noise_clip_duration_s: float | None = None,
+        n_std_thresh_stationary: float | None = None,
+        prop_decrease: float | None = None,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Denoise should use PythonExecutor")
+
+    def run_ffmpeg_pipeline(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        rnnoise_mix: float,
+        loudnorm_preset: str,
+        rnnoise_model: str | None,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("FFmpeg pipeline should use PythonExecutor")
+
+    def sox_peak_normalize(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("SoX operations should use SoxExecutor")
+
+
+class PythonExecutor:
+    """Executor for Python-based audio processing steps."""
+
+    def apply_light_denoise(
+        self,
+        input_path: Path,
+        output_path: Path,
+        sample_rate: int,
+        step_name: str,
+        *,
+        noise_clip_duration_s: float | None = None,
+        n_std_thresh_stationary: float | None = None,
+        prop_decrease: float | None = None,
+    ) -> StepMetrics:
+        """Execute light denoising with optional custom parameters."""
+        from backend.preprocess.steps.denoise_light import apply_light_denoise
+
+        kwargs: dict[str, Any] = {
+            "input_path": input_path,
+            "output_path": output_path,
+            "sample_rate": sample_rate,
+        }
+
+        if noise_clip_duration_s is not None:
+            kwargs["noise_clip_duration_s"] = noise_clip_duration_s
+        if n_std_thresh_stationary is not None:
+            kwargs["n_std_thresh_stationary"] = n_std_thresh_stationary
+        if prop_decrease is not None:
+            kwargs["prop_decrease"] = prop_decrease
+
+        return apply_light_denoise(**kwargs)
+
+    def run_ffmpeg_pipeline(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        rnnoise_mix: float,
+        loudnorm_preset: str,
+        rnnoise_model: str | None,
+        step_name: str,
+    ) -> StepMetrics:
+        """Execute FFmpeg pipeline with RNNoise and loudness normalization."""
+        from backend.preprocess.steps.ffmpeg_pipeline import run_ffmpeg_pipeline
+
+        return run_ffmpeg_pipeline(
+            input_path=input_path,
+            output_path=output_path,
+            target_sample_rate=target_sample_rate,
+            target_channels=target_channels,
+            rnnoise_mix=rnnoise_mix,
+            loudnorm_preset=loudnorm_preset,
+            rnnoise_model=rnnoise_model,
+        )
+
+    # Implement other methods with NotImplementedError
+    def resample(
+        self, input_path: Path, output_path: Path, global_config: PreprocessConfig, step_name: str
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Resample should use FFmpegExecutor")
+
+    def loudnorm_only(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        loudnorm_preset: str,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Loudnorm should use FFmpegExecutor")
+
+    def volume_with_limiter(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        volume_db: float,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Volume limiter should use FFmpegExecutor")
+
+    def peak_normalize_2pass(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        max_gain_db: float,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("Peak normalize should use FFmpegExecutor")
+
+    def sox_peak_normalize(
+        self,
+        input_path: Path,
+        output_path: Path,
+        target_sample_rate: int,
+        target_channels: int,
+        target_db: float,
+        step_name: str,
+    ) -> StepMetrics:  # type: ignore[override]
+        raise NotImplementedError("SoX operations should use SoxExecutor")
 
 
 class StepConfig(ABC):
@@ -167,21 +828,24 @@ class DynaudnormConservativeStepConfig(BaseStepConfig):
 
 
 class Step(ABC, Generic[StepConfigT]):
-    """Abstract base class for preprocessing steps."""
+    """Abstract base class for preprocessing steps with standardized execution."""
 
     config: StepConfigT  # Type annotation for type checker
 
-    def __init__(self, config: StepConfigT | None = None):
-        """Initialize step with configuration.
+    def __init__(self, config: StepConfigT | None = None, executor: StepExecutor | None = None):
+        """Initialize step with configuration and executor.
 
         Args:
             config: Step-specific configuration. If None, uses default config.
+            executor: StepExecutor to use. If None, uses default executor.
         """
         self.config = config or self.get_default_config()
         # Validate that config is the correct type at construction time
         expected_type = type(self.get_default_config())
         if not isinstance(self.config, expected_type):
             raise TypeError(f"Config must be {expected_type.__name__}, got {type(self.config).__name__}")
+
+        self.executor = executor or self.get_default_executor()
 
     @classmethod
     @abstractmethod
@@ -195,7 +859,11 @@ class Step(ABC, Generic[StepConfigT]):
         """Return default configuration for this step type."""
         pass
 
-    @abstractmethod
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Return default executor for this step type."""
+        return FFmpegExecutor()  # type: ignore[return-value]  # Default to FFmpeg executor
+
     def execute(
         self,
         input_path: Path,
@@ -203,7 +871,7 @@ class Step(ABC, Generic[StepConfigT]):
         global_config: PreprocessConfig,
         step_index: int,
     ) -> StepMetrics:
-        """Execute the preprocessing step.
+        """Execute the preprocessing step using the configured executor.
 
         Args:
             input_path: Path to input audio file
@@ -214,7 +882,100 @@ class Step(ABC, Generic[StepConfigT]):
         Returns:
             StepMetrics with execution results
         """
-        pass
+        step_name = self.get_step_name()
+
+        # Dispatch to the appropriate executor method based on step type
+        if self.get_step_type() == "resample":
+            return self.executor.resample(
+                input_path=input_path,
+                output_path=output_path,
+                global_config=global_config,
+                step_name=step_name,
+            )
+        elif self.get_step_type() == "loudnorm_only":
+            if not isinstance(self.config, LoudnormOnlyStepConfig):
+                raise TypeError(f"Expected LoudnormOnlyStepConfig, got {type(self.config).__name__}")
+            return self.executor.loudnorm_only(
+                input_path=input_path,
+                output_path=output_path,
+                target_sample_rate=global_config.target_sample_rate,
+                target_channels=global_config.target_channels or 1,
+                loudnorm_preset=self.config.loudnorm_preset,
+                step_name=step_name,
+            )
+        elif self.get_step_type() == "volume_limiter":
+            if not isinstance(self.config, VolumeLimiterStepConfig):
+                raise TypeError(f"Expected VolumeLimiterStepConfig, got {type(self.config).__name__}")
+            return self.executor.volume_with_limiter(
+                input_path=input_path,
+                output_path=output_path,
+                target_sample_rate=global_config.target_sample_rate,
+                target_channels=global_config.target_channels or 1,
+                volume_db=self.config.volume_db,
+                step_name=step_name,
+            )
+        elif self.get_step_type() == "peak_normalize_2pass":
+            if not isinstance(self.config, PeakNormalize2passStepConfig):
+                raise TypeError(f"Expected PeakNormalize2passStepConfig, got {type(self.config).__name__}")
+            return self.executor.peak_normalize_2pass(
+                input_path=input_path,
+                output_path=output_path,
+                target_sample_rate=global_config.target_sample_rate,
+                target_channels=global_config.target_channels or 1,
+                target_db=self.config.target_db,
+                max_gain_db=self.config.max_gain_db,
+                step_name=step_name,
+            )
+        elif self.get_step_type() == "sox_peak_normalize":
+            if not isinstance(self.config, SoxPeakNormalizeStepConfig):
+                raise TypeError(f"Expected SoxPeakNormalizeStepConfig, got {type(self.config).__name__}")
+            return self.executor.sox_peak_normalize(
+                input_path=input_path,
+                output_path=output_path,
+                target_sample_rate=global_config.target_sample_rate,
+                target_channels=global_config.target_channels or 1,
+                target_db=self.config.target_db,
+                step_name=step_name,
+            )
+        elif self.get_step_type() == "denoise":
+            return self.executor.apply_light_denoise(
+                input_path=input_path,
+                output_path=output_path,
+                sample_rate=global_config.target_sample_rate,
+                step_name=step_name,
+            )
+        elif self.get_step_type() == "denoise_custom":
+            if not isinstance(self.config, DenoiseCustomStepConfig):
+                raise TypeError(f"Expected DenoiseCustomStepConfig, got {type(self.config).__name__}")
+            return self.executor.apply_light_denoise(  # type: ignore[reportCallIssue]
+                input_path=input_path,
+                output_path=output_path,
+                sample_rate=global_config.target_sample_rate,
+                step_name=step_name,
+                noise_clip_duration_s=self.config.noise_clip_duration_s,
+                n_std_thresh_stationary=self.config.n_std_thresh_stationary,
+                prop_decrease=self.config.prop_decrease,
+            )
+        elif self.get_step_type() == "ffmpeg":
+            # For complex FFmpeg pipeline, we need more config
+            if not isinstance(self.config, FFmpegStepConfig):
+                raise TypeError(f"Expected FFmpegStepConfig, got {type(self.config).__name__}")
+            return self.executor.run_ffmpeg_pipeline(
+                input_path=input_path,
+                output_path=output_path,
+                target_sample_rate=global_config.target_sample_rate,
+                target_channels=global_config.target_channels or 1,
+                rnnoise_mix=global_config.rnnoise_mix,
+                loudnorm_preset=global_config.loudnorm_preset,
+                rnnoise_model=global_config.rnnoise_model,
+                step_name=step_name,
+            )
+        else:
+            raise NotImplementedError(f"Step type '{self.get_step_type()}' not implemented in executor pattern")
+
+    def get_step_name(self) -> str:
+        """Return the step name for metrics reporting."""
+        return self.get_step_type()
 
 
 class ResampleStep(Step[ResampleStepConfig]):
@@ -228,34 +989,6 @@ class ResampleStep(Step[ResampleStepConfig]):
     def get_default_config(cls) -> ResampleStepConfig:
         return ResampleStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute resampling step."""
-        import ffmpeg  # type: ignore[import-untyped]
-
-        start = time.time()
-        try:
-            stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-                stream,  # type: ignore[reportUnknownArgumentType]
-                str(output_path),
-                ac=1,  # Force mono for Whisper/faster-whisper
-                ar=global_config.target_sample_rate,
-                acodec="pcm_s16le",
-            )
-            ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-        except Exception as exc:
-            raise StepExecutionError("simple_resample", f"ffmpeg error: {exc}") from exc
-
-        duration = time.time() - start
-        LOGGER.info("Resample step completed in %.2fs", duration)
-        return StepMetrics(name="simple_resample", backend="ffmpeg", duration=duration)
-
 
 class FFmpegStep(Step[FFmpegStepConfig]):
     """FFmpeg pipeline step."""
@@ -268,35 +1001,10 @@ class FFmpegStep(Step[FFmpegStepConfig]):
     def get_default_config(cls) -> FFmpegStepConfig:
         return FFmpegStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute FFmpeg pipeline step."""
-        from backend.preprocess.steps.ffmpeg_pipeline import run_ffmpeg_pipeline
-
-        start = time.time()
-        LOGGER.info(
-            "FFmpeg params: rnnoise_mix=%.2f, loudnorm_preset=%s, rnnoise_model=%s",
-            global_config.rnnoise_mix,
-            global_config.loudnorm_preset,
-            global_config.rnnoise_model or "default",
-        )
-
-        metrics = run_ffmpeg_pipeline(
-            input_path=input_path,
-            output_path=output_path,
-            target_sample_rate=global_config.target_sample_rate,
-            target_channels=global_config.target_channels or 1,
-            rnnoise_mix=global_config.rnnoise_mix,
-            loudnorm_preset=global_config.loudnorm_preset,
-            rnnoise_model=global_config.rnnoise_model,
-        )
-        LOGGER.info("FFmpeg step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use PythonExecutor for complex FFmpeg pipeline."""
+        return PythonExecutor()
 
 
 class DenoiseStep(Step[DenoiseStepConfig]):
@@ -310,24 +1018,10 @@ class DenoiseStep(Step[DenoiseStepConfig]):
     def get_default_config(cls) -> DenoiseStepConfig:
         return DenoiseStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute denoising step."""
-        from backend.preprocess.steps.denoise_light import apply_light_denoise
-
-        start = time.time()
-        metrics = apply_light_denoise(
-            input_path=input_path,
-            output_path=output_path,
-            sample_rate=global_config.target_sample_rate,
-        )
-        LOGGER.info("Denoise step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use PythonExecutor for denoising."""
+        return PythonExecutor()
 
 
 class DenoiseCustomStep(Step[DenoiseCustomStepConfig]):
@@ -341,34 +1035,10 @@ class DenoiseCustomStep(Step[DenoiseCustomStepConfig]):
     def get_default_config(cls) -> DenoiseCustomStepConfig:
         return DenoiseCustomStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute custom denoising step."""
-        from backend.preprocess.steps.denoise_light import apply_light_denoise
-
-        start = time.time()
-        LOGGER.info(
-            "Denoise params: noise_clip=%.2fs, n_std=%.2f, prop_decrease=%.2f",
-            self.config.noise_clip_duration_s,
-            self.config.n_std_thresh_stationary,
-            self.config.prop_decrease,
-        )
-
-        metrics = apply_light_denoise(
-            input_path=input_path,
-            output_path=output_path,
-            sample_rate=global_config.target_sample_rate,
-            noise_clip_duration_s=self.config.noise_clip_duration_s,
-            n_std_thresh_stationary=self.config.n_std_thresh_stationary,
-            prop_decrease=self.config.prop_decrease,
-        )
-        LOGGER.info("Denoise custom step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use PythonExecutor for custom denoising."""
+        return PythonExecutor()
 
 
 class LoudnormOnlyStep(Step[LoudnormOnlyStepConfig]):
@@ -382,26 +1052,10 @@ class LoudnormOnlyStep(Step[LoudnormOnlyStepConfig]):
     def get_default_config(cls) -> LoudnormOnlyStepConfig:
         return LoudnormOnlyStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute loudnorm only step."""
-        from backend.variants.preprocess_steps import loudnorm_only
-
-        start = time.time()
-        metrics = loudnorm_only(
-            input_path=input_path,
-            output_path=output_path,
-            target_sample_rate=global_config.target_sample_rate,
-            target_channels=global_config.target_channels or 1,
-            loudnorm_preset=self.config.loudnorm_preset,
-        )
-        LOGGER.info("Loudnorm only step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use PreprocessStepsExecutor for loudnorm."""
+        return PreprocessStepsExecutor()
 
 
 class VolumeLimiterStep(Step[VolumeLimiterStepConfig]):
@@ -415,28 +1069,10 @@ class VolumeLimiterStep(Step[VolumeLimiterStepConfig]):
     def get_default_config(cls) -> VolumeLimiterStepConfig:
         return VolumeLimiterStepConfig(volume_db=1.5)  # Default value needed
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute volume limiter step."""
-        from backend.variants.preprocess_steps import volume_with_limiter
-
-        start = time.time()
-        LOGGER.info("Volume limiter params: volume_db=%.2f", self.config.volume_db)
-
-        metrics = volume_with_limiter(
-            input_path=input_path,
-            output_path=output_path,
-            target_sample_rate=global_config.target_sample_rate,
-            target_channels=global_config.target_channels or 1,
-            volume_db=self.config.volume_db,
-        )
-        LOGGER.info("Volume limiter step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use PreprocessStepsExecutor for volume limiter."""
+        return PreprocessStepsExecutor()
 
 
 class PeakNormalize2passStep(Step[PeakNormalize2passStepConfig]):
@@ -450,31 +1086,10 @@ class PeakNormalize2passStep(Step[PeakNormalize2passStepConfig]):
     def get_default_config(cls) -> PeakNormalize2passStepConfig:
         return PeakNormalize2passStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute peak normalize 2pass step."""
-        from backend.variants.preprocess_steps import peak_normalize_2pass
-
-        start = time.time()
-        LOGGER.info(
-            "Peak normalize params: target_db=%.1f, max_gain_db=%.1f", self.config.target_db, self.config.max_gain_db
-        )
-
-        metrics = peak_normalize_2pass(
-            input_path=input_path,
-            output_path=output_path,
-            target_sample_rate=global_config.target_sample_rate,
-            target_channels=global_config.target_channels or 1,
-            target_db=self.config.target_db,
-            max_gain_db=self.config.max_gain_db,
-        )
-        LOGGER.info("Peak normalize 2pass step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use PreprocessStepsExecutor for complex 2-pass peak normalization."""
+        return PreprocessStepsExecutor()
 
 
 class StepRegistry:
@@ -808,28 +1423,10 @@ class SoxPeakNormalizeStep(Step[SoxPeakNormalizeStepConfig]):
     def get_default_config(cls) -> SoxPeakNormalizeStepConfig:
         return SoxPeakNormalizeStepConfig()
 
-    def execute(
-        self,
-        input_path: Path,
-        output_path: Path,
-        global_config: PreprocessConfig,
-        step_index: int,
-    ) -> StepMetrics:
-        """Execute sox peak normalize step."""
-        from backend.variants.preprocess_steps import sox_peak_normalize
-
-        start = time.time()
-        LOGGER.info("SoX peak normalize params: target_db=%.1f", self.config.target_db)
-
-        metrics = sox_peak_normalize(
-            input_path=input_path,
-            output_path=output_path,
-            target_sample_rate=global_config.target_sample_rate,
-            target_channels=global_config.target_channels or 1,
-            target_db=self.config.target_db,
-        )
-        LOGGER.info("SoX peak normalize step completed in %.2fs", time.time() - start)
-        return metrics
+    @classmethod
+    def get_default_executor(cls) -> StepExecutor:
+        """Use SoxExecutor for SoX-based processing."""
+        return SoxExecutor()
 
 
 class CompressorLimiterStep(Step[CompressorLimiterStepConfig]):

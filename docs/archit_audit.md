@@ -33,7 +33,7 @@ I want to keep the pipeline working after each step!
    * **Evidence:** `PreprocessStep.step_type` is a large literal union and `config` is untyped.
    * **Fix direction:** Replace `step_type: str` with a registry of step classes/functions (`StepSpec` → `StepRunner`) and typed step configs.
 
-- [ ] **6. Preprocess implementation uses inconsistent execution styles**
+- [x] **6. Preprocess implementation uses inconsistent execution styles**
 
    * **Impact:** Different steps likely behave differently (error handling, logging, performance, determinism).
    * **Evidence:** Some steps use `ffmpeg` python bindings + regex parsing (e.g. volumedetect), rather than one unified runner approach.
