@@ -15,13 +15,14 @@ Usage:
 import argparse
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Set
 
 # Add project root to path
 project_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(project_root))
 
 from backend.database import TranscriptionDatabase
+from backend.preprocess.config import TranscriptionConfig
 from backend.variants.registry import _get_all_variants
 
 # Expected parameter columns for runs table (job level)
@@ -122,7 +123,7 @@ OPTIONAL_FILE_STATISTICS = {
 }
 
 
-def get_variant_explicit_parameters(variant) -> set[str]:
+def get_variant_explicit_parameters(variant: Any) -> Set[str]:
     """Get set of parameters that were explicitly set and passed to model.transcribe().
 
     Uses the same approach as verify_all_variants.py - checks what to_kwargs() returns,
@@ -134,17 +135,17 @@ def get_variant_explicit_parameters(variant) -> set[str]:
     Returns:
         Set of parameter names that were explicitly set and passed to model.transcribe()
     """
-    config = variant.transcription_config
+    config: TranscriptionConfig = variant.transcription_config
 
     # Prioritize to_kwargs() - this is what actually gets passed to model.transcribe()
     # (same approach as verify_all_variants.py)
     if hasattr(config, "to_kwargs"):
-        kwargs = config.to_kwargs()
-        explicit = set(kwargs.keys())
+        kwargs: Dict[str, Any] = config.to_kwargs()
+        explicit: Set[str] = set(kwargs.keys())
 
         # Handle VAD parameters - they're stored in a dict but map to individual DB columns
         if "vad_parameters" in kwargs and isinstance(kwargs.get("vad_parameters"), dict):
-            vad_params = kwargs["vad_parameters"]
+            vad_params: Dict[str, Any] = kwargs["vad_parameters"]
             if vad_params:
                 # If vad_parameters dict was set, the individual VAD params were used
                 explicit.add("vad_min_speech_duration_ms")
@@ -159,7 +160,7 @@ def get_variant_explicit_parameters(variant) -> set[str]:
 
     # Fallback: use _explicit_fields if to_kwargs() is not available
     if hasattr(config, "_explicit_fields"):
-        explicit = config._explicit_fields.copy()
+        explicit: Set[str] = config._explicit_fields.copy()
         # Handle VAD parameters dict
         if "vad_parameters" in explicit or "vad_filter" in explicit:
             if hasattr(config, "vad_parameters") and config.vad_parameters:
@@ -174,7 +175,7 @@ def get_variant_explicit_parameters(variant) -> set[str]:
     return set(RUN_PARAMETER_COLUMNS)
 
 
-def find_matching_variant(run: dict) -> tuple[Any | None, set[str]]:
+def find_matching_variant(run: Dict[str, Any]) -> tuple[Any | None, Set[str]]:
     """Try to find which variant matches this run by checking all variants.
 
     Args:
@@ -184,27 +185,27 @@ def find_matching_variant(run: dict) -> tuple[Any | None, set[str]]:
         Tuple of (variant, explicit_parameters_set)
         If no variant matches, returns (None, set()) and we assume all parameters should be set
     """
-    all_variants = _get_all_variants()
+    all_variants: List[Any] = _get_all_variants()
 
     # Try to match against all variants
     # We check if the run's non-NULL values match what the variant would set
     for variant in all_variants:
-        explicit_params = get_variant_explicit_parameters(variant)
+        explicit_params: Set[str] = get_variant_explicit_parameters(variant)
         # Check if the run's non-NULL values match what the variant would set
-        matches = True
+        matches: bool = True
         for param in explicit_params:
             if param in run and run[param] is not None:
                 # Parameter was set - check if it matches variant's value
-                variant_value = getattr(variant.transcription_config, param, None)
-                run_value = run[param]
+                variant_value: Any = getattr(variant.transcription_config, param, None)
+                run_value: Any = run[param]
                 # Handle special cases (temperature as JSON string, booleans as ints, etc.)
                 if param == "temperature" and variant_value is not None:
                     import json
 
                     if isinstance(variant_value, list):
-                        variant_value_str = json.dumps(variant_value)
+                        variant_value_str: str = json.dumps(variant_value)
                     else:
-                        variant_value_str = str(variant_value)
+                        variant_value_str: str = str(variant_value)
                     if run_value != variant_value_str:
                         matches = False
                         break
@@ -225,8 +226,8 @@ def find_matching_variant(run: dict) -> tuple[Any | None, set[str]]:
 
 
 def check_null_values(
-    row: dict, expected_columns: set[str], level: str, explicit_params: set[str] | None = None
-) -> list[str]:
+    row: Dict[str, Any], expected_columns: Set[str], level: str, explicit_params: Set[str] | None = None
+) -> List[str]:
     """Check which expected columns have NULL values.
 
     Args:
@@ -239,14 +240,14 @@ def check_null_values(
     Returns:
         List of column names that are NULL (only for parameters that were explicitly set)
     """
-    missing = []
+    missing: List[str] = []
     # If explicit_params is provided (even if empty), only check those parameters
     # Empty set means baseline variant - no parameters expected, so check nothing
     if explicit_params is not None:
-        columns_to_check = explicit_params & expected_columns
+        columns_to_check: Set[str] = explicit_params & expected_columns
     else:
         # None means check all (main transcribe function)
-        columns_to_check = expected_columns
+        columns_to_check: Set[str] = expected_columns
 
     for col in columns_to_check:
         if col not in row:
