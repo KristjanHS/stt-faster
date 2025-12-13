@@ -25,14 +25,7 @@ from collections.abc import Callable
 from typing import NoReturn
 from types import FrameType
 
-
-def _setup_logging() -> None:
-    # Log to stdout with a concise format
-    logging.basicConfig(
-        level=logging.INFO,
-        stream=sys.stdout,
-        format="[%(asctime)s] %(levelname)s %(name)s: %(message)s",
-    )
+from backend.config import setup_logging
 
 
 def _build_arg_parser() -> argparse.ArgumentParser:
@@ -48,7 +41,7 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 def _run_healthcheck(log: logging.Logger | None = None) -> NoReturn:
     """Emit a healthcheck log message and exit cleanly."""
     if log is None:
-        _setup_logging()
+        setup_logging()
         log = logging.getLogger("backend.main")
 
     log.info("Healthcheck OK")
@@ -63,7 +56,7 @@ def main(
 ) -> NoReturn:
     """Block indefinitely until SIGINT/SIGTERM is received."""
     if log is None:
-        _setup_logging()
+        setup_logging()
         log = logging.getLogger("backend.main")
 
     stop_event = (event_factory or threading.Event)()
