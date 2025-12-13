@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from backend.variants.steps import (
+    AresamplLoudnormFixed2StepConfig,
+    PeakNormalize2passStepConfig,
+    SoxPeakNormalizeStepConfig,
+    VolumeLimiterStepConfig,
+)
 from backend.variants.transcription_presets import (
     create_baseline_config,
     create_minimal_config,
@@ -352,7 +358,9 @@ def _get_all_variants() -> list[Variant]:
                     name="aresampl_loudnorm_fixed2",
                     enabled=True,
                     step_type="aresampl_loudnorm_fixed2",
-                    config={"I": -24.0, "TP": -2.0, "LRA": 15.0},
+                    config=AresamplLoudnormFixed2StepConfig(
+                        integrated_loudness=-24.0, true_peak=-2.0, loudness_range=15.0
+                    ),
                 ),
             ],
             transcription_config=create_minimal_config(),
@@ -403,7 +411,7 @@ def _get_all_variants() -> list[Variant]:
                     name="volume_1_5db_limiter",
                     enabled=True,
                     step_type="volume_limiter",
-                    config={"volume_db": 1.5},
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
                 ),
             ],
             transcription_config=create_minimal_config(
@@ -421,7 +429,7 @@ def _get_all_variants() -> list[Variant]:
                     name="volume_3db_limiter",
                     enabled=True,
                     step_type="volume_limiter",
-                    config={"volume_db": 3.0},
+                    config=VolumeLimiterStepConfig(volume_db=3.0),
                 ),
             ],
             transcription_config=create_minimal_config(
@@ -439,7 +447,7 @@ def _get_all_variants() -> list[Variant]:
                     name="peak_normalize_n6db",
                     enabled=True,
                     step_type="peak_normalize_2pass",
-                    config={"target_db": -6.0, "max_gain_db": 6.0},
+                    config=PeakNormalize2passStepConfig(target_db=-6.0, max_gain_db=6.0),
                 ),
             ],
             transcription_config=create_minimal_config(
@@ -457,7 +465,7 @@ def _get_all_variants() -> list[Variant]:
                     name="peak_normalize_n3db",
                     enabled=True,
                     step_type="peak_normalize_2pass",
-                    config={"target_db": -3.0, "max_gain_db": 6.0},
+                    config=PeakNormalize2passStepConfig(target_db=-3.0, max_gain_db=6.0),
                 ),
             ],
             transcription_config=create_minimal_config(
@@ -475,7 +483,7 @@ def _get_all_variants() -> list[Variant]:
                     name="peak_normalize_n3db_max3db",
                     enabled=True,
                     step_type="peak_normalize_2pass",
-                    config={"target_db": -3.0, "max_gain_db": 3.0},
+                    config=PeakNormalize2passStepConfig(target_db=-3.0, max_gain_db=3.0),
                 ),
             ],
             transcription_config=create_minimal_config(
@@ -493,7 +501,7 @@ def _get_all_variants() -> list[Variant]:
                     name="sox_peak_normalize_n3db",
                     enabled=True,
                     step_type="sox_peak_normalize",
-                    config={"target_db": -3.0},
+                    config=SoxPeakNormalizeStepConfig(target_db=-3.0),
                 ),
             ],
             transcription_config=create_minimal_config(

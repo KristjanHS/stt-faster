@@ -27,7 +27,7 @@ I want to keep the pipeline working after each step!
    * **Evidence:** Variants store arbitrary `config: dict[str, Any]`, plus separate `PreprocessConfig` + `TranscriptionConfig` usage paths.
    * **Fix direction:** Create a single validated "RunConfig" (typed, with defaults) and derive all per-file/per-step settings from it.
 
-- [ ] **5. Variant system is "stringly typed" with step-type explosion**
+- [x] **5. Variant system is "stringly typed" with step-type explosion**
 
    * **Impact:** Adding/changing steps becomes brittle; step names drift; refactors break variants silently.
    * **Evidence:** `PreprocessStep.step_type` is a large literal union and `config` is untyped.
