@@ -17,13 +17,13 @@ class WhisperTranscriptionService:
 
     def __init__(
         self,
-        preprocess_config_provider: Callable[[], PreprocessConfig],
+        preprocess_config: PreprocessConfig,
         preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult],
-        transcription_config_provider: Callable[[], TranscriptionConfig],
+        transcription_config: TranscriptionConfig,
     ):
-        self._preprocess_config_provider = preprocess_config_provider
+        self._preprocess_config = preprocess_config
         self._preprocess_runner = preprocess_runner
-        self._transcription_config_provider = transcription_config_provider
+        self._transcription_config = transcription_config
 
     def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         """Transcribe audio and return result with metrics."""
@@ -34,9 +34,9 @@ class WhisperTranscriptionService:
         def _collect(metrics: TranscriptionMetrics) -> None:
             metrics_container["value"] = metrics
 
-        # Get configurations
-        preprocess_config = self._preprocess_config_provider()
-        transcription_config = self._transcription_config_provider()
+        # Use stored configurations
+        preprocess_config = self._preprocess_config
+        transcription_config = self._transcription_config
 
         # Determine if we should use minimal params
         is_minimal = is_minimal_config(transcription_config)
@@ -59,9 +59,9 @@ class WhisperTranscriptionService:
                 path=request.audio_path,
                 preset=request.preset,
                 language=request.language,
-                preprocess_config_provider=self._preprocess_config_provider,
+                preprocess_config_provider=lambda: self._preprocess_config,
                 preprocess_runner=self._preprocess_runner,
-                transcription_config_provider=self._transcription_config_provider,
+                transcription_config_provider=lambda: self._transcription_config,
                 metrics_collector=_collect,
             )
 
