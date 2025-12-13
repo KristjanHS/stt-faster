@@ -2,140 +2,29 @@
 
 import json
 import logging
-import shutil
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
-from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
+from backend.database import FileMetricRecord, RunRecord
 from backend.exceptions import DatabaseError
 from backend.preprocess.config import PreprocessConfig
-from backend.transcribe import DEFAULT_OUTPUT_FORMAT, TranscriptionMetrics, transcribe
-from backend.variants.executor import (
-    create_variant_preprocess_runner,
-    create_variant_transcribe_config,
-    transcribe_with_minimal_params,
+from backend.services.interfaces import (
+    FileMover,
+    OutputWriter,
+    StateStore,
+    TranscriptionRequest,
+    TranscriptionService,
 )
+from backend.transcribe import DEFAULT_OUTPUT_FORMAT, TranscriptionMetrics
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
 
 # Supported audio file extensions
 SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
-
-
-def _create_variant_transcribe_function(
-    variant: Variant,
-    preset: str,
-    language: str | None,
-    output_format: str,
-) -> Callable[[str, str, str, str | None], TranscriptionMetrics | None]:
-    """Create a transcribe function that uses variant configuration.
-
-    Args:
-        variant: Variant definition to use
-        preset: Model preset for transcription
-        language: Optional language code
-        output_format: Output format ("txt", "json", or "both")
-
-    Returns:
-        A transcribe function matching TranscriptionProcessor's expected signature:
-        (audio: str, output_path: str, preset: str, language: str | None) -> TranscriptionMetrics | None
-    """
-    # Build preprocessing config
-    preprocess_config = PreprocessConfig()  # Use defaults
-    if not any(step.enabled for step in variant.preprocess_steps) and not variant.custom_preprocess_runner:
-        preprocess_config.enabled = False
-
-    # Create preprocessing runner from variant
-    preprocess_runner = create_variant_preprocess_runner(
-        variant,
-        preprocess_config,
-        base_name=None,
-        datetime_suffix=None,
-        output_dir=None,
-        copy_intermediate=False,
-    )
-
-    # Get transcription config based on variant preset
-    transcription_config = create_variant_transcribe_config(variant)
-
-    def _preprocess_config_provider() -> PreprocessConfig:
-        return preprocess_config
-
-    def _transcription_config_provider() -> Any:  # TranscriptionConfig
-        return transcription_config
-
-    def _variant_transcribe(
-        audio: str, output_path: str, preset: str, language: str | None = None
-    ) -> TranscriptionMetrics | None:
-        """Transcribe using variant configuration."""
-        metrics_container: dict[str, TranscriptionMetrics] = {}
-
-        def _collect(metrics: TranscriptionMetrics) -> None:
-            metrics_container["value"] = metrics
-
-        # Determine if we should use minimal params (only pass essential params to model.transcribe)
-        from backend.variants.executor import is_minimal_config  # noqa: PLC0415
-
-        is_minimal = is_minimal_config(transcription_config)
-
-        # Run transcription based on config type
-        if is_minimal:
-            # For minimal config, use the internal function that omits parameters
-            payload = transcribe_with_minimal_params(
-                path=audio,
-                preset=preset,
-                language=language,
-                preprocess_config=preprocess_config,
-                preprocess_runner=preprocess_runner,
-                transcription_config=transcription_config,
-                metrics_collector=_collect,
-            )
-        else:
-            # Use standard transcription with full config and metrics collection
-            payload = transcribe(
-                path=audio,
-                preset=preset,
-                language=language,
-                preprocess_config_provider=_preprocess_config_provider,
-                preprocess_runner=preprocess_runner,
-                transcription_config_provider=_transcription_config_provider,
-                metrics_collector=_collect,
-            )
-
-        # Write output in the specified format
-        if output_format == "txt":
-            segments = payload.get("segments", [])
-            with open(output_path, "w", encoding="utf-8") as text_file:
-                for segment in segments:
-                    text_file.write(segment["text"])
-                    text_file.write("\n")
-        elif output_format == "json":
-            with open(output_path, "w", encoding="utf-8") as json_file:
-                json.dump(payload, json_file, ensure_ascii=False, indent=2)
-        elif output_format == "both":
-            # Write both txt and json files
-            base_path = Path(output_path)
-            txt_path = base_path.with_suffix(".txt")
-            json_path = base_path.with_suffix(".json")
-
-            # Write txt
-            segments = payload.get("segments", [])
-            with open(txt_path, "w", encoding="utf-8") as text_file:
-                for segment in segments:
-                    text_file.write(segment["text"])
-                    text_file.write("\n")
-
-            # Write json
-            with open(json_path, "w", encoding="utf-8") as json_file:
-                json.dump(payload, json_file, ensure_ascii=False, indent=2)
-
-        return metrics_container.get("value")
-
-    return _variant_transcribe
 
 
 # Folder names for processed and failed files
@@ -158,97 +47,47 @@ class TranscriptionProcessor:
 
     def __init__(
         self,
-        db: TranscriptionDatabase,
+        transcription_service: TranscriptionService,
+        state_store: StateStore,
+        file_mover: FileMover,
+        output_writer: OutputWriter,
         input_folder: str | Path,
         preset: str = "et-large",
         language: str | None = None,
         output_format: str = DEFAULT_OUTPUT_FORMAT,
-        transcribe_fn: Callable[[str, str, str, str | None], TranscriptionMetrics | None] | None = None,
-        preprocess_config_provider: Callable[[], PreprocessConfig] | None = None,
-        move_fn: Callable[[str, str], str | None] = shutil.move,
         variant: Variant | None = None,
         disable_file_moving: bool = False,
     ) -> None:
         """Initialize the processor.
 
         Args:
-            db: Database instance for tracking state
+            transcription_service: Service for transcribing audio files
+            state_store: Service for managing transcription state
+            file_mover: Service for moving files
+            output_writer: Service for writing transcription output
             input_folder: Folder containing audio files to process
             preset: Model preset for transcription (default: 'et-large')
             language: Force specific language code (e.g., 'en', 'et'), None for auto-detect
             output_format: Output format - "txt" or "json" (default: from DEFAULT_OUTPUT_FORMAT)
-            preprocess_config_provider: Callable that returns preprocessing configuration
-            move_fn: Function to move files (for testing)
             variant: Optional variant to use for transcription (overrides default behavior)
             disable_file_moving: If True, don't move files after processing (useful for multi-variant runs)
         """
-        self.db = db
+        self._transcription_service = transcription_service
+        self._state_store = state_store
+        self._file_mover = file_mover
+        self._output_writer = output_writer
+
         self.input_folder = Path(input_folder)
         self.preset = preset
         self.language = language
         self.output_format = output_format
-        self._preprocess_config_provider = preprocess_config_provider or PreprocessConfig.from_env
         self._disable_file_moving = disable_file_moving
+        self._variant = variant
 
-        # If variant is provided and no custom transcribe_fn, create variant-aware transcribe function
-        if variant is not None and transcribe_fn is None:
-            LOGGER.debug("Using variant %d: %s", variant.number, variant.name)
-            transcribe_fn = _create_variant_transcribe_function(
-                variant=variant,
-                preset=preset,
-                language=language,
-                output_format=output_format,
-            )
+        # For backward compatibility with existing code that expects these attributes
+        self.db = None  # Will be removed once all references are updated
+        self._move = self._file_mover.move  # Backward compatibility
 
-        def _default_transcribe(
-            audio: str, output_path: str, preset: str, language: str | None = None
-        ) -> TranscriptionMetrics | None:
-            metrics_container: dict[str, TranscriptionMetrics] = {}
-
-            def _collect(metrics: TranscriptionMetrics) -> None:
-                metrics_container["value"] = metrics
-
-            payload = transcribe(
-                audio,
-                preset,
-                language=language,
-                preprocess_config_provider=self._preprocess_config_provider,
-                metrics_collector=_collect,
-            )
-
-            # Write output in the specified format
-            if self.output_format == "txt":
-                segments = payload.get("segments", [])
-                with open(output_path, "w", encoding="utf-8") as text_file:
-                    for segment in segments:
-                        text_file.write(segment["text"])
-                        text_file.write("\n")
-            elif self.output_format == "json":
-                with open(output_path, "w", encoding="utf-8") as json_file:
-                    json.dump(payload, json_file, ensure_ascii=False, indent=2)
-            elif self.output_format == "both":
-                # Write both txt and json files
-                base_path = Path(output_path)
-                txt_path = base_path.with_suffix(".txt")
-                json_path = base_path.with_suffix(".json")
-
-                # Write txt
-                segments = payload.get("segments", [])
-                with open(txt_path, "w", encoding="utf-8") as text_file:
-                    for segment in segments:
-                        text_file.write(segment["text"])
-                        text_file.write("\n")
-
-                # Write json
-                with open(json_path, "w", encoding="utf-8") as json_file:
-                    json.dump(payload, json_file, ensure_ascii=False, indent=2)
-
-            return metrics_container.get("value")
-
-        self._transcribe: Callable[[str, str, str, str | None], TranscriptionMetrics | None] = (
-            transcribe_fn or _default_transcribe
-        )
-        self._move = move_fn
         self._output_base_dir: Path | None = None  # For multi-variant: base dir for outputs
         self._variant_number: int | None = None  # For multi-variant: variant number for filename prefix
         self._variant_name: str | None = None  # For multi-variant: variant name for filename prefix
@@ -307,7 +146,7 @@ class TranscriptionProcessor:
         if not file_path_obj.exists():
             error_msg = f"File not found: {file_path}"
             LOGGER.error(error_msg)
-            self.db.update_status(file_path, "failed", error_msg)
+            self._state_store.update_status(file_path, "failed", error_msg)
             return FileProcessingStats(file_path=file_path, status="failed", error_message=error_msg)
 
         LOGGER.debug("Processing file: %s", file_path)
@@ -353,56 +192,60 @@ class TranscriptionProcessor:
 
                 if self.output_format == "both":
                     output_path = output_dir / f"{base_name}.txt"
-                    output_files = [
-                        output_dir / f"{base_name}.txt",
-                        output_dir / f"{base_name}.json",
-                    ]
                 else:
                     output_ext = ".txt" if self.output_format == "txt" else ".json"
                     output_path = output_dir / f"{base_name}{output_ext}"
-                    output_files = [output_path]
             else:
                 # Normal mode: write next to input file
                 if self.output_format == "both":
                     # For both format, we'll use a base path and create both files
                     output_path = file_path_obj.with_suffix(".txt")  # Base path
-                    output_files = [file_path_obj.with_suffix(".txt"), file_path_obj.with_suffix(".json")]
                 else:
                     output_ext = ".txt" if self.output_format == "txt" else ".json"
                     output_path = file_path_obj.with_suffix(output_ext)
-                    output_files = [output_path]
 
             # Perform transcription and capture metrics
-            metrics = self._transcribe(str(file_path_obj), str(output_path), self.preset, self.language)
+            request = TranscriptionRequest(
+                audio_path=str(file_path_obj),
+                output_path=str(output_path),
+                preset=self.preset,
+                language=self.language,
+            )
+            result = self._transcription_service.transcribe(request)
+            metrics = result.metrics
+
+            # Write output using the service
+            created_files = self._output_writer.write(str(output_path), result.payload, self.output_format)
 
             # Move audio and all output files to processed folder (unless disabled)
             if not self._disable_file_moving:
                 if audio_file := file_path_obj:
                     if audio_file.exists():
                         dest_audio = self.processed_folder / audio_file.name
-                        self._move(str(audio_file), str(dest_audio))
+                        self._file_mover.move(str(audio_file), str(dest_audio))
                         LOGGER.debug("Moved audio to: %s", dest_audio)
 
-                for out_file in output_files:
-                    if out_file.exists():
-                        dest_output = self.processed_folder / out_file.name
-                        self._move(str(out_file), str(dest_output))
+                # Move the files created by the output writer
+                for created_file in created_files:
+                    if created_file.exists():
+                        dest_output = self.processed_folder / created_file.name
+                        self._file_mover.move(str(created_file), str(dest_output))
                         LOGGER.debug("Moved output to: %s", dest_output)
             else:
                 # In no-move mode, only move outputs if _output_base_dir is not set
                 # When _output_base_dir is set (multi-variant mode), outputs should stay there
                 if not self._output_base_dir:
                     # Move outputs to processed folder (if different location)
-                    for out_file in output_files:
-                        if out_file.exists() and out_file.parent != self.processed_folder:
-                            dest_output = self.processed_folder / out_file.name
-                            self._move(str(out_file), str(dest_output))
+                    for created_file in created_files:
+                        if created_file.exists() and created_file.parent != self.processed_folder:
+                            dest_output = self.processed_folder / created_file.name
+                            self._file_mover.move(str(created_file), str(dest_output))
                             LOGGER.debug("Moved output to: %s", dest_output)
                 # When _output_base_dir is set, outputs are already in the correct location
 
             # Log success in database (for history/statistics)
             # Note: File location is source of truth, not database status
-            self.db.update_status(file_path, "completed")
+            self._state_store.update_status(file_path, "completed")
 
             LOGGER.debug("Successfully processed: %s", file_path)
             return FileProcessingStats(file_path=file_path, status="completed", metrics=metrics)
@@ -410,7 +253,7 @@ class TranscriptionProcessor:
         except Exception as error:
             error_msg = f"{type(error).__name__}: {error}"
             LOGGER.error("Failed to process %s: %s", file_path, error_msg, exc_info=True)
-            self.db.update_status(file_path, "failed", error_msg)
+            self._state_store.update_status(file_path, "failed", error_msg)
 
             # Move failed file to failed folder (unless disabled)
             if not self._disable_file_moving:
@@ -498,7 +341,7 @@ class TranscriptionProcessor:
         """
         LOGGER.debug("Starting folder processing")
         run_start = time.time()
-        config_snapshot = self._preprocess_config_provider()
+        config_snapshot = PreprocessConfig.from_env()
 
         # Get all files in the input folder
         files_to_process = self.get_files_to_process()
@@ -694,7 +537,7 @@ class TranscriptionProcessor:
 
         try:
             # 1. Record Run and get ID
-            run_id = self.db.record_run(run_record)
+            run_id = self._state_store.record_run(run_record)
 
             # 2. Record File Metrics
             for entry in file_stats:
@@ -788,7 +631,7 @@ class TranscriptionProcessor:
                         float_precision=m.float_precision,
                     )
 
-                self.db.record_file_metric(file_record)
+                self._state_store.record_file_metric(file_record)
 
         except DatabaseError as exc:
             LOGGER.error("Failed to record run metadata: %s", exc, exc_info=True)
