@@ -27,9 +27,9 @@ class ServiceFactory:
 
     @staticmethod
     def create_transcription_service(
-        preprocess_config_provider: Callable[[], PreprocessConfig] | None = None,
+        preprocess_config: PreprocessConfig | None = None,
         preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult] | None = None,
-        transcription_config_provider: Callable[[], TranscriptionConfig] | None = None,
+        transcription_config: TranscriptionConfig | None = None,
         variant: "Variant | None" = None,
         preset: str = "et-large",
         language: str | None = None,
@@ -45,18 +45,18 @@ class ServiceFactory:
                 output_format=output_format,
             )
 
-        # Create standard service
-        if preprocess_config_provider is None:
-            preprocess_config_provider = PreprocessConfig.from_env
+        # Create standard service with defaults
+        if preprocess_config is None:
+            preprocess_config = PreprocessConfig.from_env()
         if preprocess_runner is None:
             preprocess_runner = preprocess_audio
-        if transcription_config_provider is None:
-            transcription_config_provider = TranscriptionConfig.from_env
+        if transcription_config is None:
+            transcription_config = TranscriptionConfig.from_env()
 
         return WhisperTranscriptionService(
-            preprocess_config_provider=preprocess_config_provider,
+            preprocess_config=preprocess_config,
             preprocess_runner=preprocess_runner,
-            transcription_config_provider=transcription_config_provider,
+            transcription_config=transcription_config,
         )
 
     @staticmethod
