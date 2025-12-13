@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 from backend.preprocess.config import TranscriptionConfig
+from backend.variants.steps import StepConfig
 
 
 @dataclass(slots=True)
@@ -24,7 +25,8 @@ class PreprocessStep:
             "peak_normalize_2pass", "sox_peak_normalize",
             "compressor_limiter", "dynaudnorm_conservative"
         )
-        config: Optional configuration dictionary for step-specific parameters
+        config: Optional configuration for step-specific parameters.
+                Can be a typed StepConfig instance or legacy dict.
     """
 
     name: str
@@ -49,7 +51,7 @@ class PreprocessStep:
         "compressor_limiter",
         "dynaudnorm_conservative",
     ]
-    config: dict[str, Any] | None = None
+    config: StepConfig | None = None
 
 
 @dataclass(slots=True)
