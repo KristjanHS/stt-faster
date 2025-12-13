@@ -20,6 +20,7 @@ import logging
 import sys
 from pathlib import Path
 
+from backend.config import setup_logging
 from backend.cli.transcription_commands import cmd_process
 from backend.database import TranscriptionDatabase
 
@@ -33,6 +34,10 @@ def _configure_logging(verbose: bool) -> None:
     Args:
         verbose: If True, show DEBUG logs. If False, show only WARNING+ for noisy modules.
     """
+    # First, setup base logging from config
+    setup_logging()
+
+    # Then apply CLI-specific overrides
     if verbose:
         level = logging.DEBUG
     else:
@@ -46,7 +51,7 @@ def _configure_logging(verbose: bool) -> None:
         logging.getLogger("backend.variants.executor").setLevel(logging.INFO)
         logging.getLogger("backend.variants.preprocess_steps").setLevel(logging.INFO)
 
-    # Configure root logger
+    # Configure root logger with CLI-specific format
     logging.basicConfig(
         level=level,
         format="[%(asctime)s] %(levelname)s [%(name)s] %(message)s",
