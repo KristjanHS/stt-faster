@@ -9,7 +9,7 @@ I want to keep the pipeline working after each step!
    * **Fix direction:** Define interfaces like `TranscriptionService`, `PreprocessService`, `StateStore`, `FileMover`; inject them into the processor/orchestrator.
    * **Status:** ✅ IMPLEMENTED - Protocol-based service interfaces with dependency injection. All tests pass.
 
-- [ ] **2. `TranscriptionProcessor` is a "god object"**
+- [x] **2. `TranscriptionProcessor` is a "god object"**
 
    * **Impact:** One class owns scanning, processing, output writing, file moving, DB updates, and run aggregation → high bug risk, low reuse.
    * **Evidence:** Processor tests validate move + status update behavior tightly coupled to processor behavior.

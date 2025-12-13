@@ -48,8 +48,15 @@ def _build_console_handler(level: int, *, isatty: Callable[[], bool] | None = No
     return handler
 
 
-def _setup_logging() -> None:
-    """Configure the root logger once with console and optional file handler."""
+def setup_logging() -> None:
+    """Configure the root logger with console and optional file handler.
+
+    This function should be called explicitly in entrypoints (CLI, scripts).
+    It is idempotent and safe to call multiple times.
+
+    Python's default logging behavior (no handlers) will be used until
+    this function is called.
+    """
     global _logging_configured
     if _logging_configured:
         return
@@ -105,4 +112,4 @@ def _setup_logging() -> None:
 
 
 # --- End Logging Configuration ---
-_setup_logging()
+# No automatic setup at import time - entrypoints must call setup_logging() explicitly
