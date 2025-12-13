@@ -3,11 +3,11 @@
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, TYPE_CHECKING, Union
 
 from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, RunSummarizer
 from backend.types import FileProcessingStats
-from backend.preprocess.config import PreprocessConfig
+from backend.run_config import RunConfig
 from backend.services.interfaces import (
     FileMover,
     OutputWriter,
@@ -15,7 +15,9 @@ from backend.services.interfaces import (
     TranscriptionService,
 )
 from backend.transcribe import DEFAULT_OUTPUT_FORMAT
-from backend.variants.variant import Variant
+
+if TYPE_CHECKING:
+    from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,11 +31,13 @@ class TranscriptionProcessor:
         state_store: StateStore,
         file_mover: FileMover,
         output_writer: OutputWriter,
-        input_folder: str | Path,
+        run_config: RunConfig | None = None,
+        # Backward compatibility parameters
+        input_folder: str | Path | None = None,
         preset: str = "et-large",
         language: str | None = None,
-        output_format: str = DEFAULT_OUTPUT_FORMAT,
-        variant: Variant | None = None,
+        output_format: str | None = None,
+        variant: Union["Variant", None] = None,
         disable_file_moving: bool = False,
     ) -> None:
         """Initialize the processor with its component dependencies.
@@ -43,22 +47,36 @@ class TranscriptionProcessor:
             state_store: Service for managing transcription state
             file_mover: Service for moving files
             output_writer: Service for writing transcription output
-            input_folder: Folder containing audio files to process
-            preset: Model preset for transcription (default: 'et-large')
-            language: Force specific language code (e.g., 'en', 'et'), None for auto-detect
-            output_format: Output format - "txt" or "json" (default: from DEFAULT_OUTPUT_FORMAT)
-            variant: Optional variant to use for transcription (overrides default behavior)
+            run_config: Complete run configuration with all settings (new API)
+            input_folder: Folder containing audio files to process (legacy API)
+            preset: Model preset for transcription (legacy API)
+            language: Force specific language code (legacy API)
+            output_format: Output format - "txt" or "json" (legacy API)
+            variant: Optional variant to use for transcription (legacy API)
             disable_file_moving: If True, don't move files after processing (useful for multi-variant runs)
         """
-        self.input_folder = Path(input_folder)
-        self.preset = preset
-        self.language = language
-        self.output_format = output_format
+        # Handle backward compatibility: create RunConfig from legacy parameters if needed
+        if run_config is None:
+            if input_folder is None:
+                raise ValueError("Either run_config or input_folder must be provided")
+            run_config = RunConfig.from_env_and_variant(Path(input_folder), variant)
+            run_config.model_preset = preset
+            run_config.language = language
+            run_config.output_format = output_format or DEFAULT_OUTPUT_FORMAT
+
+        self.run_config = run_config
+        self.effective_config = run_config.get_effective_config()
+
+        # Extract settings for backward compatibility and convenience
+        self.input_folder = self.effective_config.input_folder
+        self.preset = self.effective_config.model_preset
+        self.language = self.effective_config.language
+        self.output_format = self.effective_config.output_format
         self._disable_file_moving = disable_file_moving
-        self._variant = variant
 
         # For backward compatibility with existing code that expects these attributes
         self.db = None  # Will be removed once all references are updated
+        self._variant = variant
 
         self._output_base_dir: Path | None = None  # For multi-variant: base dir for outputs
         self._variant_number: int | None = None  # For multi-variant: variant number for filename prefix
@@ -80,6 +98,7 @@ class TranscriptionProcessor:
         self._move = file_mover.move
 
         LOGGER.debug("Processor initialized for folder: %s", self.input_folder)
+        LOGGER.debug("Run configuration: %s", self.run_config.to_dict())
 
     @property
     def processed_folder(self) -> Path:
@@ -169,7 +188,9 @@ class TranscriptionProcessor:
         """
         LOGGER.debug("Starting folder processing")
         run_start = time.time()
-        config_snapshot = PreprocessConfig.from_env()
+
+        # Use the effective config snapshot from run_config
+        config_snapshot = self.effective_config.preprocess
 
         # Get all files in the input folder
         files_to_process = self.get_files_to_process()

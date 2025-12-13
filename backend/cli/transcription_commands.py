@@ -20,6 +20,7 @@ from backend.cli.ui import (
 )
 from backend.config import setup_logging
 from backend.processor import TranscriptionProcessor
+from backend.run_config import RunConfig
 from backend.services.factory import ServiceFactory
 from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
@@ -182,6 +183,12 @@ def _process_single_variant(
     LOGGER.debug("Using variant %d: %s", variant.number, variant.name)
 
     try:
+        # Create run configuration
+        run_config = RunConfig.from_env_and_variant(input_folder, variant)
+        run_config.model_preset = args.preset
+        run_config.language = args.language
+        run_config.output_format = args.output_format
+
         # Create services using factory
         transcription_service = ServiceFactory.create_transcription_service(
             variant=variant,
@@ -198,11 +205,7 @@ def _process_single_variant(
             state_store=state_store,
             file_mover=file_mover,
             output_writer=output_writer,
-            input_folder=input_folder,
-            preset=args.preset,
-            language=args.language,
-            output_format=args.output_format,
-            variant=variant,
+            run_config=run_config,
         )
 
         results = processor.process_folder()
@@ -263,6 +266,12 @@ def _process_multi_variant(
 
         try:
             # Create services using factory
+            # Create run configuration for this variant
+            run_config = RunConfig.from_env_and_variant(input_folder, variant)
+            run_config.model_preset = args.preset
+            run_config.language = args.language
+            run_config.output_format = args.output_format
+
             transcription_service = ServiceFactory.create_transcription_service(
                 variant=variant,
                 preset=args.preset,
@@ -280,11 +289,7 @@ def _process_multi_variant(
                 state_store=state_store,
                 file_mover=file_mover,
                 output_writer=output_writer,
-                input_folder=input_folder,
-                preset=args.preset,
-                language=args.language,
-                output_format=args.output_format,
-                variant=variant,
+                run_config=run_config,
                 disable_file_moving=True,
             )
 
