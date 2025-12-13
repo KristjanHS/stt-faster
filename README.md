@@ -97,7 +97,7 @@ docker run --rm \
   - `meta-linters.yml`: Actionlint, Yamlfmt, Hadolint on relevant changes.
   - `semgrep.yml`, `codeql.yml`: Security scans on PR/schedule/manual.
   - `trivy_pip-audit.yml`: pip-audit + Trivy on dep/Docker changes and schedule.
-- Tests & coverage: `tests/unit`, `tests/integration`, `tests/e2e`. Fast path example: `.venv/bin/python -m pytest tests/unit -q`. Coverage HTML: `reports/coverage`.
+- Tests & coverage: `tests/unit`, `tests/integration`, `tests/e2e`. Fast path example: `make unit`. Coverage HTML: `reports/coverage`.
 - Logging: App logging in `backend/config.py` (level via `LOG_LEVEL`, Rich when TTY; optional file rotation via `APP_LOG_DIR`). Script logging helpers in `scripts/common.sh`. Unit tests cover both.
 
  - Use Makefile targets for common checks; see `Makefile` and `docs/AI_instructions.md` for details.

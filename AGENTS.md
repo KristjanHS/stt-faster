@@ -18,15 +18,11 @@ How to work safely and correctly in this repo. Follow unless a human overrides.
 - When plan-only, gather context, output a numbered plan, stop; once approved, store in `docs_AI_coder/plan.md`.
 
 ## Commands & tasks (stop on first failure)  
-- Unit tests: `.venv/bin/python -m pytest tests/unit -q`  
-- Integration: `.venv/bin/python -m pytest tests/integration -q`  
-- Pre-commit: `uv run pre-commit run --all-files`  
+- Unit tests: `make unit`  
+- Integration: `make integration`  
+- Pre-commit: `make pre-commit`  
 - If UI/log outputs change, update snapshots/expectations instead of disabling checks.  
-- After edits, run builds/tests; on failure, share logs before retrying (max three attempts).  
-- Integration markers: default full `make integration`; AI agents may set `INTEGRATION_MARKERS="not gpu"` if no GPU.  
-- Suites: unit (fast, sockets blocked, `-n auto`), integration (one real component, network allowed), e2e
-  (Docker Compose), UI (Playwright `--no-cov`); unit tests must avoid real network I/O.  
-- Run pytest as module (e.g., `.venv/bin.python -m pytest tests/`).  
+- After edits, run pre-commit and ests; on failure, share logs before retrying (max three attempts).
 - Use Make targets when available: `make pyright|ruff-fix|ruff-format|unit|integration-local|pre-commit|pre-push`.
 
 ## Code & deps  
