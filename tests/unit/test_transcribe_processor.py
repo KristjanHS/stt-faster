@@ -8,6 +8,7 @@ import pytest
 
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
+from backend.run_config import RunConfig
 from backend.services.factory import ServiceFactory
 from backend.services.interfaces import TranscriptionResult
 from backend.transcribe import TranscriptionMetrics
@@ -23,6 +24,12 @@ def _create_test_processor(
     disable_file_moving: bool = False,
 ) -> TranscriptionProcessor:
     """Helper function to create a processor with services for testing."""
+    # Create run configuration
+    run_config = RunConfig.from_env_and_variant(temp_folder, variant)
+    run_config.model_preset = preset
+    run_config.language = language
+    run_config.output_format = output_format
+
     transcription_service = ServiceFactory.create_transcription_service(
         variant=variant,
         preset=preset,
@@ -39,11 +46,7 @@ def _create_test_processor(
         state_store=state_store,
         file_mover=file_mover,
         output_writer=output_writer,
-        input_folder=temp_folder,
-        preset=preset,
-        language=language,
-        output_format=output_format,
-        variant=variant,
+        run_config=run_config,
         disable_file_moving=disable_file_moving,
     )
 
@@ -233,12 +236,13 @@ def test_process_file_success(
     )
 
     # Create processor with mock service
+    run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
         state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
-        input_folder=temp_folder,
+        run_config=run_config,
     )
     result = processor.process_file(str(audio_file))
 
@@ -281,12 +285,13 @@ def test_process_file_failure(
 
     # Capture logs at ERROR level to verify expected error logging
     with caplog.at_level(logging.ERROR, logger="backend.processor"):
+        run_config = RunConfig.from_env_and_variant(temp_folder, None)
         processor = TranscriptionProcessor(
             transcription_service=mock_transcription_service,
             state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
             file_mover=ServiceFactory.create_file_mover(),
             output_writer=ServiceFactory.create_output_writer(),
-            input_folder=temp_folder,
+            run_config=run_config,
         )
         result = processor.process_file(str(audio_file))
 
@@ -383,12 +388,13 @@ def test_process_all_files(
         payload={"segments": [{"text": "test transcription"}]},
     )
 
+    run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
         state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
-        input_folder=temp_folder,
+        run_config=run_config,
     )
     results = processor.process_all_files([str(audio1), str(audio2)])
 
@@ -438,12 +444,13 @@ def test_process_folder(
         payload={"segments": [{"text": "test transcription"}]},
     )
 
+    run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
         state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
-        input_folder=temp_folder,
+        run_config=run_config,
     )
     results = processor.process_folder()
 
@@ -516,12 +523,13 @@ def test_process_file_move_failure_keeps_pending_status(
 
     # Capture logs at WARNING and ERROR levels to verify expected error logging
     with caplog.at_level(logging.WARNING, logger="backend.processor"):
+        run_config = RunConfig.from_env_and_variant(temp_folder, None)
         processor = TranscriptionProcessor(
             transcription_service=mock_transcription_service,
             state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
             file_mover=mock_file_mover,
             output_writer=ServiceFactory.create_output_writer(),
-            input_folder=temp_folder,
+            run_config=run_config,
         )
         result = processor.process_file(str(audio_file))
 
@@ -602,14 +610,15 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
         payload={"segments": [{"text": "test transcription"}]},
     )
 
+    run_config = RunConfig.from_env_and_variant(temp_folder, None)
+    run_config.output_format = "both"
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
         state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
-        input_folder=temp_folder,
+        run_config=run_config,
         disable_file_moving=True,
-        output_format="both",
     )
     processor._output_base_dir = output_base
 
@@ -678,14 +687,15 @@ def test_process_file_root_level_file_with_output_base_dir(
         payload={"segments": [{"text": "test transcription"}]},
     )
 
+    run_config = RunConfig.from_env_and_variant(temp_folder, None)
+    run_config.output_format = "both"
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
         state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
-        input_folder=temp_folder,
+        run_config=run_config,
         disable_file_moving=True,
-        output_format="both",
     )
     processor._output_base_dir = output_base
 

@@ -17,7 +17,7 @@ import json
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Dict, List, Tuple
 
 
 def format_time(seconds: float | None) -> str:
@@ -30,12 +30,12 @@ def format_time(seconds: float | None) -> str:
 
 
 def find_segments_in_range(
-    segments: list[dict[str, Any]],
+    segments: List[Dict[str, Any]],
     start_s: float,
     end_s: float,
     min_overlap_s: float = 3.0,
     min_overlap_ratio: float = 0.2,
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]], float]:
+) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], float]:
     """Find segments that meaningfully overlap with the given time range.
 
     Returns:
@@ -44,10 +44,10 @@ def find_segments_in_range(
         - contained_segments: Segments fully inside the range
         - total_coverage_s: Total seconds of coverage by overlapping segments
     """
-    range_duration = end_s - start_s
-    overlapping = []
-    contained = []
-    total_coverage = 0.0
+    range_duration: float = end_s - start_s
+    overlapping: List[Dict[str, Any]] = []
+    contained: List[Dict[str, Any]] = []
+    total_coverage: float = 0.0
 
     for seg in segments:
         seg_start = seg.get("start")
@@ -72,7 +72,7 @@ def find_segments_in_range(
     return overlapping, contained, total_coverage
 
 
-def extract_text_in_range(segment: dict[str, Any], start_s: float, end_s: float) -> str:
+def extract_text_in_range(segment: Dict[str, Any], start_s: float, end_s: float) -> str:
     """Extract text from segment using word timestamps for accurate slicing.
 
     If word timestamps are available, returns only words that fall within the range.
@@ -86,17 +86,17 @@ def extract_text_in_range(segment: dict[str, Any], start_s: float, end_s: float)
     Returns:
         Text string containing only words within the time range
     """
-    words = segment.get("words")
+    words: List[Dict[str, Any]] | None = segment.get("words")
     if not words:
         # Fallback to full segment text if no word timestamps
         return segment.get("text", "").strip()
 
     # Extract words that fall within the range
-    words_in_range = []
+    words_in_range: List[str] = []
     for word in words:
-        word_start = word.get("start")
-        word_end = word.get("end")
-        word_text = word.get("word", "")
+        word_start: float | None = word.get("start")
+        word_end: float | None = word.get("end")
+        word_text: str = word.get("word", "")
 
         if word_start is not None and word_end is not None:
             # Word overlaps with range if it starts before end_s and ends after start_s
@@ -108,14 +108,16 @@ def extract_text_in_range(segment: dict[str, Any], start_s: float, end_s: float)
     return ""
 
 
-def get_top_no_speech_segments(segments: list[dict[str, Any]], top_n: int = 5) -> list[dict[str, Any]]:
+def get_top_no_speech_segments(segments: List[Dict[str, Any]], top_n: int = 5) -> List[Dict[str, Any]]:
     """Get top N segments by no_speech_prob."""
-    segments_with_prob = [seg for seg in segments if seg.get("no_speech_prob") is not None]
-    sorted_segments = sorted(segments_with_prob, key=lambda s: s.get("no_speech_prob", 0.0), reverse=True)
+    segments_with_prob: List[Dict[str, Any]] = [seg for seg in segments if seg.get("no_speech_prob") is not None]
+    sorted_segments: List[Dict[str, Any]] = sorted(
+        segments_with_prob, key=lambda s: s.get("no_speech_prob", 0.0), reverse=True
+    )
     return sorted_segments[:top_n]
 
 
-def calculate_transcript_stats(segments: list[dict[str, Any]]) -> dict[str, Any]:
+def calculate_transcript_stats(segments: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Calculate transcript statistics."""
     if not segments:
         return {
