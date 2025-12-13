@@ -18,8 +18,8 @@ from backend.cli.ui import (
     display_processing_summary,
     display_run_statistics,
 )
-from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
+from backend.services.factory import ServiceFactory
 from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
 
@@ -177,23 +177,37 @@ def _process_single_variant(
     LOGGER.debug("Using variant %d: %s", variant.number, variant.name)
 
     try:
-        with TranscriptionDatabase(args.db_path) as db:
-            processor = TranscriptionProcessor(
-                db,
-                input_folder,
-                preset=args.preset,
-                language=args.language,
-                output_format=args.output_format,
-                variant=variant,
-            )
-            results = processor.process_folder()
+        # Create services using factory
+        transcription_service = ServiceFactory.create_transcription_service(
+            variant=variant,
+            preset=args.preset,
+            language=args.language,
+            output_format=args.output_format,
+        )
+        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        file_mover = ServiceFactory.create_file_mover()
+        output_writer = ServiceFactory.create_output_writer()
 
-            # Display summary using Rich
-            display_processing_summary(results)
+        processor = TranscriptionProcessor(
+            transcription_service=transcription_service,
+            state_store=state_store,
+            file_mover=file_mover,
+            output_writer=output_writer,
+            input_folder=input_folder,
+            preset=args.preset,
+            language=args.language,
+            output_format=args.output_format,
+            variant=variant,
+        )
 
-            run_stats = results.get("run_statistics")
-            if run_stats:
-                display_run_statistics(run_stats)
+        results = processor.process_folder()
+
+        # Display summary using Rich
+        display_processing_summary(results)
+
+        run_stats = results.get("run_statistics")
+        if run_stats:
+            display_run_statistics(run_stats)
 
         return 0
 
@@ -243,63 +257,76 @@ def _process_multi_variant(
         )
 
         try:
-            with TranscriptionDatabase(args.db_path) as db:
-                # Create processor with variant-specific output handling
-                # Disable file moving so all variants can process the same input files
-                processor = TranscriptionProcessor(
-                    db,
-                    input_folder,
-                    preset=args.preset,
-                    language=args.language,
-                    output_format=args.output_format,
-                    variant=variant,
-                    disable_file_moving=True,
-                )
+            # Create services using factory
+            transcription_service = ServiceFactory.create_transcription_service(
+                variant=variant,
+                preset=args.preset,
+                language=args.language,
+                output_format=args.output_format,
+            )
+            state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+            file_mover = ServiceFactory.create_file_mover()
+            output_writer = ServiceFactory.create_output_writer()
 
-                # Use single run folder for all outputs
-                # Files will be prefixed with variant number in the processor
-                processor.processed_folder = run_folder
-                processor.failed_folder = run_folder / "failed"
-                # Set output base dir and store variant info for filename prefixing
-                processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
-                processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
-                processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
-                processor.processed_folder.mkdir(exist_ok=True, parents=True)
-                processor.failed_folder.mkdir(exist_ok=True, parents=True)
+            # Create processor with variant-specific output handling
+            # Disable file moving so all variants can process the same input files
+            processor = TranscriptionProcessor(
+                transcription_service=transcription_service,
+                state_store=state_store,
+                file_mover=file_mover,
+                output_writer=output_writer,
+                input_folder=input_folder,
+                preset=args.preset,
+                language=args.language,
+                output_format=args.output_format,
+                variant=variant,
+                disable_file_moving=True,
+            )
 
-                results = processor.process_folder()
-                all_results[variant.number] = results
+            # Use single run folder for all outputs
+            # Files will be prefixed with variant number in the processor
+            processor.processed_folder = run_folder
+            processor.failed_folder = run_folder / "failed"
+            # Set output base dir and store variant info for filename prefixing
+            processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
+            processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
+            processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
+            processor.processed_folder.mkdir(exist_ok=True, parents=True)
+            processor.failed_folder.mkdir(exist_ok=True, parents=True)
 
-                # Find JSON file(s) created for this variant
-                # Pattern: variant_{number:03d}_{name}_*.json
-                json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
-                json_filename = json_files[0].name if json_files else None
+            results = processor.process_folder()
+            all_results[variant.number] = results
 
-                # Collect variant metadata
-                transcription_config = variant.transcription_config
-                variant_meta = {
-                    "variant_number": variant.number,
-                    "variant_name": variant.name,
-                    "json_filename": json_filename,  # Store exact filename for easy lookup
-                    "transcription_config": {
-                        "beam_size": getattr(transcription_config, "beam_size", None),
-                        "chunk_length": getattr(transcription_config, "chunk_length", None),
-                        "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
-                        "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
-                        "vad_filter": getattr(transcription_config, "vad_filter", None),
-                        "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
-                    },
-                    "results": {
-                        "succeeded": results.get("succeeded", 0),
-                        "failed": results.get("failed", 0),
-                    },
-                }
-                all_variant_metadata.append(variant_meta)
+            # Find JSON file(s) created for this variant
+            # Pattern: variant_{number:03d}_{name}_*.json
+            json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
+            json_filename = json_files[0].name if json_files else None
 
-                console.print(
-                    f"[green]✓[/green] Variant {variant.number} completed: "
-                    f"{results.get('succeeded', 0)} succeeded, {results.get('failed', 0)} failed"
-                )
+            # Collect variant metadata
+            transcription_config = variant.transcription_config
+            variant_meta = {
+                "variant_number": variant.number,
+                "variant_name": variant.name,
+                "json_filename": json_filename,  # Store exact filename for easy lookup
+                "transcription_config": {
+                    "beam_size": getattr(transcription_config, "beam_size", None),
+                    "chunk_length": getattr(transcription_config, "chunk_length", None),
+                    "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
+                    "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
+                    "vad_filter": getattr(transcription_config, "vad_filter", None),
+                    "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
+                },
+                "results": {
+                    "succeeded": results.get("succeeded", 0),
+                    "failed": results.get("failed", 0),
+                },
+            }
+            all_variant_metadata.append(variant_meta)
+
+            console.print(
+                f"[green]✓[/green] Variant {variant.number} completed: "
+                f"{results.get('succeeded', 0)} succeeded, {results.get('failed', 0)} failed"
+            )
 
         except Exception as error:
             console.print(f"[red]✗[/red] Variant {variant.number} failed: {error}")
