@@ -66,6 +66,9 @@ explicit = true
 # for GPU:
 # torch = { index = "pytorch-cu128"}
 
+[project.scripts]
+stt-faster = "backend.cli.main:main"
+
 [build-system]
 requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
