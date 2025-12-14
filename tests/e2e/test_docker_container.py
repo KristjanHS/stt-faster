@@ -127,7 +127,8 @@ class TestDockerRuntime:
         """Verify the healthcheck command works."""
         result = exec_in_container("python", "-m", "backend.main", "--healthcheck")
         assert result.returncode == 0
-        assert "Healthcheck OK" in result.stdout
+        # Healthcheck message is logged to stderr (Python logging default)
+        assert "Healthcheck OK" in result.stderr or "Healthcheck OK" in result.stdout
 
 
 class TestDockerPythonEnvironment:
