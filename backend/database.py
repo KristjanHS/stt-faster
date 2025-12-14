@@ -210,24 +210,47 @@ def _convert_parameter_value(value: str, value_type: str) -> Any:
         value_type: Type name (e.g., 'float', 'int', 'bool', 'str')
 
     Returns:
-        Converted value with appropriate type
+        Converted value with appropriate type. Returns original string
+        if conversion fails (with warning logged).
     """
-    if value_type == "float":
-        return float(value)
-    elif value_type == "int":
-        return int(value)
-    elif value_type == "bool":
-        return value.lower() in ("true", "1", "yes", "on")
-    elif value_type == "str":
-        return value
-    else:
-        # Fallback: try to infer type
-        try:
-            if "." in value:
-                return float(value)
+    try:
+        if value_type == "float":
+            return float(value)
+        elif value_type == "int":
             return int(value)
-        except ValueError:
+        elif value_type == "bool":
+            # Handle boolean conversion explicitly
+            value_lower = str(value).lower()
+            if value_lower in ("true", "1", "yes", "on"):
+                return True
+            elif value_lower in ("false", "0", "no", "off", ""):
+                return False
+            else:
+                # Invalid boolean string - log warning and default to False
+                LOGGER.warning(
+                    "Invalid boolean value '%s' (type: %s), defaulting to False",
+                    value,
+                    value_type,
+                )
+                return False
+        elif value_type == "str":
             return value
+        else:
+            # Fallback: try to infer type
+            try:
+                if "." in value:
+                    return float(value)
+                return int(value)
+            except ValueError:
+                return value
+    except (ValueError, TypeError) as e:
+        LOGGER.warning(
+            "Failed to convert parameter value '%s' (type: %s): %s. Returning original string.",
+            value,
+            value_type,
+            e,
+        )
+        return value  # Return original string as fallback
 
 
 def get_default_db_path() -> Path:
@@ -1760,19 +1783,21 @@ class TranscriptionDatabase:
                 [run_id],
             )
             for param_row in params_cursor.fetchall():
-                category, name, value, _value_type = param_row
+                category, name, value, value_type = param_row
+                # Convert value back to original type
+                converted_value = _convert_parameter_value(value, value_type)
                 # Map category-specific names to result keys
                 if category == "preprocess" and name == "profile":
-                    result["preprocess_profile"] = value
+                    result["preprocess_profile"] = converted_value
                 elif category == "preprocess":
-                    result[name] = value
+                    result[name] = converted_value
                 elif category == "transcription":
-                    result[name] = value
+                    result[name] = converted_value
                 elif category == "model":
                     # model_id, device, compute_type already in result from run_configs
                     # Only add if not already present
                     if name not in result or result[name] is None:
-                        result[name] = value
+                        result[name] = converted_value
 
             return result
 
