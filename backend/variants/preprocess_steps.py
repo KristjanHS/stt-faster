@@ -664,7 +664,7 @@ def create_preprocess_runner(
         # Log preprocessing start
         LOGGER.info("Starting preprocessing: %s", Path(input_path).name)
         if steps:
-            LOGGER.info("Steps: %s", [step.get("name", "unknown") for step in steps])
+            LOGGER.info("Steps: %s", [step.name for step in steps])
         else:
             LOGGER.info("No preprocessing steps configured")
 
@@ -676,7 +676,7 @@ def create_preprocess_runner(
         step_index = 0
         temp_dir = None  # Initialize to avoid unbound variable warning
 
-        enabled_steps = [step for step in steps if step.get("enabled", True)]
+        enabled_steps = [step for step in steps if step.enabled]
 
         if enabled_steps:
             temp_dir = TemporaryDirectory(prefix="stt-preprocess_", dir=merged_config.temp_dir)

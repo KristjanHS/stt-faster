@@ -584,28 +584,10 @@ def get_builtin_variants() -> list[Variant]:
     all_variants = _get_all_variants()
     # Only return active variants for batch jobs:
     # Variants 2, 5: baseline_no_vad, diagnostic/config tuning
-    # Variants 12-21: Decode quality and silence guard variants
+    # Variants 22-32: Preprocessing variants (level/volume tweaks)
     active_variant_numbers = {
         2,
-        3,
-        4,
         5,
-        6,
-        7,
-        8,
-        9,
-        10,
-        11,
-        12,
-        13,
-        14,
-        15,
-        16,
-        17,
-        18,
-        19,
-        20,
-        21,
         22,
         23,
         24,
@@ -617,7 +599,6 @@ def get_builtin_variants() -> list[Variant]:
         30,
         31,
         32,
-        33,
     }
     return [v for v in all_variants if v.number in active_variant_numbers]
 

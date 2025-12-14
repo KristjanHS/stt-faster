@@ -370,3 +370,4 @@
 3. Eventually migrate to Alternative 3 (full restructure) when time permits
 
 This allows the codebase to be immediately usable as a package while planning for architectural improvements.
+

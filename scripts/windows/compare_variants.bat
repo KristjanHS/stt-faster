@@ -52,7 +52,7 @@ if errorlevel 1 (
     wsl -e bash -c "cd /home/kristjans/projects/stt-faster && .venv/bin/python --version"
     echo.
     echo Press any key to exit...
-    pause >nul
+    pause
     exit /b 1
 )
 echo WSL and Python access confirmed.
@@ -80,14 +80,14 @@ if !PYTHON_ERROR! neq 0 (
     echo.
     del "!TEMP_VARIANTS_FILE!" >nul 2>&1
     echo Press any key to exit...
-    pause >nul
+    pause
     exit /b !PYTHON_ERROR!
 )
 
 REM Read the variants from the temp file
 set "VARIANTS="
 for /f "delims=" %%i in (!TEMP_VARIANTS_FILE!) do set "VARIANTS=%%i"
-del "!TEMP_VARIANTS_FILE!" >nul 2>&1
+    del "!TEMP_VARIANTS_FILE!" >nul 2>&1
 
 if "!VARIANTS!"=="" (
     echo.
@@ -98,11 +98,9 @@ if "!VARIANTS!"=="" (
     echo The Python command succeeded but returned no variant numbers.
     echo.
     echo Press any key to exit...
-    pause >nul
+    pause
     exit /b 1
 )
-
-echo Using builtin variants: !VARIANTS!
 
 echo.
 echo ========================================
@@ -124,7 +122,10 @@ REM Output: Both txt and json formats
 REM Output structure: variant_outputs/variant_XXX_name/processed/
 REM Note: transcribe_manager.py processes folders, so we pass the directory containing the file
 echo Starting transcription...
+echo NOTE: You will see real-time progress for each variant as it processes.
 echo.
+
+REM Run transcription with output going directly to console for real-time display
 wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --preset et-large --language et --output-format both --variants '!VARIANTS!'"
 set "TRANSCRIBE_ERROR=!errorlevel!"
 
@@ -134,10 +135,11 @@ if !TRANSCRIBE_ERROR! neq 0 (
     echo ERROR: Transcription failed with error code !TRANSCRIBE_ERROR!
     echo ========================================
     echo.
-    echo Check the output above for error details.
+    echo The transcription process encountered an error.
+    echo Check the output above for detailed error information.
     echo.
     echo Press any key to exit...
-    pause >nul
+    pause
     exit /b !TRANSCRIBE_ERROR!
 )
 

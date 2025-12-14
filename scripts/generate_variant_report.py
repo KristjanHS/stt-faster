@@ -155,14 +155,14 @@ def calculate_activation_potential(
     Returns:
         Dictionary with max_no_speech_prob, min_avg_logprob, count_ns_candidates, count_would_skip
     """
-    no_speech_probs = []
-    avg_logprobs = []
+    no_speech_probs: list[float] = []
+    avg_logprobs: list[float] = []
     count_ns_candidates = 0
     count_would_skip = 0
 
     for seg in segments:
-        no_speech_prob = seg.get("no_speech_prob")
-        avg_logprob = seg.get("avg_logprob")
+        no_speech_prob = seg.get("no_speech_prob")  # type: ignore[reportUnknownMemberType]
+        avg_logprob = seg.get("avg_logprob")  # type: ignore[reportUnknownMemberType]
 
         if no_speech_prob is not None:
             no_speech_probs.append(no_speech_prob)
@@ -236,9 +236,9 @@ def calculate_words_in_range(
     # First, find segments with meaningful overlap (same criteria as excerpts)
     overlapping_segments, _, _ = find_segments_in_range(segments, start_s, end_s, min_overlap_s, min_overlap_ratio)
 
-    words_in_range = []
+    words_in_range: list[str] = []
     chars_in_range = 0
-    unique_words = set()
+    unique_words: set[str] = set()
     text_source = "words"  # Track whether we're using word timestamps or fallback
 
     for seg in overlapping_segments:
@@ -246,9 +246,9 @@ def calculate_words_in_range(
         if words:
             # Use word timestamps - but only count words that actually fall in the range
             for word in words:
-                word_start = word.get("start")
-                word_end = word.get("end")
-                word_text = word.get("word", "").strip()
+                word_start = word.get("start")  # type: ignore[reportUnknownMemberType]
+                word_end = word.get("end")  # type: ignore[reportUnknownMemberType]
+                word_text = word.get("word", "").strip()  # type: ignore[reportUnknownMemberType]
 
                 if word_start is not None and word_end is not None:
                     # Word overlaps with range if it starts before end_s and ends after start_s
@@ -302,9 +302,9 @@ def calculate_silence_metrics(
     # First, find segments with meaningful overlap (same criteria as excerpts)
     silence_segments, _, _ = find_segments_in_range(segments, start_s, end_s, min_overlap_s, min_overlap_ratio)
 
-    silence_words = []
-    no_speech_probs = []
-    avg_logprobs = []
+    silence_words: list[str] = []
+    no_speech_probs: list[float] = []
+    avg_logprobs: list[float] = []
     text_source = "words"  # Track whether we're using word timestamps or fallback
 
     for seg in silence_segments:
@@ -324,7 +324,7 @@ def calculate_silence_metrics(
                 word_end = word.get("end")
                 if word_start is not None and word_end is not None:
                     if word_start < end_s and word_end > start_s:
-                        silence_words.append(word.get("word", ""))
+                        silence_words.append(word.get("word", ""))  # type: ignore[reportUnknownMemberType]
         else:
             # Fallback: approximate from segment text
             text_source = "segment_fallback"
@@ -357,7 +357,7 @@ def simulate_counterfactual_skips(
     Returns:
         Tuple of (count, list of segments that would be skipped with their details)
     """
-    skipped_segments = []
+    skipped_segments: list[dict[str, Any]] = []
 
     for seg in reference_segments:
         no_speech_prob = seg.get("no_speech_prob")
@@ -1059,7 +1059,7 @@ def main() -> int:
         csv_path = output_dir / csv_filename
 
         # Get all possible keys from all rows
-        all_keys = set()
+        all_keys: set[str] = set()
         for row in csv_rows:
             all_keys.update(row.keys())
 
@@ -1069,7 +1069,7 @@ def main() -> int:
             with csv_path.open("w", encoding="utf-8", newline="") as f:
                 writer = csv.DictWriter(f, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(csv_rows)
+                writer.writerows(csv_rows)  # type: ignore[reportUnknownMemberType]
             print(f"CSV export saved to: {csv_path}", file=sys.stderr)  # noqa: T201
         except Exception as e:
             print(f"Error writing CSV to {csv_path}: {e}", file=sys.stderr)  # noqa: T201
