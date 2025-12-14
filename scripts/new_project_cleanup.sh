@@ -103,7 +103,7 @@ declare -a TO_REMOVE=(
     "${ROOT_DIR}/logs"
     "${ROOT_DIR}/typings"
     "${ROOT_DIR}/${ORIGINAL_MODULE}.egg-info"
-    "${ROOT_DIR}/transcribe_state.db"
+    "${ROOT_DIR}/transcribe_state.duckdb"
     "${ROOT_DIR}/semgrep_local.sarif"
     "${ROOT_DIR}/tests/test.mp3"
     "${ROOT_DIR}/scripts/transcribe_manager.py"

@@ -68,7 +68,7 @@ def real_audio_test_folder(tmp_path: Path) -> Path:
 @pytest.fixture
 def cli_test_db(tmp_path: Path) -> Path:
     """Create a temporary database path for CLI testing."""
-    return tmp_path / "test_cli.db"
+    return tmp_path / "test_cli.duckdb"
 
 
 @pytest.fixture(scope="session")
