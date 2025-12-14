@@ -6,7 +6,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import duckdb
 
@@ -226,6 +226,212 @@ def get_default_db_path() -> Path:
     return app_data_dir / "transcribe_state.duckdb"
 
 
+@dataclass(slots=True)
+class Migration:
+    """Represents a database schema migration."""
+
+    version: int
+    name: str
+    description: str
+    migrate: Callable[[duckdb.DuckDBPyConnection], None]
+
+
+# Migration Functions
+def _get_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> set[str]:
+    """Get existing column names for a table."""
+    try:
+        columns_result = conn.execute(f"DESCRIBE {table_name}").fetchall()
+        return {row[0] for row in columns_result}
+    except Exception:
+        # Table doesn't exist yet
+        return set()
+
+
+def _migration_001_add_rnnoise_columns(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add rnnoise_model and rnnoise_mix columns to file_metrics."""
+    existing_columns = _get_columns(conn, "file_metrics")
+    if "rnnoise_model" not in existing_columns:
+        LOGGER.debug("Migrating schema: adding rnnoise_model column to file_metrics")
+        conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_model VARCHAR")
+    if "rnnoise_mix" not in existing_columns:
+        LOGGER.debug("Migrating schema: adding rnnoise_mix column to file_metrics")
+        conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_mix DOUBLE")
+
+
+def _migration_002_add_file_metrics_columns(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add loudnorm_target_lra and snr_estimation_method columns to file_metrics."""
+    existing_columns = _get_columns(conn, "file_metrics")
+    if "loudnorm_target_lra" not in existing_columns:
+        LOGGER.debug("Migrating schema: adding loudnorm_target_lra column to file_metrics")
+        conn.execute("ALTER TABLE file_metrics ADD COLUMN loudnorm_target_lra DOUBLE")
+    if "snr_estimation_method" not in existing_columns:
+        LOGGER.debug("Migrating schema: adding snr_estimation_method column to file_metrics")
+        conn.execute("ALTER TABLE file_metrics ADD COLUMN snr_estimation_method VARCHAR")
+
+
+def _migration_003_add_transcription_params_to_file_metrics(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add transcription parameter columns to file_metrics table."""
+    existing_columns = _get_columns(conn, "file_metrics")
+    transcription_columns = {
+        "patience": "DOUBLE",
+        "task": "VARCHAR",
+        "chunk_length": "INTEGER",
+        "vad_filter": "BOOLEAN",
+        "vad_threshold": "DOUBLE",
+        "vad_min_speech_duration_ms": "INTEGER",
+        "vad_max_speech_duration_s": "DOUBLE",
+        "vad_min_silence_duration_ms": "INTEGER",
+        "vad_speech_pad_ms": "INTEGER",
+        "temperature": "VARCHAR",
+        "temperature_increment_on_fallback": "DOUBLE",
+        "best_of": "INTEGER",
+        "compression_ratio_threshold": "DOUBLE",
+        "logprob_threshold": "DOUBLE",
+        "no_speech_threshold": "DOUBLE",
+        "length_penalty": "DOUBLE",
+        "repetition_penalty": "DOUBLE",
+        "no_repeat_ngram_size": "INTEGER",
+        "suppress_tokens": "VARCHAR",
+        "condition_on_previous_text": "BOOLEAN",
+        "initial_prompt": "VARCHAR",
+    }
+
+    for column_name, column_type in transcription_columns.items():
+        if column_name not in existing_columns:
+            LOGGER.debug("Migrating schema: adding %s column to file_metrics", column_name)
+            if column_type == "DOUBLE":
+                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} DOUBLE")
+            elif column_type == "VARCHAR":
+                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} VARCHAR")
+            elif column_type == "INTEGER":
+                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} INTEGER")
+            elif column_type == "BOOLEAN":
+                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} BOOLEAN")
+            else:
+                LOGGER.warning("Unknown column type %s for %s, skipping migration", column_type, column_name)
+
+
+def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add transcription parameter columns to runs table."""
+    existing_columns = _get_columns(conn, "runs")
+    transcription_columns = {
+        "patience": "DOUBLE",
+        "task": "VARCHAR",
+        "chunk_length": "INTEGER",
+        "vad_filter": "BOOLEAN",
+        "vad_threshold": "DOUBLE",
+        "vad_min_speech_duration_ms": "INTEGER",
+        "vad_max_speech_duration_s": "DOUBLE",
+        "vad_min_silence_duration_ms": "INTEGER",
+        "vad_speech_pad_ms": "INTEGER",
+        "temperature": "VARCHAR",
+        "temperature_increment_on_fallback": "DOUBLE",
+        "best_of": "INTEGER",
+        "compression_ratio_threshold": "DOUBLE",
+        "logprob_threshold": "DOUBLE",
+        "no_speech_threshold": "DOUBLE",
+        "length_penalty": "DOUBLE",
+        "repetition_penalty": "DOUBLE",
+        "no_repeat_ngram_size": "INTEGER",
+        "suppress_tokens": "VARCHAR",
+        "condition_on_previous_text": "BOOLEAN",
+        "initial_prompt": "VARCHAR",
+    }
+
+    for column_name, column_type in transcription_columns.items():
+        if column_name not in existing_columns:
+            LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
+            if column_type == "DOUBLE":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
+            elif column_type == "VARCHAR":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
+            elif column_type == "INTEGER":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
+            elif column_type == "BOOLEAN":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
+            else:
+                LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+
+
+def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnection) -> None:
+    """Add preprocessing parameter columns to runs table."""
+    existing_columns = _get_columns(conn, "runs")
+    preprocessing_columns = {
+        "volume_adjustment_db": "DOUBLE",
+        "resampler": "VARCHAR",
+        "sample_format": "VARCHAR",
+        "loudnorm_target_i": "DOUBLE",
+        "loudnorm_target_tp": "DOUBLE",
+        "loudnorm_target_lra": "DOUBLE",
+        "loudnorm_backend": "VARCHAR",
+        "denoise_method": "VARCHAR",
+        "denoise_library": "VARCHAR",
+        "rnnoise_model": "VARCHAR",
+        "rnnoise_mix": "DOUBLE",
+        "snr_estimation_method": "VARCHAR",
+    }
+
+    for column_name, column_type in preprocessing_columns.items():
+        if column_name not in existing_columns:
+            LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
+            if column_type == "DOUBLE":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
+            elif column_type == "VARCHAR":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
+            elif column_type == "INTEGER":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
+            elif column_type == "BOOLEAN":
+                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
+            else:
+                LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+
+
+def _validate_migration_ordering() -> None:
+    """Validate that migrations are properly ordered and unique."""
+    versions = [m.version for m in MIGRATIONS]
+    if versions != sorted(versions):
+        raise ValueError("Migrations must be ordered by version number")
+    if len(versions) != len(set(versions)):
+        raise ValueError("Migration versions must be unique")
+    if versions and versions[0] != 1:
+        raise ValueError("Migrations must start with version 1")
+
+
+# Migration Registry
+MIGRATIONS: list[Migration] = [
+    Migration(
+        version=1,
+        name="add_rnnoise_columns",
+        description="Add rnnoise_model and rnnoise_mix columns to file_metrics table",
+        migrate=_migration_001_add_rnnoise_columns,
+    ),
+    Migration(
+        version=2,
+        name="add_file_metrics_columns",
+        description="Add loudnorm_target_lra and snr_estimation_method columns to file_metrics table",
+        migrate=_migration_002_add_file_metrics_columns,
+    ),
+    Migration(
+        version=3,
+        name="add_transcription_params_file_metrics",
+        description="Add transcription parameter columns to file_metrics table",
+        migrate=_migration_003_add_transcription_params_to_file_metrics,
+    ),
+    Migration(
+        version=4,
+        name="add_transcription_params_runs",
+        description="Add transcription parameter columns to runs table",
+        migrate=_migration_004_add_transcription_params_to_runs,
+    ),
+    Migration(
+        version=5,
+        name="add_preprocessing_params_runs",
+        description="Add preprocessing parameter columns to runs table",
+        migrate=_migration_005_add_preprocessing_params_to_runs,
+    ),
+]
+
+
 class TranscriptionDatabase:
     """Simple SQLite database for tracking transcription state."""
 
@@ -436,6 +642,14 @@ class TranscriptionDatabase:
                 ALTER TABLE file_metrics ALTER COLUMN id SET DEFAULT nextval('seq_file_metrics_id');
             """)
 
+            # Schema version table for tracking migrations
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS schema_version (
+                    version INTEGER PRIMARY KEY,
+                    applied_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
             # Migrate existing tables: add missing columns if they don't exist
             self._migrate_schema()
 
@@ -445,165 +659,76 @@ class TranscriptionDatabase:
             raise DatabaseError(msg) from e
 
     def _migrate_schema(self) -> None:
-        """Migrate existing database schema by adding missing columns."""
+        """Migrate existing database schema using version-based ordered migrations."""
         if self.conn is None:
             return
 
         try:
-            # Migrate file_metrics table
-            try:
-                columns_result = self.conn.execute("DESCRIBE file_metrics").fetchall()
-                existing_columns: set[str] = {row[0] for row in columns_result}
-            except Exception:
-                # Table doesn't exist yet, no migration needed
-                existing_columns = set()
+            # Validate migration registry
+            _validate_migration_ordering()
 
-            # Add rnnoise_model column if it doesn't exist
-            if "rnnoise_model" not in existing_columns:
-                LOGGER.debug("Migrating schema: adding rnnoise_model column to file_metrics")
-                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_model VARCHAR")
+            # Get current schema version
+            current_version = self._get_current_schema_version()
 
-            # Add rnnoise_mix column if it doesn't exist
-            if "rnnoise_mix" not in existing_columns:
-                LOGGER.debug("Migrating schema: adding rnnoise_mix column to file_metrics")
-                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN rnnoise_mix DOUBLE")
+            # Find pending migrations
+            pending = [m for m in MIGRATIONS if m.version > current_version]
 
-            # Add loudnorm_target_lra column if it doesn't exist
-            if "loudnorm_target_lra" not in existing_columns:
-                LOGGER.debug("Migrating schema: adding loudnorm_target_lra column to file_metrics")
-                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN loudnorm_target_lra DOUBLE")
+            if not pending:
+                LOGGER.debug("Database schema is up to date (version %d)", current_version)
+                return
 
-            # Add snr_estimation_method column if it doesn't exist
-            if "snr_estimation_method" not in existing_columns:
-                LOGGER.debug("Migrating schema: adding snr_estimation_method column to file_metrics")
-                self.conn.execute("ALTER TABLE file_metrics ADD COLUMN snr_estimation_method VARCHAR")
+            LOGGER.info("Running %d pending migration(s)", len(pending))
 
-            # Add transcription parameter columns to file_metrics if they don't exist
-            # List of transcription parameter columns that might be missing from old databases
-            transcription_columns_to_add = {
-                "patience": "DOUBLE",
-                "task": "VARCHAR",
-                "chunk_length": "INTEGER",
-                "vad_filter": "BOOLEAN",
-                "vad_threshold": "DOUBLE",
-                "vad_min_speech_duration_ms": "INTEGER",
-                "vad_max_speech_duration_s": "DOUBLE",
-                "vad_min_silence_duration_ms": "INTEGER",
-                "vad_speech_pad_ms": "INTEGER",
-                "temperature": "VARCHAR",
-                "temperature_increment_on_fallback": "DOUBLE",
-                "best_of": "INTEGER",
-                "compression_ratio_threshold": "DOUBLE",
-                "logprob_threshold": "DOUBLE",
-                "no_speech_threshold": "DOUBLE",
-                "length_penalty": "DOUBLE",
-                "repetition_penalty": "DOUBLE",
-                "no_repeat_ngram_size": "INTEGER",
-                "suppress_tokens": "VARCHAR",
-                "condition_on_previous_text": "BOOLEAN",
-                "initial_prompt": "VARCHAR",
-            }
-
-            for column_name, column_type in transcription_columns_to_add.items():
-                if column_name not in existing_columns:
-                    LOGGER.debug("Migrating schema: adding %s column to file_metrics", column_name)
-                    # Use hardcoded SQL statements matching existing migration pattern
-                    # This avoids any potential SQL injection risks
-                    if column_type == "DOUBLE":
-                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} DOUBLE")
-                    elif column_type == "VARCHAR":
-                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} VARCHAR")
-                    elif column_type == "INTEGER":
-                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} INTEGER")
-                    elif column_type == "BOOLEAN":
-                        self.conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} BOOLEAN")
-                    else:
-                        LOGGER.warning("Unknown column type %s for %s, skipping migration", column_type, column_name)
-
-            # Migrate runs table - add missing transcription parameters
-            try:
-                runs_columns_result = self.conn.execute("DESCRIBE runs").fetchall()
-                runs_existing_columns: set[str] = {row[0] for row in runs_columns_result}
-            except Exception:
-                # Table doesn't exist yet, no migration needed
-                runs_existing_columns = set()
-
-            # List of new transcription parameter columns to add
-            # Using hardcoded strings for each column to match existing migration pattern
-            # and avoid any potential SQL injection risks
-            new_columns_to_add = {
-                "patience": "DOUBLE",
-                "task": "VARCHAR",
-                "chunk_length": "INTEGER",
-                "vad_filter": "BOOLEAN",
-                "vad_threshold": "DOUBLE",
-                "vad_min_speech_duration_ms": "INTEGER",
-                "vad_max_speech_duration_s": "DOUBLE",
-                "vad_min_silence_duration_ms": "INTEGER",
-                "vad_speech_pad_ms": "INTEGER",
-                "temperature": "VARCHAR",
-                "temperature_increment_on_fallback": "DOUBLE",
-                "best_of": "INTEGER",
-                "compression_ratio_threshold": "DOUBLE",
-                "logprob_threshold": "DOUBLE",
-                "no_speech_threshold": "DOUBLE",
-                "length_penalty": "DOUBLE",
-                "repetition_penalty": "DOUBLE",
-                "no_repeat_ngram_size": "INTEGER",
-                "suppress_tokens": "VARCHAR",
-                "condition_on_previous_text": "BOOLEAN",
-                "initial_prompt": "VARCHAR",
-            }
-
-            for column_name, column_type in new_columns_to_add.items():
-                if column_name not in runs_existing_columns:
-                    LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
-                    # Use hardcoded SQL statements matching existing migration pattern
-                    # This avoids any potential SQL injection risks
-                    if column_type == "DOUBLE":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
-                    elif column_type == "VARCHAR":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
-                    elif column_type == "INTEGER":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
-                    elif column_type == "BOOLEAN":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
-                    else:
-                        LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
-
-            # Add preprocessing parameter columns to runs table
-            preprocessing_columns_to_add = {
-                "volume_adjustment_db": "DOUBLE",
-                "resampler": "VARCHAR",
-                "sample_format": "VARCHAR",
-                "loudnorm_target_i": "DOUBLE",
-                "loudnorm_target_tp": "DOUBLE",
-                "loudnorm_target_lra": "DOUBLE",
-                "loudnorm_backend": "VARCHAR",
-                "denoise_method": "VARCHAR",
-                "denoise_library": "VARCHAR",
-                "rnnoise_model": "VARCHAR",
-                "rnnoise_mix": "DOUBLE",
-                "snr_estimation_method": "VARCHAR",
-            }
-
-            for column_name, column_type in preprocessing_columns_to_add.items():
-                if column_name not in runs_existing_columns:
-                    LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
-                    if column_type == "DOUBLE":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
-                    elif column_type == "VARCHAR":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
-                    elif column_type == "INTEGER":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
-                    elif column_type == "BOOLEAN":
-                        self.conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
-                    else:
-                        LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+            # Apply each pending migration
+            for migration in pending:
+                try:
+                    LOGGER.info(
+                        "Applying migration %d: %s - %s", migration.version, migration.name, migration.description
+                    )
+                    migration.migrate(self.conn)
+                    self._record_migration(migration.version)
+                    self.conn.commit()
+                except Exception as e:
+                    LOGGER.error("Migration %d failed: %s", migration.version, e)
+                    raise DatabaseError(f"Migration {migration.version} failed") from e
 
         except Exception as e:
             # Log but don't fail - migration errors shouldn't break initialization
             LOGGER.warning("Schema migration encountered an issue: %s", e)
+
+    def _get_current_schema_version(self) -> int:
+        """Get current schema version from database."""
+        if self.conn is None:
+            return 0
+
+        try:
+            result = self.conn.execute("SELECT MAX(version) FROM schema_version").fetchone()
+            return result[0] if result is not None and result[0] is not None else 0
+        except Exception:
+            # Table doesn't exist yet, no migrations applied
+            return 0
+
+    def _record_migration(self, version: int) -> None:
+        """Record that a migration was applied."""
+        if self.conn is None:
+            raise DatabaseError("Database connection not available")
+
+        self.conn.execute("INSERT INTO schema_version (version) VALUES (?)", (version,))
+
+    def get_migration_history(self) -> list[tuple[Any, ...]]:
+        """Get migration history for debugging/auditing."""
+        if self.conn is None:
+            return []
+
+        try:
+            return self.conn.execute("""
+                SELECT version, applied_at
+                FROM schema_version
+                ORDER BY version
+            """).fetchall()
+        except Exception:
+            # Table doesn't exist yet
+            return []
 
     def add_file(self, file_path: str, status: str = "pending") -> None:
         """Add a file to track or update its status if it exists.
