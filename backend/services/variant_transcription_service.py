@@ -11,6 +11,7 @@ from backend.transcribe import TranscriptionMetrics
 from backend.variants.executor import (
     create_variant_preprocess_runner,
     create_variant_transcribe_config,
+    is_baseline_config,
     is_minimal_config,
 )
 from backend.variants.variant import Variant
@@ -64,11 +65,26 @@ class VariantTranscriptionService:
         def _collect(metrics: TranscriptionMetrics) -> None:
             metrics_container["value"] = metrics
 
-        # Determine if we should use minimal params
-        is_minimal = is_minimal_config(self.transcription_config)
+        # Determine transcription path based on config type
+        # Check baseline first (baseline is a subset of minimal, but handled separately)
+        is_baseline = is_baseline_config(self.transcription_config)
+        is_minimal = is_minimal_config(self.transcription_config) if not is_baseline else False
 
         # Run transcription based on config type
-        if is_minimal:
+        if is_baseline:
+            # For baseline config, use baseline transcription (only passes language and vad_filter)
+            from backend.variants.executor import transcribe_with_baseline_params as transcribe_baseline_fn
+
+            payload = transcribe_baseline_fn(
+                path=request.audio_path,
+                preset=request.preset,
+                language=request.language,
+                preprocess_config=self.preprocess_config,
+                preprocess_runner=self.preprocess_runner,
+                transcription_config=self.transcription_config,
+                metrics_collector=_collect,
+            )
+        elif is_minimal:
             # For minimal config, use the internal function that omits parameters
             from backend.variants.executor import transcribe_with_minimal_params as transcribe_minimal_fn
 
