@@ -167,7 +167,7 @@ def test_context_manager(temp_db: TranscriptionDatabase) -> None:
 
 def test_schema_migration_adds_rnnoise_model_column(tmp_path: Path) -> None:
     """Test that migration adds rnnoise_model column to existing databases."""
-    db_path = tmp_path / "test_migration.db"
+    db_path = tmp_path / "test_migration.duckdb"
 
     # Create a database with old schema (without rnnoise_model column)
     # This simulates an existing database created before rnnoise_model was added
@@ -403,7 +403,7 @@ def test_migration_on_production_database() -> None:
 
 def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
     """Test that migration adds rnnoise_mix column to existing databases."""
-    db_path = tmp_path / "test_migration_mix.db"
+    db_path = tmp_path / "test_migration_mix.duckdb"
 
     # Create a database with old schema (without rnnoise_mix column)
     # This simulates an existing database created before rnnoise_mix was added
@@ -547,7 +547,7 @@ def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
 
 def test_schema_migration_adds_both_rnnoise_columns(tmp_path: Path) -> None:
     """Test that migration adds both rnnoise_model and rnnoise_mix columns when both are missing."""
-    db_path = tmp_path / "test_migration_both.db"
+    db_path = tmp_path / "test_migration_both.duckdb"
 
     # Create a database with very old schema (without both rnnoise columns)
     conn = duckdb.connect(str(db_path))
@@ -869,7 +869,7 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
     This simulates the production error scenario where an old database exists
     without columns that the code expects, and verifies our test would catch it.
     """
-    db_path = tmp_path / "test_missing_column.db"
+    db_path = tmp_path / "test_missing_column.duckdb"
 
     # Create a database with old schema missing loudnorm_target_lra and snr_estimation_method
     # (simulating the production error)

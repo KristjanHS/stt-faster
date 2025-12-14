@@ -42,7 +42,7 @@ After:
   ├── processed/
   │   ├── audio1.wav + audio1.json
   │   └── audio2.mp3 + audio2.json
-  └── transcribe_state.db
+  └── transcribe_state.duckdb
 ```
 
 ## Requirements
@@ -62,7 +62,7 @@ After:
 
 **Files stuck in pending**  
 → Check errors: `.venv/bin/python scripts/transcribe_manager.py status --verbose`  
-→ Or delete `transcribe_state.db` to start fresh
+→ Or delete `transcribe_state.duckdb` to start fresh
 
 ## Customization
 
