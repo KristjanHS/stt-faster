@@ -39,7 +39,7 @@ I want to keep the pipeline working after each step!
    * **Evidence:** Some steps use `ffmpeg` python bindings + regex parsing (e.g. volumedetect), rather than one unified runner approach.
    * **Fix direction:** Standardize on one execution abstraction (e.g., `run_ffmpeg(cmd)`) and force every step to report metrics the same way.
 
-- [ ] **7. Schema drift risk: migrations are reactive and column-based**
+- [x] **7. Schema drift risk: migrations are reactive and column-based**
 
    * **Impact:** "Works on my machine" DB breakages; production DB needs frequent emergency patching.
    * **Evidence:** Tests explicitly simulate missing columns and rely on migrations to patch old DBs.
