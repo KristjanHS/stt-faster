@@ -3,10 +3,9 @@
 import logging
 import time
 from pathlib import Path
-from typing import Any, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Any, Union
 
 from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, RunSummarizer
-from backend.types import FileProcessingStats
 from backend.run_config import RunConfig
 from backend.services.interfaces import (
     FileMover,
@@ -15,6 +14,7 @@ from backend.services.interfaces import (
     TranscriptionService,
 )
 from backend.transcribe import DEFAULT_OUTPUT_FORMAT
+from backend.types import FileProcessingStats
 
 if TYPE_CHECKING:
     from backend.variants.variant import Variant
@@ -105,10 +105,20 @@ class TranscriptionProcessor:
         """Get the processed folder path (backward compatibility)."""
         return self._file_mover_policy.processed_folder
 
+    @processed_folder.setter
+    def processed_folder(self, value: Path) -> None:
+        """Set the processed folder path."""
+        self._file_mover_policy.processed_folder = Path(value)
+
     @property
     def failed_folder(self) -> Path:
         """Get the failed folder path (backward compatibility)."""
         return self._file_mover_policy.failed_folder
+
+    @failed_folder.setter
+    def failed_folder(self, value: Path) -> None:
+        """Set the failed folder path."""
+        self._file_mover_policy.failed_folder = Path(value)
 
     def scan_folder(self) -> list[str]:
         """Scan the input folder for audio files.

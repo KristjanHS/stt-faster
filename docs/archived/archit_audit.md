@@ -57,7 +57,7 @@ I want to keep the pipeline working after each step!
    * **Evidence:** Refactor log mentions `transcribe_state.db`, but integration uses `transcribe_state.duckdb`; tests also create temp files with `.db` suffix while using DuckDB.
    * **Fix direction:** Pick one canonical filename/extension; add a one-time migration/alias; update docs + CLI help consistently.
 
-- [ ] **10. Script sprawl + sys.path hacks + circular-import pressure**
+- [x] **10. Script sprawl + sys.path hacks + circular-import pressure**
 
    * **Impact:** Hard to package/distribute; inconsistent CLI behavior; "works when run from repo root only"; encourages hidden coupling.
    * **Evidence:** Scripts modify `sys.path` to import backend; also processor code uses local imports to dodge dependency cycles.
