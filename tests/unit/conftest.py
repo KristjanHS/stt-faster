@@ -23,7 +23,7 @@ def _disable_network_for_unit_tests() -> None:
 @pytest.fixture
 def temp_db() -> Iterator[TranscriptionDatabase]:
     """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as tmp:
+    with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as tmp:
         db_path = tmp.name
 
     # DuckDB requires the file to be a valid DB or not exist.

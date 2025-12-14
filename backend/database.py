@@ -202,6 +202,34 @@ def _format_timestamp(value: str | datetime | None) -> str:
     return value
 
 
+def _convert_parameter_value(value: str, value_type: str) -> Any:
+    """Convert parameter value string back to original type.
+
+    Args:
+        value: String representation of the value
+        value_type: Type name (e.g., 'float', 'int', 'bool', 'str')
+
+    Returns:
+        Converted value with appropriate type
+    """
+    if value_type == "float":
+        return float(value)
+    elif value_type == "int":
+        return int(value)
+    elif value_type == "bool":
+        return value.lower() in ("true", "1", "yes", "on")
+    elif value_type == "str":
+        return value
+    else:
+        # Fallback: try to infer type
+        try:
+            if "." in value:
+                return float(value)
+            return int(value)
+        except ValueError:
+            return value
+
+
 def get_default_db_path() -> Path:
     """Get XDG-compliant default database path.
 
@@ -1841,16 +1869,18 @@ class TranscriptionDatabase:
                 # Add parameters from run_parameters table
                 if run_id in params_by_run:
                     for category, name, value, value_type in params_by_run[run_id]:
+                        # Convert value back to original type
+                        converted_value = _convert_parameter_value(value, value_type)
                         if category == "preprocess" and name == "profile":
-                            result["preprocess_profile"] = value
+                            result["preprocess_profile"] = converted_value
                         elif category == "preprocess":
-                            result[name] = value
+                            result[name] = converted_value
                         elif category == "transcription":
-                            result[name] = value
+                            result[name] = converted_value
                         elif category == "model":
                             # Only add if not already present from run_configs
                             if name not in result or result[name] is None:
-                                result[name] = value
+                                result[name] = converted_value
 
                 results.append(result)
 
