@@ -364,18 +364,18 @@ def check_file_metrics_completeness(db: TranscriptionDatabase, run_id: int) -> t
         if not file_complete:
             details["all_complete"] = False
 
-        details["files_checked"].append(file_details)
+        details["files_checked"].append(file_details)  # type: ignore[reportUnknownMemberType]
 
     details["complete"] = details["all_complete"]
     return details["complete"], details
 
 
-def print_run_report(run_details: dict) -> None:
+def print_run_report(run_details: dict[str, Any]) -> None:
     """Print a formatted report for a run check."""
     print(f"\n{'=' * 80}")
     print(f"RUN ID: {run_details['run_id']}")
-    print(f"Preset: {run_details.get('preset', 'N/A')}")
-    print(f"Recorded at: {run_details.get('recorded_at', 'N/A')}")
+    print(f"Preset: {run_details.get('preset', 'N/A')}")  # type: ignore[reportUnknownMemberType]
+    print(f"Recorded at: {run_details.get('recorded_at', 'N/A')}")  # type: ignore[reportUnknownMemberType]
     print(f"{'=' * 80}")
 
     if "error" in run_details:
@@ -384,9 +384,9 @@ def print_run_report(run_details: dict) -> None:
 
     # Job level check
     print("\n📊 JOB LEVEL (runs table):")
-    variant_name = run_details.get("variant_name", "unknown")
-    variant_number = run_details.get("variant_number")
-    explicit_params = run_details.get("explicit_parameters", [])
+    variant_name = run_details.get("variant_name", "unknown")  # type: ignore[reportUnknownMemberType]
+    variant_number = run_details.get("variant_number")  # type: ignore[reportUnknownMemberType]
+    explicit_params = run_details.get("explicit_parameters", [])  # type: ignore[reportUnknownMemberType]
 
     if variant_number:
         print(f"  Detected variant: {variant_number} ({variant_name})")
@@ -397,8 +397,8 @@ def print_run_report(run_details: dict) -> None:
     else:
         print("  Using main transcribe function (all parameters should be set)")
 
-    missing_params = run_details.get("missing_parameters", [])
-    missing_stats = run_details.get("missing_statistics", [])
+    missing_params = run_details.get("missing_parameters", [])  # type: ignore[reportUnknownMemberType]
+    missing_stats = run_details.get("missing_statistics", [])  # type: ignore[reportUnknownMemberType]
 
     if missing_params:
         print(f"  ⚠️  Missing parameters ({len(missing_params)}):")
@@ -419,7 +419,7 @@ def print_run_report(run_details: dict) -> None:
     else:
         print("  ✅ All statistics present")
 
-    if run_details.get("complete"):
+    if run_details.get("complete"):  # type: ignore[reportUnknownMemberType]
         print("  ✅ JOB LEVEL: COMPLETE")
     else:
         print("  ❌ JOB LEVEL: INCOMPLETE")
@@ -436,12 +436,12 @@ def print_file_metrics_report(file_details: dict) -> None:
 
     incomplete_count = 0
     for file_info in file_details["files_checked"]:
-        if not file_info.get("complete", False):
+        if not file_info.get("complete", False):  # type: ignore[reportUnknownMemberType]
             incomplete_count += 1
             print(f"\n  📄 File {file_info['file_index']}: {file_info['audio_path']}")
             print(f"     Status: {file_info['status']}")
 
-            missing_params = file_info.get("missing_parameters", [])
+            missing_params = file_info.get("missing_parameters", [])  # type: ignore[reportUnknownMemberType]
             if missing_params:
                 print(f"     ⚠️  Missing parameters ({len(missing_params)}):")
                 for param in missing_params[:10]:  # Show first 10
@@ -449,7 +449,7 @@ def print_file_metrics_report(file_details: dict) -> None:
                 if len(missing_params) > 10:
                     print(f"        ... and {len(missing_params) - 10} more")
 
-            missing_stats = file_info.get("missing_statistics", [])
+            missing_stats = file_info.get("missing_statistics", [])  # type: ignore[reportUnknownMemberType]
             if missing_stats:
                 print(f"     ⚠️  Missing statistics ({len(missing_stats)}):")
                 for stat in missing_stats[:10]:  # Show first 10
@@ -462,7 +462,7 @@ def print_file_metrics_report(file_details: dict) -> None:
     else:
         print(f"\n  ⚠️  {incomplete_count} out of {file_details['file_count']} files are incomplete")
 
-    if file_details.get("complete"):
+    if file_details.get("complete"):  # type: ignore[reportUnknownMemberType]
         print("  ✅ FILE LEVEL: COMPLETE")
     else:
         print("  ❌ FILE LEVEL: INCOMPLETE")

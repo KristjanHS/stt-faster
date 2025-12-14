@@ -84,3 +84,4 @@ The test suite follows best practices:
 
 This follows the testing pyramid principle and aligns with the project's `testing_approach.md` guidelines.
 
+
