@@ -6,7 +6,7 @@ from typing import Callable
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult
-from backend.transcribe import TranscriptionMetrics
+from backend.transcribe import TranscriptionMetrics, transcribe
 from backend.variants.executor import is_minimal_config, transcribe_with_minimal_params
 
 LOGGER = logging.getLogger(__name__)
@@ -27,7 +27,6 @@ class WhisperTranscriptionService:
 
     def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         """Transcribe audio and return result with metrics."""
-        from backend.transcribe import transcribe  # Import here to avoid circular imports
 
         metrics_container: dict[str, TranscriptionMetrics] = {}
 
