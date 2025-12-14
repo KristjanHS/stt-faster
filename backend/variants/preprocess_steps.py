@@ -375,7 +375,7 @@ def aresampl_loudnorm_fixed(
         stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             "aresample",
-            ar=target_sample_rate,
+            osr=target_sample_rate,
         )
         stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
@@ -421,7 +421,7 @@ def aresampl_loudnorm_fixed2(
         stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             "aresample",
-            ar=target_sample_rate,
+            osr=target_sample_rate,
             precision="24",
         )
         stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
@@ -439,6 +439,9 @@ def aresampl_loudnorm_fixed2(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[name-defined]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("aresampl_loudnorm_fixed2", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("aresampl_loudnorm_fixed2", f"ffmpeg error: {exc}") from exc
 
