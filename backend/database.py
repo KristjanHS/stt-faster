@@ -313,6 +313,18 @@ def _migration_003_add_transcription_params_to_file_metrics(conn: duckdb.DuckDBP
 
 def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnection) -> None:
     """Add transcription parameter columns to runs table."""
+    # Skip if normalized tables exist (schema already migrated to normalized form)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('run_configs', 'run_metrics')"
+        )
+        existing_tables = {row[0] for row in cursor.fetchall()}
+        if len(existing_tables) >= 2:
+            LOGGER.debug("Normalized tables exist, skipping migration 4 (transcription params in run_configs)")
+            return
+    except Exception:
+        pass  # nosec B110 - safe pass for migration check
+
     existing_columns = _get_columns(conn, "runs")
     transcription_columns = {
         "patience": "DOUBLE",
@@ -355,6 +367,18 @@ def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnect
 
 def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnection) -> None:
     """Add preprocessing parameter columns to runs table."""
+    # Skip if normalized tables exist (schema already migrated to normalized form)
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('run_configs', 'run_metrics')"
+        )
+        existing_tables = {row[0] for row in cursor.fetchall()}
+        if len(existing_tables) >= 2:
+            LOGGER.debug("Normalized tables exist, skipping migration 5 (preprocessing params in run_configs)")
+            return
+    except Exception:
+        pass  # nosec B110 - safe pass for migration check
+
     existing_columns = _get_columns(conn, "runs")
     preprocessing_columns = {
         "volume_adjustment_db": "DOUBLE",
@@ -384,6 +408,465 @@ def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnect
                 conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
             else:
                 LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+
+
+def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> None:
+    """Normalize runs table schema for Alternative 3 - split into multiple tables for flexibility."""
+    import json
+
+    # First check if normalized tables already exist (for new databases created with new schema)
+    # If they exist, this migration should skip entirely to avoid foreign key constraint issues
+    # The wide columns in runs from migrations 4-5 are harmless if normalized tables handle the data
+    try:
+        cursor = conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table' "
+            "AND name IN ('run_configs', 'run_metrics', 'run_parameters')"
+        )
+        existing_tables = {row[0] for row in cursor.fetchall()}
+        if len(existing_tables) >= 2:  # At least run_configs and run_metrics exist
+            LOGGER.debug("Normalized tables already exist, skipping migration 6 (schema already normalized)")
+            return
+    except Exception:
+        pass  # nosec B110 - safe pass for migration check  # Continue to check old columns
+
+    # Check if migration is needed by looking for old wide columns
+    try:
+        cursor = conn.execute("DESCRIBE runs")
+        columns = {row[0] for row in cursor.fetchall()}
+
+        # Check for old wide columns that should be removed
+        old_wide_columns = {
+            "volume_adjustment_db",
+            "resampler",
+            "sample_format",
+            "loudnorm_target_i",
+            "loudnorm_target_tp",
+            "loudnorm_target_lra",
+            "loudnorm_backend",
+            "denoise_method",
+            "denoise_library",
+            "rnnoise_model",
+            "rnnoise_mix",
+            "snr_estimation_method",
+            "beam_size",
+            "patience",
+            "word_timestamps",
+            "task",
+            "chunk_length",
+            "vad_filter",
+            "vad_threshold",
+            "vad_min_speech_duration_ms",
+            "vad_max_speech_duration_s",
+            "vad_min_silence_duration_ms",
+            "vad_speech_pad_ms",
+            "temperature",
+            "temperature_increment_on_fallback",
+            "best_of",
+            "compression_ratio_threshold",
+            "logprob_threshold",
+            "no_speech_threshold",
+            "length_penalty",
+            "repetition_penalty",
+            "no_repeat_ngram_size",
+            "suppress_tokens",
+            "condition_on_previous_text",
+            "initial_prompt",
+        }
+
+        has_old_columns = bool(old_wide_columns & columns)
+
+        if not has_old_columns:
+            LOGGER.debug("Runs table already normalized (no old wide columns found), skipping migration")
+            return
+        else:
+            LOGGER.info(
+                "Detected old wide runs schema with %d old columns, proceeding with migration",
+                len(old_wide_columns & columns),
+            )
+
+    except Exception as e:
+        LOGGER.info("Could not check migration status (%s), proceeding with migration", e)
+
+    LOGGER.info("Starting runs table normalization migration")
+
+    # Wrap migration in transaction for atomicity
+    transaction_started = False
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        transaction_started = True
+    except Exception:
+        # DuckDB may not support explicit transactions for DDL, continue anyway
+        pass  # nosec B110 - safe pass for transaction initialization
+
+    try:
+        # Check if normalized tables already exist (from _init_db for new databases)
+        # This is a second check in case the first one didn't catch it
+        try:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' "
+                "AND name IN ('run_configs', 'run_metrics', 'run_parameters')"
+            )
+            existing_normalized: set[str] = {row[0] for row in cursor.fetchall()}
+            if len(existing_normalized) >= 2:
+                LOGGER.debug("Normalized tables found in second check, aborting migration")
+                # Clean up any intermediate tables
+                try:
+                    conn.execute("DROP TABLE IF EXISTS runs_new")
+                except Exception:
+                    pass  # nosec B110 - safe pass for cleanup
+                if transaction_started:
+                    try:
+                        conn.execute("COMMIT")
+                    except Exception:
+                        pass  # nosec B110 - safe pass for transaction commit
+                return
+        except Exception:
+            existing_normalized = set()
+
+        # Create new normalized tables (only if they don't exist)
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS runs_new (
+            id INTEGER PRIMARY KEY,
+            recorded_at TIMESTAMP NOT NULL,
+            input_folder VARCHAR,
+            preset VARCHAR NOT NULL,
+            language VARCHAR,
+            preprocess_enabled BOOLEAN NOT NULL,
+            files_found INTEGER NOT NULL,
+            succeeded INTEGER NOT NULL,
+            failed INTEGER NOT NULL,
+            total_processing_time DOUBLE,
+            total_audio_duration DOUBLE,
+            speed_ratio DOUBLE
+        );
+        """)
+
+        # Only create normalized tables if they don't exist
+        if "run_configs" not in existing_normalized:
+            conn.execute("""
+                CREATE TABLE run_configs (
+                    run_id INTEGER PRIMARY KEY REFERENCES runs_new(id),
+                    model_id VARCHAR,
+                    device VARCHAR,
+                    compute_type VARCHAR
+                );
+            """)
+
+        if "run_metrics" not in existing_normalized:
+            conn.execute("""
+                CREATE TABLE run_metrics (
+                    run_id INTEGER PRIMARY KEY REFERENCES runs_new(id),
+                    total_preprocess_time DOUBLE,
+                    total_transcribe_time DOUBLE,
+                    additional_metrics JSON
+                );
+            """)
+
+        if "run_parameters" not in existing_normalized:
+            conn.execute("""
+                CREATE TABLE run_parameters (
+                    id INTEGER PRIMARY KEY,
+                    run_id INTEGER REFERENCES runs_new(id),
+                    category VARCHAR,
+                    name VARCHAR,
+                    value VARCHAR,
+                    value_type VARCHAR
+                );
+            """)
+
+        # Migrate existing data
+        LOGGER.debug("Migrating existing runs data to normalized schema")
+
+        # Check if there's any data to migrate
+        try:
+            count_result = conn.execute("SELECT COUNT(*) FROM runs").fetchone()
+            has_data = count_result and count_result[0] > 0
+        except Exception:
+            has_data = False
+
+        if not has_data and existing_normalized:
+            LOGGER.debug("No runs data to migrate and normalized tables already exist, skipping migration")
+            # Drop intermediate tables if they exist
+            try:
+                conn.execute("DROP TABLE IF EXISTS runs_new")
+            except Exception:
+                pass  # nosec B110 - safe pass for cleanup
+            try:
+                conn.execute("DROP TABLE IF EXISTS file_metrics_new")
+            except Exception:
+                pass  # nosec B110 - safe pass for cleanup
+            if transaction_started:
+                try:
+                    conn.execute("COMMIT")
+                except Exception:
+                    pass  # nosec B110 - safe pass for transaction commit
+            return
+
+        # Get all existing runs
+        cursor = conn.execute("SELECT * FROM runs ORDER BY id")
+        existing_runs = cursor.fetchall()
+        column_names = [desc[0] for desc in cursor.description]
+
+        for row in existing_runs:
+            run_data = dict(zip(column_names, row))
+            run_id = run_data["id"]
+
+            # Insert core run data
+            conn.execute(
+                """
+            INSERT INTO runs_new (
+                id, recorded_at, input_folder, preset, language, preprocess_enabled,
+                files_found, succeeded, failed, total_processing_time,
+                total_audio_duration, speed_ratio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+                (
+                    run_id,
+                    run_data["recorded_at"],
+                    run_data["input_folder"],
+                    run_data["preset"],
+                    run_data["language"],
+                    run_data["preprocess_enabled"],
+                    run_data["files_found"],
+                    run_data["succeeded"],
+                    run_data["failed"],
+                    run_data["total_processing_time"],
+                    run_data["total_audio_duration"],
+                    run_data["speed_ratio"],
+                ),
+            )
+
+            # Extract and insert config data
+            preprocess_config = {
+                "profile": run_data.get("preprocess_profile"),
+                "target_sample_rate": run_data.get("target_sample_rate"),
+                "target_channels": run_data.get("target_channels"),
+                "loudnorm_preset": run_data.get("loudnorm_preset"),
+                "volume_adjustment_db": run_data.get("volume_adjustment_db"),
+                "resampler": run_data.get("resampler"),
+                "sample_format": run_data.get("sample_format"),
+                "loudnorm_target_i": run_data.get("loudnorm_target_i"),
+                "loudnorm_target_tp": run_data.get("loudnorm_target_tp"),
+                "loudnorm_target_lra": run_data.get("loudnorm_target_lra"),
+                "loudnorm_backend": run_data.get("loudnorm_backend"),
+                "denoise_method": run_data.get("denoise_method"),
+                "denoise_library": run_data.get("denoise_library"),
+                "rnnoise_model": run_data.get("rnnoise_model"),
+                "rnnoise_mix": run_data.get("rnnoise_mix"),
+                "snr_estimation_method": run_data.get("snr_estimation_method"),
+            }
+
+            transcription_config = {
+                "beam_size": run_data.get("beam_size"),
+                "patience": run_data.get("patience"),
+                "word_timestamps": run_data.get("word_timestamps"),
+                "task": run_data.get("task"),
+                "chunk_length": run_data.get("chunk_length"),
+                "vad_filter": run_data.get("vad_filter"),
+                "vad_threshold": run_data.get("vad_threshold"),
+                "vad_min_speech_duration_ms": run_data.get("vad_min_speech_duration_ms"),
+                "vad_max_speech_duration_s": run_data.get("vad_max_speech_duration_s"),
+                "vad_min_silence_duration_ms": run_data.get("vad_min_silence_duration_ms"),
+                "vad_speech_pad_ms": run_data.get("vad_speech_pad_ms"),
+                "temperature": run_data.get("temperature"),
+                "temperature_increment_on_fallback": run_data.get("temperature_increment_on_fallback"),
+                "best_of": run_data.get("best_of"),
+                "compression_ratio_threshold": run_data.get("compression_ratio_threshold"),
+                "logprob_threshold": run_data.get("logprob_threshold"),
+                "no_speech_threshold": run_data.get("no_speech_threshold"),
+                "length_penalty": run_data.get("length_penalty"),
+                "repetition_penalty": run_data.get("repetition_penalty"),
+                "no_repeat_ngram_size": run_data.get("no_repeat_ngram_size"),
+                "suppress_tokens": run_data.get("suppress_tokens"),
+                "condition_on_previous_text": run_data.get("condition_on_previous_text"),
+                "initial_prompt": run_data.get("initial_prompt"),
+            }
+
+            conn.execute(
+                """
+                INSERT INTO run_configs (
+                    run_id, model_id, device, compute_type
+                ) VALUES (?, ?, ?, ?)
+            """,
+                (
+                    run_id,
+                    run_data.get("model_id"),
+                    run_data.get("device"),
+                    run_data.get("compute_type"),
+                ),
+            )
+
+            # Insert metrics
+            conn.execute(
+                """
+                INSERT INTO run_metrics (
+                    run_id, total_preprocess_time, total_transcribe_time, additional_metrics
+                ) VALUES (?, ?, ?, ?)
+            """,
+                (
+                    run_id,
+                    run_data.get("total_preprocess_time"),
+                    run_data.get("total_transcribe_time"),
+                    json.dumps({}, sort_keys=True),  # Empty for now, extensible
+                ),
+            )
+
+            # Insert individual parameters for flexibility
+            params_to_insert: list[tuple[int, str, str, str, str]] = []
+
+            # Preprocessing parameters
+            for key, value in preprocess_config.items():
+                if value is not None:
+                    params_to_insert.append((run_id, "preprocess", key, str(value), type(value).__name__))
+
+            # Transcription parameters
+            for key, value in transcription_config.items():
+                if value is not None:
+                    params_to_insert.append((run_id, "transcription", key, str(value), type(value).__name__))
+
+            # Model parameters
+            if run_data.get("model_id"):
+                params_to_insert.append((run_id, "model", "model_id", run_data["model_id"], "str"))
+            if run_data.get("device"):
+                params_to_insert.append((run_id, "model", "device", run_data["device"], "str"))
+            if run_data.get("compute_type"):
+                params_to_insert.append((run_id, "model", "compute_type", run_data["compute_type"], "str"))
+
+            for param_data in params_to_insert:
+                conn.execute(
+                    """
+                    INSERT INTO run_parameters (run_id, category, name, value, value_type)
+                    VALUES (?, ?, ?, ?, ?)
+                """,
+                    param_data,
+                )
+
+        # Since we can't rename tables with foreign key dependencies in DuckDB,
+        # we need to drop dependent tables first, then recreate everything
+
+        # First, drop all dependent tables that reference runs
+        # This allows us to drop and recreate runs table
+        try:
+            conn.execute("DROP TABLE IF EXISTS run_parameters")
+        except Exception:
+            pass  # nosec B110 - safe pass for migration cleanup
+        try:
+            conn.execute("DROP TABLE IF EXISTS run_metrics")
+        except Exception:
+            pass  # nosec B110 - safe pass for migration cleanup
+        try:
+            conn.execute("DROP TABLE IF EXISTS run_configs")
+        except Exception:
+            pass  # nosec B110 - safe pass for migration cleanup
+        # Note: We don't touch file_metrics - it doesn't have a foreign key constraint
+        # and its structure doesn't change in this migration
+
+        # Now we can safely drop runs table
+        try:
+            conn.execute("DROP TABLE IF EXISTS runs")
+        except Exception as e:
+            LOGGER.warning("Could not drop old runs table: %s", e)
+
+        # Check if runs table already exists before trying to rename
+        try:
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='runs'")
+            runs_exists = cursor.fetchone() is not None
+            if runs_exists:
+                # Check if runs is already normalized
+                cursor = conn.execute("DESCRIBE runs")
+                columns = {row[0] for row in cursor.fetchall()}
+                if "volume_adjustment_db" not in columns:
+                    # Runs table is already normalized, no need to rename
+                    LOGGER.debug("Runs table already exists and is normalized, dropping runs_new")
+                    try:
+                        conn.execute("DROP TABLE IF EXISTS runs_new")
+                    except Exception:
+                        pass  # nosec B110 - safe pass for cleanup
+                else:
+                    # Runs exists but is not normalized - we can't drop it due to foreign keys
+                    # This shouldn't happen if the early checks worked, but handle it gracefully
+                    LOGGER.warning("Runs table exists with old schema but can't be dropped due to dependencies")
+                    try:
+                        conn.execute("DROP TABLE IF EXISTS runs_new")
+                    except Exception:
+                        pass  # nosec B110 - safe pass for cleanup
+            else:
+                # Runs doesn't exist, safe to rename
+                try:
+                    conn.execute("ALTER TABLE runs_new RENAME TO runs")
+                except Exception as e:
+                    LOGGER.warning("Could not rename runs_new to runs: %s", e)
+        except Exception as e:
+            LOGGER.warning("Error checking runs table status: %s", e)
+
+        # Recreate normalized tables that reference runs
+        # (They were dropped earlier to allow runs table to be dropped)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_configs (
+                run_id INTEGER PRIMARY KEY REFERENCES runs(id),
+                model_id VARCHAR,
+                device VARCHAR,
+                compute_type VARCHAR
+            );
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_metrics (
+                run_id INTEGER PRIMARY KEY REFERENCES runs(id),
+                total_preprocess_time DOUBLE,
+                total_transcribe_time DOUBLE,
+                additional_metrics JSON
+            );
+        """)
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS run_parameters (
+                id INTEGER PRIMARY KEY,
+                run_id INTEGER REFERENCES runs(id),
+                category VARCHAR,
+                name VARCHAR,
+                value VARCHAR,
+                value_type VARCHAR
+            );
+        """)
+
+        # Update sequences (skip ALTER TABLE if normalized tables exist to avoid foreign key issues)
+        try:
+            cursor = conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('run_configs', 'run_metrics')"
+            )
+            existing_tables = {row[0] for row in cursor.fetchall()}
+            has_normalized = len(existing_tables) >= 2
+        except Exception:
+            has_normalized = False
+
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_runs_id START 1")
+        if not has_normalized:
+            try:
+                conn.execute("ALTER TABLE runs ALTER COLUMN id SET DEFAULT nextval('seq_runs_id')")
+            except Exception:
+                pass  # nosec B110 - Skip if table has foreign key dependencies
+        conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_run_parameters_id START 1")
+        conn.execute("ALTER TABLE run_parameters ALTER COLUMN id SET DEFAULT nextval('seq_run_parameters_id')")
+
+        # Commit transaction if we started one
+        if transaction_started:
+            try:
+                conn.execute("COMMIT")
+            except Exception:
+                # DuckDB may auto-commit, that's fine
+                pass  # nosec B110 - safe pass for transaction commit
+
+        LOGGER.info("Completed runs table normalization migration")
+    except Exception:
+        # Rollback on error if transaction was started
+        if transaction_started:
+            try:
+                conn.execute("ROLLBACK")
+            except Exception:
+                # DuckDB may not support rollback for DDL, log and continue
+                pass  # nosec B110 - safe pass for transaction rollback
+        raise
 
 
 def _validate_migration_ordering() -> None:
@@ -429,6 +912,12 @@ MIGRATIONS: list[Migration] = [
         description="Add preprocessing parameter columns to runs table",
         migrate=_migration_005_add_preprocessing_params_to_runs,
     ),
+    Migration(
+        version=6,
+        name="normalize_runs_schema",
+        description="Normalize runs table schema with separate config, metrics, and parameters tables",
+        migrate=_migration_006_normalize_runs_schema,
+    ),
 ]
 
 
@@ -471,76 +960,69 @@ class TranscriptionDatabase:
                 ALTER TABLE transcriptions ALTER COLUMN id SET DEFAULT nextval('seq_transcriptions_id');
             """)
 
-            # Runs table - Stores BATCH CONFIGURATION and AGGREGATES
-            # Removed JSON blobs, expanded config columns
+            # Runs table - Stores BATCH CONFIGURATION and AGGREGATES (normalized schema)
             self.conn.execute("""
                 CREATE TABLE IF NOT EXISTS runs (
                     id INTEGER PRIMARY KEY,
                     recorded_at TIMESTAMP NOT NULL,
                     input_folder VARCHAR,
-
-                    -- Configuration
                     preset VARCHAR NOT NULL,
                     language VARCHAR,
                     preprocess_enabled BOOLEAN NOT NULL,
-                    preprocess_profile VARCHAR,
-                    target_sample_rate INTEGER,
-                    target_channels INTEGER,
-                    loudnorm_preset VARCHAR,
-                    -- Preprocessing parameters used
-                    volume_adjustment_db DOUBLE,
-                    resampler VARCHAR,
-                    sample_format VARCHAR,
-                    loudnorm_target_i DOUBLE,
-                    loudnorm_target_tp DOUBLE,
-                    loudnorm_target_lra DOUBLE,
-                    loudnorm_backend VARCHAR,
-                    denoise_method VARCHAR,
-                    denoise_library VARCHAR,
-                    rnnoise_model VARCHAR,
-                    rnnoise_mix DOUBLE,
-                    snr_estimation_method VARCHAR,
-
-                    model_id VARCHAR,
-                    device VARCHAR,
-                    compute_type VARCHAR,
-
-                    beam_size INTEGER,
-                    patience DOUBLE,
-                    word_timestamps BOOLEAN,
-                    task VARCHAR,
-                    chunk_length INTEGER,
-                    vad_filter BOOLEAN,
-                    vad_threshold DOUBLE,
-                    vad_min_speech_duration_ms INTEGER,
-                    vad_max_speech_duration_s DOUBLE,
-                    vad_min_silence_duration_ms INTEGER,
-                    vad_speech_pad_ms INTEGER,
-                    temperature VARCHAR,
-                    temperature_increment_on_fallback DOUBLE,
-                    best_of INTEGER,
-                    compression_ratio_threshold DOUBLE,
-                    logprob_threshold DOUBLE,
-                    no_speech_threshold DOUBLE,
-                    length_penalty DOUBLE,
-                    repetition_penalty DOUBLE,
-                    no_repeat_ngram_size INTEGER,
-                    suppress_tokens VARCHAR,
-                    condition_on_previous_text BOOLEAN,
-                    initial_prompt VARCHAR,
-
-                    -- Aggregates
                     files_found INTEGER NOT NULL,
                     succeeded INTEGER NOT NULL,
                     failed INTEGER NOT NULL,
                     total_processing_time DOUBLE,
-                    total_preprocess_time DOUBLE,
-                    total_transcribe_time DOUBLE,
                     total_audio_duration DOUBLE,
                     speed_ratio DOUBLE
                 );
                 CREATE SEQUENCE IF NOT EXISTS seq_runs_id START 1;
-                ALTER TABLE runs ALTER COLUMN id SET DEFAULT nextval('seq_runs_id');
+            """)
+            # Set default only if table was just created (no foreign key dependencies yet)
+            # If normalized tables exist, skip ALTER to avoid foreign key constraint issues
+            try:
+                cursor = self.conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name IN ('run_configs', 'run_metrics')"
+                )
+                existing_tables = {row[0] for row in cursor.fetchall()}
+                if len(existing_tables) < 2:
+                    self.conn.execute("ALTER TABLE runs ALTER COLUMN id SET DEFAULT nextval('seq_runs_id')")
+            except Exception:
+                # If we can't check or alter, continue - sequence will work anyway
+                pass  # nosec B110 - safe pass for initialization
+
+            # Run configs table - Stores configuration parameters
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS run_configs (
+                    run_id INTEGER PRIMARY KEY REFERENCES runs(id),
+                    model_id VARCHAR,
+                    device VARCHAR,
+                    compute_type VARCHAR
+                );
+            """)
+
+            # Run metrics table - Stores timing and performance metrics
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS run_metrics (
+                    run_id INTEGER PRIMARY KEY REFERENCES runs(id),
+                    total_preprocess_time DOUBLE,
+                    total_transcribe_time DOUBLE,
+                    additional_metrics JSON
+                );
+            """)
+
+            # Run parameters table - Flexible parameter storage (replaces JSON configs)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS run_parameters (
+                    id INTEGER PRIMARY KEY,
+                    run_id INTEGER REFERENCES runs(id),
+                    category VARCHAR NOT NULL,
+                    name VARCHAR NOT NULL,
+                    value VARCHAR,
+                    value_type VARCHAR
+                );
+                CREATE SEQUENCE IF NOT EXISTS seq_run_parameters_id START 1;
+                ALTER TABLE run_parameters ALTER COLUMN id SET DEFAULT nextval('seq_run_parameters_id');
             """)
 
             # File Metrics table - Stores PER-FILE OUTCOMES
@@ -997,56 +1479,31 @@ class TranscriptionDatabase:
             raise DatabaseError(msg) from e
 
     def record_run(self, record: RunRecord) -> int:
-        """Persist a new run record and return its ID."""
+        """Persist a new run record and return its ID using normalized schema."""
         if not self.conn:
             msg = "Database not initialized"
             raise DatabaseError(msg)
 
         recorded_at = _format_timestamp(record.recorded_at)
 
+        # Begin transaction for atomicity
+        transaction_started = False
         try:
-            # DuckDB execute with parameters and RETURNING clause
+            self.conn.execute("BEGIN TRANSACTION")
+            transaction_started = True
+        except Exception:
+            # DuckDB may auto-commit, continue anyway
+            pass  # nosec B110 - safe pass for transaction initialization
+
+        try:
+            # Insert core run data
             cursor = self.conn.execute(
                 """
                 INSERT INTO runs (
-                    recorded_at, input_folder,
-                    preset, language,
-                    preprocess_enabled, preprocess_profile, target_sample_rate, target_channels, loudnorm_preset,
-                    volume_adjustment_db, resampler, sample_format,
-                    loudnorm_target_i, loudnorm_target_tp, loudnorm_target_lra, loudnorm_backend,
-                    denoise_method, denoise_library, rnnoise_model, rnnoise_mix, snr_estimation_method,
-                    model_id, device, compute_type,
-                    beam_size, patience, word_timestamps, task, chunk_length,
-                    vad_filter, vad_threshold, vad_min_speech_duration_ms, vad_max_speech_duration_s,
-                    vad_min_silence_duration_ms, vad_speech_pad_ms,
-                    temperature, temperature_increment_on_fallback, best_of,
-                    compression_ratio_threshold, logprob_threshold, no_speech_threshold,
-                    length_penalty, repetition_penalty, no_repeat_ngram_size,
-                    suppress_tokens, condition_on_previous_text, initial_prompt,
-                    files_found, succeeded, failed,
-                    total_processing_time,
-                    total_preprocess_time,
-                    total_transcribe_time,
-                    total_audio_duration,
-                    speed_ratio
-                ) VALUES (
-                    ?, ?,
-                    ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?, ?, ?,
-                    ?, ?, ?, ?,
-                    ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?,
-                    ?, ?, ?, ?, ?
-                )
+                    recorded_at, input_folder, preset, language, preprocess_enabled,
+                    files_found, succeeded, failed, total_processing_time,
+                    total_audio_duration, speed_ratio
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 RETURNING id;
                 """,
                 (
@@ -1055,54 +1512,10 @@ class TranscriptionDatabase:
                     record.preset,
                     record.language,
                     int(record.preprocess_enabled),
-                    record.preprocess_profile,
-                    record.target_sample_rate,
-                    record.target_channels,
-                    record.loudnorm_preset,
-                    record.volume_adjustment_db,
-                    record.resampler,
-                    record.sample_format,
-                    record.loudnorm_target_i,
-                    record.loudnorm_target_tp,
-                    record.loudnorm_target_lra,
-                    record.loudnorm_backend,
-                    record.denoise_method,
-                    record.denoise_library,
-                    record.rnnoise_model,
-                    record.rnnoise_mix,
-                    record.snr_estimation_method,
-                    record.model_id,
-                    record.device,
-                    record.compute_type,
-                    record.beam_size,
-                    record.patience,
-                    int(record.word_timestamps) if record.word_timestamps is not None else None,
-                    record.task,
-                    record.chunk_length,
-                    int(record.vad_filter) if record.vad_filter is not None else None,
-                    record.vad_threshold,
-                    record.vad_min_speech_duration_ms,
-                    record.vad_max_speech_duration_s,
-                    record.vad_min_silence_duration_ms,
-                    record.vad_speech_pad_ms,
-                    record.temperature,
-                    record.temperature_increment_on_fallback,
-                    record.best_of,
-                    record.compression_ratio_threshold,
-                    record.logprob_threshold,
-                    record.no_speech_threshold,
-                    record.length_penalty,
-                    record.repetition_penalty,
-                    record.no_repeat_ngram_size,
-                    record.suppress_tokens,
-                    int(record.condition_on_previous_text) if record.condition_on_previous_text is not None else None,
-                    record.initial_prompt,
                     record.files_found,
                     record.succeeded,
                     record.failed,
                     record.total_processing_time,
-                    record.total_preprocess_time,
-                    record.total_transcribe_time,
                     record.total_audio_duration,
                     record.speed_ratio,
                 ),
@@ -1110,20 +1523,142 @@ class TranscriptionDatabase:
 
             # Fetch the returned ID
             row = cursor.fetchone()
-            if row:
-                run_id = row[0]
-                self.conn.commit()
-                LOGGER.debug("Recorded run with ID: %s", run_id)
-                return run_id
+            if not row:
+                raise DatabaseError("Failed to retrieve inserted run ID")
+            run_id = row[0]
 
-            raise DatabaseError("Failed to retrieve inserted run ID")
+            # Prepare config data
+            preprocess_config = {
+                "profile": record.preprocess_profile,
+                "target_sample_rate": record.target_sample_rate,
+                "target_channels": record.target_channels,
+                "loudnorm_preset": record.loudnorm_preset,
+                "volume_adjustment_db": record.volume_adjustment_db,
+                "resampler": record.resampler,
+                "sample_format": record.sample_format,
+                "loudnorm_target_i": record.loudnorm_target_i,
+                "loudnorm_target_tp": record.loudnorm_target_tp,
+                "loudnorm_target_lra": record.loudnorm_target_lra,
+                "loudnorm_backend": record.loudnorm_backend,
+                "denoise_method": record.denoise_method,
+                "denoise_library": record.denoise_library,
+                "rnnoise_model": record.rnnoise_model,
+                "rnnoise_mix": record.rnnoise_mix,
+                "snr_estimation_method": record.snr_estimation_method,
+            }
+
+            transcription_config = {
+                "beam_size": record.beam_size,
+                "patience": record.patience,
+                "word_timestamps": record.word_timestamps,
+                "task": record.task,
+                "chunk_length": record.chunk_length,
+                "vad_filter": record.vad_filter,
+                "vad_threshold": record.vad_threshold,
+                "vad_min_speech_duration_ms": record.vad_min_speech_duration_ms,
+                "vad_max_speech_duration_s": record.vad_max_speech_duration_s,
+                "vad_min_silence_duration_ms": record.vad_min_silence_duration_ms,
+                "vad_speech_pad_ms": record.vad_speech_pad_ms,
+                "temperature": record.temperature,
+                "temperature_increment_on_fallback": record.temperature_increment_on_fallback,
+                "best_of": record.best_of,
+                "compression_ratio_threshold": record.compression_ratio_threshold,
+                "logprob_threshold": record.logprob_threshold,
+                "no_speech_threshold": record.no_speech_threshold,
+                "length_penalty": record.length_penalty,
+                "repetition_penalty": record.repetition_penalty,
+                "no_repeat_ngram_size": record.no_repeat_ngram_size,
+                "suppress_tokens": record.suppress_tokens,
+                "condition_on_previous_text": record.condition_on_previous_text,
+                "initial_prompt": record.initial_prompt,
+            }
+
+            # Insert config data
+            self.conn.execute(
+                """
+                INSERT INTO run_configs (
+                    run_id, model_id, device, compute_type
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    record.model_id,
+                    record.device,
+                    record.compute_type,
+                ),
+            )
+
+            # Insert metrics data
+            self.conn.execute(
+                """
+                INSERT INTO run_metrics (
+                    run_id, total_preprocess_time, total_transcribe_time, additional_metrics
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (
+                    run_id,
+                    record.total_preprocess_time,
+                    record.total_transcribe_time,
+                    json.dumps({}, sort_keys=True),  # Empty for now, extensible
+                ),
+            )
+
+            # Insert individual parameters for flexibility
+            params_to_insert: list[tuple[int, str, str, str, str]] = []
+
+            # Preprocessing parameters
+            for key, value in preprocess_config.items():
+                if value is not None:
+                    params_to_insert.append((run_id, "preprocess", key, str(value), type(value).__name__))
+
+            # Transcription parameters
+            for key, value in transcription_config.items():
+                if value is not None:
+                    params_to_insert.append((run_id, "transcription", key, str(value), type(value).__name__))
+
+            # Model parameters
+            if record.model_id:
+                params_to_insert.append((run_id, "model", "model_id", record.model_id, "str"))
+            if record.device:
+                params_to_insert.append((run_id, "model", "device", record.device, "str"))
+            if record.compute_type:
+                params_to_insert.append((run_id, "model", "compute_type", record.compute_type, "str"))
+
+            for param_data in params_to_insert:
+                self.conn.execute(
+                    """
+                    INSERT INTO run_parameters (run_id, category, name, value, value_type)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    param_data,
+                )
+
+            # Commit transaction if we started one
+            if transaction_started:
+                self.conn.commit()
+            else:
+                # DuckDB may auto-commit, but ensure commit anyway
+                try:
+                    self.conn.commit()
+                except Exception:
+                    pass  # nosec B110 - safe pass for transaction commit
+
+            LOGGER.debug("Recorded run with ID: %s", run_id)
+            return run_id
 
         except Exception as e:
+            # Rollback on error if transaction was started
+            if transaction_started:
+                try:
+                    self.conn.rollback()
+                except Exception:
+                    # DuckDB may not support rollback, continue anyway
+                    pass  # nosec B110 - safe pass for transaction rollback
             msg = f"Failed to record run: {e}"
             raise DatabaseError(msg) from e
 
     def get_run_by_id(self, run_id: int) -> dict[str, Any] | None:
-        """Get a specific run by ID.
+        """Get a specific run by ID, reconstructing the full record from normalized tables.
 
         Args:
             run_id: The run ID to retrieve
@@ -1136,14 +1671,83 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.execute("SELECT * FROM runs WHERE id = ?", [run_id])
+            # Query to get core run data and configs
+            cursor = self.conn.execute(
+                """
+                SELECT
+                    r.id, r.recorded_at, r.input_folder, r.preset, r.language, r.preprocess_enabled,
+                    r.files_found, r.succeeded, r.failed, r.total_processing_time,
+                    r.total_audio_duration, r.speed_ratio,
+                    c.model_id, c.device, c.compute_type,
+                    m.total_preprocess_time, m.total_transcribe_time
+                FROM runs r
+                LEFT JOIN run_configs c ON r.id = c.run_id
+                LEFT JOIN run_metrics m ON r.id = m.run_id
+                WHERE r.id = ?
+                """,
+                [run_id],
+            )
             row = cursor.fetchone()
 
             if not row:
                 return None
 
-            columns = [desc[0] for desc in cursor.description]
-            return dict(zip(columns, row))
+            # Get column names for safe access
+            column_names = [desc[0] for desc in cursor.description]
+            row_dict = dict(zip(column_names, row))
+
+            # Reconstruct the flattened structure expected by callers
+            result = {
+                "id": row_dict["id"],
+                "recorded_at": row_dict["recorded_at"],
+                "input_folder": row_dict["input_folder"],
+                "preset": row_dict["preset"],
+                "language": row_dict["language"],
+                "preprocess_enabled": bool(row_dict["preprocess_enabled"]),
+                "files_found": row_dict["files_found"],
+                "succeeded": row_dict["succeeded"],
+                "failed": row_dict["failed"],
+                "total_processing_time": row_dict["total_processing_time"],
+                "total_audio_duration": row_dict["total_audio_duration"],
+                "speed_ratio": row_dict["speed_ratio"],
+                "model_id": row_dict.get("model_id"),
+                "device": row_dict.get("device"),
+                "compute_type": row_dict.get("compute_type"),
+            }
+
+            # Add metrics
+            if row_dict.get("total_preprocess_time") is not None:
+                result["total_preprocess_time"] = row_dict["total_preprocess_time"]
+            if row_dict.get("total_transcribe_time") is not None:
+                result["total_transcribe_time"] = row_dict["total_transcribe_time"]
+
+            # Fetch parameters from run_parameters table
+            params_cursor = self.conn.execute(
+                """
+                SELECT category, name, value, value_type
+                FROM run_parameters
+                WHERE run_id = ?
+                ORDER BY category, name
+                """,
+                [run_id],
+            )
+            for param_row in params_cursor.fetchall():
+                category, name, value, _value_type = param_row
+                # Map category-specific names to result keys
+                if category == "preprocess" and name == "profile":
+                    result["preprocess_profile"] = value
+                elif category == "preprocess":
+                    result[name] = value
+                elif category == "transcription":
+                    result[name] = value
+                elif category == "model":
+                    # model_id, device, compute_type already in result from run_configs
+                    # Only add if not already present
+                    if name not in result or result[name] is None:
+                        result[name] = value
+
+            return result
+
         except Exception as e:
             msg = f"Failed to fetch run {run_id}: {e}"
             raise DatabaseError(msg) from e
@@ -1155,20 +1759,103 @@ class TranscriptionDatabase:
             raise DatabaseError(msg)
 
         try:
-            cursor = self.conn.cursor()
-            query = "SELECT * FROM runs ORDER BY recorded_at DESC"
+            query = """
+                SELECT
+                    r.id, r.recorded_at, r.input_folder, r.preset, r.language, r.preprocess_enabled,
+                    r.files_found, r.succeeded, r.failed, r.total_processing_time,
+                    r.total_audio_duration, r.speed_ratio,
+                    c.model_id, c.device, c.compute_type,
+                    m.total_preprocess_time, m.total_transcribe_time
+                FROM runs r
+                LEFT JOIN run_configs c ON r.id = c.run_id
+                LEFT JOIN run_metrics m ON r.id = m.run_id
+                ORDER BY r.recorded_at DESC
+            """
             params: tuple[int, ...] = ()
             if limit is not None:
                 query += " LIMIT ?"
                 params = (limit,)
-            cursor.execute(query, params)
+
+            cursor = self.conn.execute(query, params)
             rows = cursor.fetchall()
 
             if not rows:
                 return []
 
-            columns = [desc[0] for desc in cursor.description]
-            return [dict(zip(columns, row)) for row in rows]
+            # Get column names for safe access
+            column_names = [desc[0] for desc in cursor.description]
+
+            # Get all run IDs to fetch parameters in batch
+            run_ids = [row[0] for row in rows]
+
+            # Fetch all parameters for these runs
+            if run_ids:
+                # Build parameterized query safely
+                placeholders = ",".join("?" * len(run_ids))
+                params_query = (
+                    "SELECT run_id, category, name, value, value_type "
+                    "FROM run_parameters "
+                    f"WHERE run_id IN ({placeholders}) "  # nosec B608 - placeholders safe (from len), values parameterized
+                    "ORDER BY run_id, category, name"
+                )
+                params_cursor = self.conn.execute(params_query, run_ids)
+                params_by_run: dict[int, list[tuple[str, str, str, str]]] = {}
+                for param_row in params_cursor.fetchall():
+                    run_id, category, name, value, value_type = param_row
+                    if run_id not in params_by_run:
+                        params_by_run[run_id] = []
+                    params_by_run[run_id].append((category, name, value, value_type))
+            else:
+                params_by_run = {}
+
+            results: list[dict[str, Any]] = []
+            for row in rows:
+                row_dict = dict(zip(column_names, row))
+                run_id = row_dict["id"]
+
+                # Reconstruct the flattened structure expected by callers
+                result = {
+                    "id": row_dict["id"],
+                    "recorded_at": row_dict["recorded_at"],
+                    "input_folder": row_dict["input_folder"],
+                    "preset": row_dict["preset"],
+                    "language": row_dict["language"],
+                    "preprocess_enabled": bool(row_dict["preprocess_enabled"]),
+                    "files_found": row_dict["files_found"],
+                    "succeeded": row_dict["succeeded"],
+                    "failed": row_dict["failed"],
+                    "total_processing_time": row_dict["total_processing_time"],
+                    "total_audio_duration": row_dict["total_audio_duration"],
+                    "speed_ratio": row_dict["speed_ratio"],
+                    "model_id": row_dict.get("model_id"),
+                    "device": row_dict.get("device"),
+                    "compute_type": row_dict.get("compute_type"),
+                }
+
+                # Add metrics
+                if row_dict.get("total_preprocess_time") is not None:
+                    result["total_preprocess_time"] = row_dict["total_preprocess_time"]
+                if row_dict.get("total_transcribe_time") is not None:
+                    result["total_transcribe_time"] = row_dict["total_transcribe_time"]
+
+                # Add parameters from run_parameters table
+                if run_id in params_by_run:
+                    for category, name, value, value_type in params_by_run[run_id]:
+                        if category == "preprocess" and name == "profile":
+                            result["preprocess_profile"] = value
+                        elif category == "preprocess":
+                            result[name] = value
+                        elif category == "transcription":
+                            result[name] = value
+                        elif category == "model":
+                            # Only add if not already present from run_configs
+                            if name not in result or result[name] is None:
+                                result[name] = value
+
+                results.append(result)
+
+            return results
+
         except Exception as e:
             msg = f"Failed to fetch run history: {e}"
             raise DatabaseError(msg) from e
