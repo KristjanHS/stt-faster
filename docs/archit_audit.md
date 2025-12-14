@@ -45,7 +45,7 @@ I want to keep the pipeline working after each step!
    * **Evidence:** Tests explicitly simulate missing columns and rely on migrations to patch old DBs.
    * **Fix direction:** Add explicit schema versioning + ordered migrations (even a simple `schema_version` table + migration list is enough).
 
-- [ ] **8. Metrics persistence is fragile (wide tables + huge INSERT surface area)**
+- [x] **8. Metrics persistence is fragile (wide tables + huge INSERT surface area)**
 
    * **Impact:** Every new metric/parameter forces schema changes + updates to long SQL insert lists → easy to miss fields.
    * **Evidence:** `record_run()` inserts a very wide set of columns in one statement.
