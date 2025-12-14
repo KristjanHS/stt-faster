@@ -9,7 +9,9 @@ import shutil
 import subprocess  # nosec B404
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
+
+import typer
 
 from backend.cli.ui import (
     console,
@@ -26,6 +28,9 @@ from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
+
+# Create Typer app for unified CLI
+app = typer.Typer(name="transcribe", help="Transcription processing commands")
 
 
 def _get_git_commit_hash() -> str | None:
@@ -419,3 +424,34 @@ def cmd_process(args: argparse.Namespace) -> int:
     else:
         # Multi-variant mode
         return _process_multi_variant(args, input_folder, variants)
+
+
+@app.command()
+def process(
+    input_folder: Annotated[str, typer.Argument(help="Path to input folder containing audio files")],
+    preset: Annotated[str, typer.Option("--preset", "-p", help="Model preset name")] = "et-large",
+    language: Annotated[str | None, typer.Option("--language", "-l", help="Language code")] = None,
+    output_format: Annotated[
+        str, typer.Option("--output-format", "-f", help="Output format: txt, json, or both")
+    ] = "both",
+    variant: Annotated[int | None, typer.Option("--variant", "-v", help="Variant number")] = None,
+    variants: Annotated[str | None, typer.Option("--variants", help="Comma-separated list of variant numbers")] = None,
+    db_path: Annotated[str | None, typer.Option("--db-path", help="Path to database file")] = None,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose output")] = False,
+) -> None:
+    """Process audio files in the specified folder."""
+
+    # Create argparse-like namespace for backward compatibility
+    args = argparse.Namespace()
+    args.input_folder = input_folder
+    args.preset = preset
+    args.language = language
+    args.output_format = output_format
+    args.variant = variant
+    args.variants = variants
+    args.db_path = db_path
+    args.verbose = verbose
+
+    exit_code = cmd_process(args)
+    if exit_code != 0:
+        raise typer.Exit(exit_code)
