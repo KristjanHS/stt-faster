@@ -71,7 +71,7 @@ EXCLUDES=(
     "--exclude=*.log"
     "--exclude=${ORIGINAL_MODULE}.egg-info"
     "--exclude=semgrep_local.sarif"
-    "--exclude=transcribe_state.db"
+    "--exclude=transcribe_state.duckdb"
 )
 
 rsync -a --info=name0 "${EXCLUDES[@]}" "${SOURCE_ROOT}/" "${ABS_TARGET}/"

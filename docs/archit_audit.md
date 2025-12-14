@@ -51,7 +51,7 @@ I want to keep the pipeline working after each step!
    * **Evidence:** `record_run()` inserts a very wide set of columns in one statement.
    * **Fix direction:** Keep a stable core schema + store "extras" as JSON (or separate normalized tables) to stop constant churn.
 
-- [ ] **9. State DB naming/extension inconsistency and doc drift**
+- [x] **9. State DB naming/extension inconsistency and doc drift**
 
    * **Impact:** Confusing ops/debugging; accidental "new DB created" vs "existing DB migrated"; harder cross-platform support.
    * **Evidence:** Refactor log mentions `transcribe_state.db`, but integration uses `transcribe_state.duckdb`; tests also create temp files with `.db` suffix while using DuckDB.

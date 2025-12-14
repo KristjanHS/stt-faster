@@ -46,7 +46,7 @@ Batch audio transcription with Estonian (default) and English models. [Technical
 
 **Output**: Files moved to `processed/` subfolder with JSON transcripts. Failed files in `failed/` subfolder.
 
-**Troubleshooting**: For WSL paths use `/mnt/c/Users/...`. Delete `transcribe_state.db` to reset tracking.
+**Troubleshooting**: For WSL paths use `/mnt/c/Users/...`. Delete `transcribe_state.duckdb` to reset tracking.
 
 ### Docker Usage (No Local Installation)
 

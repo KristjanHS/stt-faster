@@ -33,4 +33,4 @@ def e2e_test_db(tmp_path: Path) -> Path:
     Returns:
         Path to temporary database file
     """
-    return tmp_path / "test_transcriptions.db"
+    return tmp_path / "test_transcriptions.duckdb"
