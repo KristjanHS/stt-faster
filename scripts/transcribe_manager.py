@@ -18,6 +18,7 @@ Usage:
 import argparse
 import logging
 import sys
+from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
 
 from backend.config import setup_logging
@@ -51,13 +52,15 @@ def _configure_logging(verbose: bool) -> None:
         logging.getLogger("backend.variants.executor").setLevel(logging.INFO)
         logging.getLogger("backend.variants.preprocess_steps").setLevel(logging.INFO)
 
-    # Configure root logger with CLI-specific format
-    logging.basicConfig(
-        level=level,
-        format="[%(asctime)s] %(levelname)s [%(name)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-        force=True,  # Override any existing configuration
-    )
+    # Update root logger level without resetting handlers
+    root = logging.getLogger()
+    root.setLevel(level)
+
+    # Ensure console handler uses message-only format (file handler keeps full format)
+    for handler in root.handlers:
+        if not isinstance(handler, TimedRotatingFileHandler):
+            # This is a console handler - ensure it uses message-only format
+            handler.setFormatter(logging.Formatter("%(message)s"))
 
 
 def cmd_status(args: argparse.Namespace) -> int:
