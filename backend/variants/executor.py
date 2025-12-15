@@ -346,7 +346,7 @@ def transcribe_with_baseline_params(
         LOGGER.debug("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     model = pick_model(preset)
-    LOGGER.info("✅ Model loaded, ready for transcription")
+    LOGGER.info("Model loaded, ready for transcription")
 
     # Auto-detect language based on preset if not explicitly provided
     applied_language = language
@@ -355,13 +355,13 @@ def transcribe_with_baseline_params(
 
     # Log language configuration
     if applied_language:
-        LOGGER.info("🌐 Language: %s (forced)", applied_language)
+        LOGGER.info("Language: %s (forced)", applied_language)
     else:
-        LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
+        LOGGER.info("Language: auto-detect")
 
     # For baseline, use to_kwargs() to get only explicitly set fields
     # Everything else uses faster-whisper library defaults
-    LOGGER.info("🔄 Starting transcription with baseline config (library defaults)...")
+    LOGGER.info("Starting transcription with baseline config")
     transcribe_start = time.time()
 
     # Get only explicitly set parameters from config
@@ -388,7 +388,7 @@ def transcribe_with_baseline_params(
     if "logprob_threshold" in transcribe_kwargs and "log_prob_threshold" not in transcribe_kwargs:
         transcribe_kwargs["log_prob_threshold"] = transcribe_kwargs.pop("logprob_threshold")
 
-    LOGGER.info("Calling model.transcribe() with baseline kwargs: %s", transcribe_kwargs)
+    LOGGER.debug("Calling model.transcribe() with baseline kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),
         **transcribe_kwargs,
@@ -663,7 +663,7 @@ def transcribe_with_minimal_params(
         LOGGER.debug("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     model = pick_model(preset)
-    LOGGER.info("✅ Model loaded, ready for transcription")
+    LOGGER.info("Model loaded, ready for transcription")
 
     # Auto-detect language based on preset if not explicitly provided
     applied_language = language
@@ -672,15 +672,15 @@ def transcribe_with_minimal_params(
 
     # Log language configuration
     if applied_language:
-        LOGGER.info("🌐 Language: %s (forced)", applied_language)
+        LOGGER.info("Language: %s (forced)", applied_language)
     else:
-        LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
+        LOGGER.info("Language: auto-detect")
 
     # Call model.transcribe with only essential parameters
     # Only include parameters from config that are in the allowed set
     # Allowed: beam_size, chunk_length, no_speech_threshold, condition_on_previous_text,
     #          patience, vad_filter, vad_parameters (with vad_threshold merged in)
-    LOGGER.info("🔄 Starting transcription...")
+    LOGGER.info("Starting transcription")
     transcribe_start = time.time()
 
     # Use to_kwargs() to get only explicitly set parameters from config
@@ -750,7 +750,7 @@ def transcribe_with_minimal_params(
     if "logprob_threshold" in transcribe_kwargs and "log_prob_threshold" not in transcribe_kwargs:
         transcribe_kwargs["log_prob_threshold"] = transcribe_kwargs.pop("logprob_threshold")
 
-    LOGGER.info("Calling model.transcribe() with minimal kwargs: %s", transcribe_kwargs)
+    LOGGER.debug("Calling model.transcribe() with minimal kwargs: %s", transcribe_kwargs)
     segments, info = model.transcribe(
         str(preprocess_result.output_path),
         **transcribe_kwargs,
