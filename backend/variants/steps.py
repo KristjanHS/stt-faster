@@ -134,6 +134,9 @@ class FFmpegExecutor:
             )
             ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
 
+        except ffmpeg.Error as exc:  # type: ignore[misc]
+            stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+            raise StepExecutionError(step_name, f"ffmpeg resample failed: {stderr}") from exc
         except Exception as exc:
             raise StepExecutionError(step_name, f"ffmpeg resample error: {exc}") from exc
 
@@ -176,6 +179,9 @@ class FFmpegExecutor:
             )
             ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
 
+        except ffmpeg.Error as exc:  # type: ignore[misc]
+            stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+            raise StepExecutionError(step_name, f"ffmpeg loudnorm failed: {stderr}") from exc
         except Exception as exc:
             raise StepExecutionError(step_name, f"ffmpeg loudnorm error: {exc}") from exc
 
@@ -208,6 +214,9 @@ class FFmpegExecutor:
             )
             ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
 
+        except ffmpeg.Error as exc:  # type: ignore[misc]
+            stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+            raise StepExecutionError(step_name, f"ffmpeg volume limiter failed: {stderr}") from exc
         except Exception as exc:
             raise StepExecutionError(step_name, f"ffmpeg volume limiter error: {exc}") from exc
 
@@ -282,6 +291,9 @@ class FFmpegExecutor:
             )
             ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
 
+        except ffmpeg.Error as exc:  # type: ignore[misc]
+            stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+            raise StepExecutionError(step_name, f"ffmpeg peak normalize failed: {stderr}") from exc
         except Exception as exc:
             raise StepExecutionError(step_name, f"ffmpeg peak normalize error: {exc}") from exc
 
@@ -373,7 +385,7 @@ class SoxExecutor:
             import ffmpeg  # type: ignore[import-untyped]
 
             stream = ffmpeg.input(str(output_path))  # type: ignore[reportUnknownMemberType]
-            temp_output = output_path.with_suffix(output_path.suffix + ".tmp")
+            temp_output = output_path.with_name(output_path.stem + ".tmp" + output_path.suffix)
             stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
                 stream,  # type: ignore[reportUnknownArgumentType]
                 str(temp_output),
@@ -387,6 +399,9 @@ class SoxExecutor:
 
         except subprocess.CalledProcessError as exc:
             raise StepExecutionError(step_name, f"sox failed: {exc.stderr}") from exc
+        except ffmpeg.Error as exc:  # type: ignore[misc]
+            stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+            raise StepExecutionError(step_name, f"ffmpeg failed: {stderr}") from exc
         except Exception as exc:
             raise StepExecutionError(step_name, f"Error: {exc}") from exc
 

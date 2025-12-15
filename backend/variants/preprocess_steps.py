@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import shutil
 import time
 from pathlib import Path
@@ -114,6 +115,9 @@ def loudnorm_only(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("loudnorm_only", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("loudnorm_only", f"ffmpeg error: {exc}") from exc
 
@@ -153,6 +157,9 @@ def volume_with_limiter(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("volume_with_limiter", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("volume_with_limiter", f"ffmpeg error: {exc}") from exc
 
@@ -169,28 +176,65 @@ def peak_normalize_2pass(
     max_gain_db: float,
 ) -> StepMetrics:
     """Apply two-pass peak normalization."""
+
     import ffmpeg  # type: ignore[import-untyped]
 
     start = time.time()
     try:
-        # Use loudnorm in two-pass mode for peak normalization
+        # Pass 1: volumedetect
         stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
-            "loudnorm",
-            i=f"{target_db:.1f}",
-            tp=f"{target_db:.1f}",
-            lra=max_gain_db,
-            dual_mono="true",
+            "null",
+            af="volumedetect",
+            f="null",
         )
+        _, stderr = ffmpeg.run(  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            overwrite_output=True,
+            quiet=True,
+            capture_stdout=True,
+            capture_stderr=True,
+        )
+
+        # Parse max_volume from stderr
+        stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr  # type: ignore[reportUnnecessaryIsInstance]
+        match = re.search(r"max_volume:\s*([-\d.]+)\s*dB", stderr_str)
+        if not match:
+            raise StepExecutionError("peak_normalize_2pass", "Could not find max_volume in volumedetect output")
+
+        max_volume_db = float(match.group(1))
+
+        # Compute gain: clamp((-target_db - max_volume_db), 0.0, max_gain_db)
+        gain_db = max(0.0, min(-target_db - max_volume_db, max_gain_db))
+
+        LOGGER.info(
+            "Peak normalize: max_volume=%.2f dBFS, target=%.2f dBFS, applying gain=%.2f dB",
+            max_volume_db,
+            target_db,
+            gain_db,
+        )
+
+        # Pass 2: Apply gain + limiter
+        if gain_db > 0.0:
+            filter_graph = f"volume={gain_db}dB,alimiter=limit=0.98"
+        else:
+            # No gain needed, just apply limiter
+            filter_graph = "alimiter=limit=0.98"
+
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
         stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
             stream,  # type: ignore[reportUnknownArgumentType]
             str(output_path),
             ac=target_channels,
+            af=filter_graph,
             ar=target_sample_rate,
             acodec="pcm_s16le",
         )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("peak_normalize_2pass", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("peak_normalize_2pass", f"ffmpeg error: {exc}") from exc
 
@@ -234,6 +278,9 @@ def loudnorm_with_highpass(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("loudnorm_with_highpass", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("loudnorm_with_highpass", f"ffmpeg error: {exc}") from exc
 
@@ -265,6 +312,9 @@ def dynaudnorm_only(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("dynaudnorm_only", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("dynaudnorm_only", f"ffmpeg error: {exc}") from exc
 
@@ -307,6 +357,9 @@ def highlow_aform_loudnorm(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("highlow_aform_loudnorm", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("highlow_aform_loudnorm", f"ffmpeg error: {exc}") from exc
 
@@ -350,6 +403,9 @@ def highlow_nosampl_loudnorm(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("highlow_nosampl_loudnorm", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("highlow_nosampl_loudnorm", f"ffmpeg error: {exc}") from exc
 
@@ -392,6 +448,9 @@ def aresampl_loudnorm_fixed(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("aresampl_loudnorm_fixed", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("aresampl_loudnorm_fixed", f"ffmpeg error: {exc}") from exc
 
@@ -479,6 +538,9 @@ def loudnorm_2pass_linear(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg error: {exc}") from exc
 
@@ -510,6 +572,9 @@ def limiter_only(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("limiter_only", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("limiter_only", f"ffmpeg error: {exc}") from exc
 
@@ -544,6 +609,9 @@ def sox_peak_normalize(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("sox_peak_normalize", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("sox_peak_normalize", f"ffmpeg error: {exc}") from exc
 
@@ -586,6 +654,9 @@ def compressor_with_limiter(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("compressor_with_limiter", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("compressor_with_limiter", f"ffmpeg error: {exc}") from exc
 
@@ -620,6 +691,9 @@ def dynaudnorm_conservative(
             acodec="pcm_s16le",
         )
         ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError("dynaudnorm_conservative", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
         raise StepExecutionError("dynaudnorm_conservative", f"ffmpeg error: {exc}") from exc
 
