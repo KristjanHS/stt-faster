@@ -109,7 +109,6 @@ echo ========================================
 echo.
 echo Model: TalTech Estonian Whisper (et-large)
 echo Language: Estonian
-echo Variants: !VARIANTS! (from get_builtin_variants)
 echo Processing audio file: !AUDIO_FILE!
 echo WSL path: !WSL_INPUT_DIR!
 echo.
