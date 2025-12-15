@@ -65,23 +65,72 @@ def _get_variant_overrides(variant: Variant) -> dict[str, Any]:
         variant: Variant instance
 
     Returns:
-        Dictionary of overridden fields (only fields that differ from defaults)
+        Dictionary of all explicitly set fields in the variant config
     """
-    from backend.variants.transcription_presets import create_minimal_config  # noqa: PLC0415
-
-    # Get baseline minimal config (defaults)
-    baseline = create_minimal_config()
     config = variant.transcription_config
 
+    # Use to_kwargs() to get all explicitly set fields (public API)
+    # This returns only fields that were explicitly set via config.set()
+    if hasattr(config, "to_kwargs"):
+        result: dict[str, Any] = config.to_kwargs()  # type: ignore[reportUnknownVariableType]
+        return result
+
+    # Fallback: check common fields if to_kwargs() is not available
+    # This should rarely happen, but provides backward compatibility
     overrides: dict[str, Any] = {}
-    # Check which fields are overridden
-    for field in ["beam_size", "chunk_length", "no_speech_threshold", "condition_on_previous_text"]:
-        baseline_val = getattr(baseline, field, None)
-        config_val = getattr(config, field, None)
-        if config_val is not None and config_val != baseline_val:
-            overrides[field] = config_val
+    common_fields = [
+        "beam_size",
+        "chunk_length",
+        "no_speech_threshold",
+        "logprob_threshold",
+        "condition_on_previous_text",
+        "vad_filter",
+        "word_timestamps",
+        "task",
+        "patience",
+        "vad_parameters",
+    ]
+    for field in common_fields:
+        value = getattr(config, field, None)
+        if value is not None:
+            overrides[field] = value
 
     return overrides
+
+
+def _format_overrides_concise(overrides: dict[str, Any]) -> str:
+    """Format overrides dictionary into a concise string.
+
+    Args:
+        overrides: Dictionary of override values
+
+    Returns:
+        Concise string representation, e.g., "vad_filter=false, chunk_length=20, beam_size=5"
+    """
+    if not overrides:
+        return "none"
+
+    # Format each key-value pair concisely
+    parts: list[str] = []
+    for key, value in sorted(overrides.items()):
+        # Handle special formatting for common types
+        if isinstance(value, bool):
+            parts.append(f"{key}={str(value).lower()}")
+        elif isinstance(value, dict):
+            # For dicts like vad_parameters, show a compact representation
+            dict_items: list[tuple[str, Any]] = list(value.items())  # type: ignore[reportUnknownArgumentType]
+            dict_str = ",".join(f"{k}={v}" for k, v in sorted(dict_items))
+            parts.append(f"{key}={{{dict_str}}}")
+        elif isinstance(value, (int, float)):
+            parts.append(f"{key}={value}")
+        elif isinstance(value, str):
+            # For strings, show without quotes for common values
+            parts.append(f"{key}={value}")
+        else:
+            # For other types, use string representation
+            parts.append(f"{key}={value}")
+
+    return ", ".join(parts)
 
 
 def _configure_logging(verbose: bool) -> None:
@@ -267,10 +316,8 @@ def _process_multi_variant(
 
     for variant in variants:
         overrides = _get_variant_overrides(variant)
-        console.print(
-            f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] "
-            f"(overrides: {overrides if overrides else 'none'})"
-        )
+        overrides_str = _format_overrides_concise(overrides)
+        console.print(f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] (overrides: {overrides_str})")
 
         try:
             # Create services using factory
