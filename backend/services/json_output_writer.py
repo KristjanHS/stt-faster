@@ -15,6 +15,7 @@ class JsonOutputWriter:
 
         if format in ("txt", "both"):
             txt_path = base_path.with_suffix(".txt")
+            txt_path.parent.mkdir(parents=True, exist_ok=True)
             segments: list[dict[str, Any]] = payload.get("segments", [])
             with open(txt_path, "w", encoding="utf-8") as f:
                 for segment in segments:
@@ -27,6 +28,7 @@ class JsonOutputWriter:
 
         if format in ("json", "both"):
             json_path = base_path.with_suffix(".json")
+            json_path.parent.mkdir(parents=True, exist_ok=True)
             with open(json_path, "w", encoding="utf-8") as f:
                 json.dump(payload, f, ensure_ascii=False, indent=2)
             created_files.append(json_path)
