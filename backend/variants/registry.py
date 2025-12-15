@@ -577,15 +577,13 @@ def get_all_variants() -> list[Variant]:
 def get_builtin_variants() -> list[Variant]:
     """Return list of active built-in variants.
 
-    All other variants are disabled but remain defined and can be accessed
+    All variants are now active. Variants can still be accessed individually
     via get_variant_by_number() or get_variant_by_name().
     All variants now use declarative preprocessing steps.
     """
     all_variants = _get_all_variants()
-    # Only return active variants for batch jobs:
-    # Variants 2, 5: baseline_no_vad, diagnostic/config tuning
-    # Variants 22-32: Preprocessing variants (level/volume tweaks)
-    active_variant_numbers = {2, 5, 28, 29, 30}
+    # All variants (1-33) are active
+    active_variant_numbers = set(range(1, 34))  # 1 to 33 inclusive
     return [v for v in all_variants if v.number in active_variant_numbers]
 
 
