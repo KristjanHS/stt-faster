@@ -438,10 +438,10 @@ def transcribe(
     model_picker: Callable[[str], Any] | None = None,
     metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
 ) -> Dict[str, Any]:
-    LOGGER.info("🎤 Starting transcription of: %s", os.path.basename(path))
+    LOGGER.info("Starting transcription of: %s", os.path.basename(path))
     preset_config = get_preset(preset)
     LOGGER.info(
-        "🧠 Using preset %s (%s compute, device %s)",
+        "Using preset %s (%s compute, device %s)",
         preset,
         preset_config.compute_type,
         preset_config.device,
@@ -449,12 +449,12 @@ def transcribe(
 
     preprocess_config = preprocess_config_provider()
     transcription_config = transcription_config_provider()
-    LOGGER.info("⚙️ Beam size: %d", transcription_config.beam_size)
+    LOGGER.info("Beam size: %d", transcription_config.beam_size)
     overall_start = time.time()
     preprocess_result = preprocess_runner(path, preprocess_config)
     duration_hint = preprocess_result.input_info.duration if preprocess_result.input_info else None
     if duration_hint:
-        LOGGER.info("🎧 Input duration: %.1f minutes (from metadata)", duration_hint / 60)
+        LOGGER.info("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     try:
         model = (model_picker or pick_model)(preset)
@@ -469,11 +469,11 @@ def transcribe(
 
         # Log language configuration
         if applied_language:
-            LOGGER.info("🌐 Language: %s (forced)", applied_language)
+            LOGGER.info("Language: %s (forced)", applied_language)
         else:
-            LOGGER.info("🌐 Language: auto-detect (may be unreliable)")
+            LOGGER.info("Language: auto-detect")
 
-        LOGGER.info("🔄 Transcribing audio...")
+        LOGGER.info("Transcribing audio")
         transcribe_start = time.time()
         # Merge vad_threshold into vad_parameters as 'threshold'
         vad_params = dict(transcription_config.vad_parameters)
@@ -521,7 +521,7 @@ def transcribe(
 
         total_audio_duration = getattr(info, "duration", None) or duration_hint
         if total_audio_duration and not duration_hint:
-            LOGGER.info("🎧 Input duration: %.1f minutes", total_audio_duration / 60)
+            LOGGER.info("Input duration: %.1f minutes", total_audio_duration / 60)
 
         segment_payloads: list[Dict[str, Any]] = []
         audio_processed = 0.0

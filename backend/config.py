@@ -30,20 +30,24 @@ def _parse_level(value: str | None, default: int = logging.INFO) -> int:
 
 
 def _build_console_handler(level: int, *, isatty: Callable[[], bool] | None = None) -> logging.Handler:
-    """Return a console handler. Use Rich in TTY, plain stream otherwise."""
+    """Return a console handler. Use Rich in TTY, plain stream otherwise.
+
+    Console handler always uses message-only format (no timestamp, level, or module name).
+    """
     is_tty = isatty or sys.stderr.isatty
     if is_tty():
         handler = RichHandler(
             show_time=False,
             show_path=False,
             rich_tracebacks=True,
-            show_level=True,
+            show_level=False,  # Don't show level in console
             log_time_format="[%X]",
         )
         handler.setFormatter(logging.Formatter("%(message)s"))
     else:
         handler = logging.StreamHandler(stream=sys.stderr)
-        handler.setFormatter(logging.Formatter(LOG_FORMAT))
+        # Console always uses message-only format
+        handler.setFormatter(logging.Formatter("%(message)s"))
     handler.setLevel(level)
     return handler
 
