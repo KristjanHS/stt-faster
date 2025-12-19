@@ -39,6 +39,13 @@ def _get_all_variants() -> list[Variant]:
       - 27-29: P4-P6 - Peak normalize 2-pass (-6dBFS, -3dBFS, -3dBFS max +3dB)
       - 30: P7 - SoX peak normalize (-3dBFS)
       - 31-32: P8-P9 - Compressor and dynaudnorm (conservative)
+    - Variant 33: Variant 2 with word timestamps
+    - Variants 34-38: Variant 1 derivatives (best-bet combinations)
+      - 34: Variant 1 + word timestamps
+      - 35: Variant 1 + Beam 7
+      - 36: Variant 1 + P2 (+1.5 dB + limiter)
+      - 37: Variant 1 + P8 (compressor+limiter)
+      - 38: Beam 7 + Guard-lite (softened)
     """
     return [
         # Group 1: No preprocessing, baseline configs (simplest) - Variants 1-2
@@ -559,6 +566,83 @@ def _get_all_variants() -> list[Variant]:
                 )[2]
             )(),
         ),
+        # Group 6: Variant 1 derivatives (best-bet combinations) - Variants 34-38
+        # Variant 34: Variant 1 + word timestamps
+        # Keep the winning baseline behavior, but flip on word timestamps
+        Variant(
+            name="baseline_word_timestamps",
+            number=34,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("word_timestamps", True),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 35: Variant 1 + Beam 7
+        # Apply beam=7 to the baseline (with VAD still on) to see if it beats Variant 1
+        Variant(
+            name="baseline_beam7",
+            number=35,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 36: Variant 1 + P2 (+1.5 dB + limiter)
+        # Combine P2 loudness tweak with baseline decoder to test preprocessing impact
+        Variant(
+            name="baseline_p2_volume_1_5db",
+            number=36,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=create_baseline_config(),
+        ),
+        # Variant 37: Variant 1 + P8 (compressor+limiter)
+        # Combine P8 compressor with baseline transcription to isolate preprocessing impact
+        Variant(
+            name="baseline_p8_compressor",
+            number=37,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="compressor_limiter",
+                    enabled=True,
+                    step_type="compressor_limiter",
+                    config=None,
+                ),
+            ],
+            transcription_config=create_baseline_config(),
+        ),
+        # Variant 38: Beam 7 + Guard-lite (softened)
+        # More realistic combo: beam=7 + patience≈1.2 + chunk≈25 + no_speech_threshold ~0.8–0.9
+        # + logprob_threshold ~-0.6 to -0.45 (still guardy, less "mute button")
+        Variant(
+            name="beam7_guardlite_softened",
+            number=38,
+            preprocess_steps=[],
+            transcription_config=create_minimal_config(
+                vad_filter=False,
+                task="transcribe",
+                word_timestamps=True,
+                beam_size=7,
+                patience=1.2,
+                chunk_length=25,
+                no_speech_threshold=0.85,  # Middle of 0.8-0.9 range
+                logprob_threshold=-0.525,  # Middle of -0.6 to -0.45 range
+            ),
+        ),
     ]
 
 
@@ -582,8 +666,8 @@ def get_builtin_variants() -> list[Variant]:
     All variants now use declarative preprocessing steps.
     """
     all_variants = _get_all_variants()
-    # All variants (1-33) are active
-    active_variant_numbers = set(range(1, 34))  # 1 to 33 inclusive
+    # All variants (1-38) are active
+    active_variant_numbers = set(range(34, 39))  # 34 to 38 inclusive
     return [v for v in all_variants if v.number in active_variant_numbers]
 
 
@@ -610,7 +694,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-33)
+        number: Variant number (1-38)
 
     Returns:
         Variant instance or None if not found
