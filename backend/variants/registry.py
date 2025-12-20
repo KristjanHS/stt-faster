@@ -46,6 +46,15 @@ def _get_all_variants() -> list[Variant]:
       - 36: Variant 1 + P2 (+1.5 dB + limiter)
       - 37: Variant 1 + P8 (compressor+limiter)
       - 38: Beam 7 + Guard-lite (softened)
+    - Variants 39-46: Variant 36 derivatives (P2 preprocessing with parameter tweaks)
+      - 39: Variant 36 + beam_size=6
+      - 40: Variant 36 + beam_size=7
+      - 41: Variant 36 + volume_db=2.0
+      - 42: Variant 36 + patience=1.2
+      - 43: Variant 36 + beam_size=6 + patience=1.2
+      - 44: Variant 36 + beam_size=7 + patience=1.2
+      - 45: Variant 36 + chunk_length=25
+      - 46: Variant 36 + word_timestamps=True
     """
     return [
         # Group 1: No preprocessing, baseline configs (simplest) - Variants 1-2
@@ -643,6 +652,163 @@ def _get_all_variants() -> list[Variant]:
                 logprob_threshold=-0.525,  # Middle of -0.6 to -0.45 range
             ),
         ),
+        # Group 7: Variant 36 derivatives (P2 preprocessing with parameter tweaks) - Variants 39-46
+        # Variant 39: Variant 36 + beam_size=6
+        Variant(
+            name="p2_volume_1_5db_beam6",
+            number=39,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 6),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 40: Variant 36 + beam_size=7
+        Variant(
+            name="p2_volume_1_5db_beam7",
+            number=40,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 41: Variant 36 + volume_db=2.0
+        Variant(
+            name="p2_volume_2_0db",
+            number=41,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_2_0db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=2.0),
+                ),
+            ],
+            transcription_config=create_baseline_config(),
+        ),
+        # Variant 42: Variant 36 + patience=1.2
+        Variant(
+            name="p2_volume_1_5db_pat12",
+            number=42,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("patience", 1.2),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 43: Variant 36 + beam_size=6 + patience=1.2
+        Variant(
+            name="p2_volume_1_5db_beam6_pat12",
+            number=43,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 6),
+                    config.set("patience", 1.2),
+                    config,
+                )[3]
+            )(),
+        ),
+        # Variant 44: Variant 36 + beam_size=7 + patience=1.2
+        Variant(
+            name="p2_volume_1_5db_beam7_pat12",
+            number=44,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config,
+                )[3]
+            )(),
+        ),
+        # Variant 45: Variant 36 + chunk_length=25
+        Variant(
+            name="p2_volume_1_5db_chunk25",
+            number=45,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("chunk_length", 25),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 46: Variant 36 + word_timestamps=True
+        Variant(
+            name="p2_volume_1_5db_word_timestamps",
+            number=46,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("word_timestamps", True),
+                    config,
+                )[2]
+            )(),
+        ),
     ]
 
 
@@ -658,6 +824,10 @@ def get_all_variants() -> list[Variant]:
     return _get_all_variants()
 
 
+# Baseline variant number used for comparison and diff calculations in reports
+baseline_variant_num = 36
+
+
 def get_builtin_variants() -> list[Variant]:
     """Return list of active built-in variants.
 
@@ -666,8 +836,8 @@ def get_builtin_variants() -> list[Variant]:
     All variants now use declarative preprocessing steps.
     """
     all_variants = _get_all_variants()
-    # All variants (1-38) are active
-    active_variant_numbers = set(range(34, 39))  # 34 to 38 inclusive
+    # Active variants: 36, and 39-46
+    active_variant_numbers = {36} | set(range(39, 47))
     return [v for v in all_variants if v.number in active_variant_numbers]
 
 
@@ -694,7 +864,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-38)
+        number: Variant number (1-46)
 
     Returns:
         Variant instance or None if not found
