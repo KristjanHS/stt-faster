@@ -108,24 +108,23 @@ def verify_variant(variant_number: int) -> bool:
         print()  # noqa: T201
 
         # Derive expected parameters from the variant's transcription config
-        # Base parameters that are always included
-        expected_base = {
-            "beam_size": getattr(transcription_config, "beam_size", 5),
-            "word_timestamps": getattr(transcription_config, "word_timestamps", False),
-            "task": getattr(transcription_config, "task", "transcribe"),
-            "language": "et",  # From the test call
-        }
-
-        # Parameters that can be overridden (from transcribe_with_minimal_params logic)
-        allowed_override_params = {"beam_size", "chunk_length", "no_speech_threshold", "condition_on_previous_text"}
-
-        # Build expected kwargs from config
-        expected_kwargs = expected_base.copy()
-        for param in allowed_override_params:
-            if hasattr(transcription_config, param):
-                value = getattr(transcription_config, param)
-                if value is not None:
-                    expected_kwargs[param] = value
+        # Use to_kwargs() to get only explicitly set parameters (same as executor does)
+        expected_kwargs_from_config = transcription_config.to_kwargs()
+        
+        # Language is always added by the executor if provided
+        expected_kwargs = expected_kwargs_from_config.copy()
+        expected_kwargs["language"] = "et"  # From the test call
+        
+        # Handle logprob_threshold -> log_prob_threshold conversion
+        # The executor converts logprob_threshold to log_prob_threshold when calling model.transcribe()
+        if "logprob_threshold" in expected_kwargs:
+            # Check for log_prob_threshold in actual_kwargs instead
+            expected_value = expected_kwargs.pop("logprob_threshold")
+            if "log_prob_threshold" in actual_kwargs:
+                expected_kwargs["log_prob_threshold"] = expected_value
+            else:
+                # Keep it as logprob_threshold for error reporting
+                expected_kwargs["logprob_threshold"] = expected_value
 
         print("  VERIFICATION RESULT:")  # noqa: T201
         print()  # noqa: T201
@@ -133,19 +132,48 @@ def verify_variant(variant_number: int) -> bool:
         all_correct = True
         # Verify all expected parameters are present and correct
         for param, expected_value in expected_kwargs.items():
-            if param not in actual_kwargs:
+            # Handle logprob_threshold -> log_prob_threshold conversion
+            actual_param = param
+            if param == "logprob_threshold" and "log_prob_threshold" in actual_kwargs:
+                actual_param = "log_prob_threshold"
+            
+            if actual_param not in actual_kwargs:
                 print(f"    ❌ {param}: MISSING (expected {expected_value})")  # noqa: T201
                 all_correct = False
-            elif actual_kwargs[param] != expected_value:
-                actual_value = actual_kwargs[param]
+            elif actual_kwargs[actual_param] != expected_value:
+                actual_value = actual_kwargs[actual_param]
                 print(f"    ❌ {param}: {actual_value} (expected {expected_value})")  # noqa: T201
                 all_correct = False
             else:
-                print(f"    ✅ {param}: {actual_kwargs[param]} (matches config)")  # noqa: T201
+                print(f"    ✅ {param}: {actual_kwargs[actual_param]} (matches config)")  # noqa: T201
 
-        # Check for unexpected parameters (only allow expected ones)
-        allowed_params = {"beam_size", "word_timestamps", "task", "language"}
-        allowed_params.update(allowed_override_params)
+        # Check for unexpected parameters
+        # Allowed params are those that can be passed by transcribe_with_minimal_params
+        # (from executor.py ALLOWED_MINIMAL_KEYS plus language)
+        # Note: logprob_threshold is converted to log_prob_threshold by the executor
+        allowed_params = {
+            "beam_size",
+            "word_timestamps",
+            "task",
+            "chunk_length",
+            "no_speech_threshold",
+            "logprob_threshold",  # Config uses this
+            "log_prob_threshold",  # Executor converts to this
+            "condition_on_previous_text",
+            "patience",
+            "vad_filter",
+            "vad_parameters",
+            "temperature",
+            "temperature_increment_on_fallback",
+            "best_of",
+            "compression_ratio_threshold",
+            "length_penalty",
+            "repetition_penalty",
+            "no_repeat_ngram_size",
+            "suppress_tokens",
+            "initial_prompt",
+            "language",  # Always added by executor
+        }
         unexpected = set(actual_kwargs.keys()) - allowed_params
         if unexpected:
             print()  # noqa: T201
