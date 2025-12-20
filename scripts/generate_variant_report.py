@@ -19,6 +19,8 @@ import sys
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
+from backend.variants.registry import baseline_variant_num
+
 
 def format_time(seconds: float | None) -> str:
     """Format seconds as mm:ss."""
@@ -350,7 +352,7 @@ def simulate_counterfactual_skips(
     """Simulate how many reference segments would be skipped by a given threshold pair.
 
     Args:
-        reference_segments: Segments from reference variant (e.g., Variant 90)
+        reference_segments: Segments from reference variant (e.g., Variant 1)
         no_speech_threshold: Threshold for no_speech_prob
         logprob_threshold: Threshold for avg_logprob
 
@@ -413,22 +415,24 @@ def find_best_reference_variant(
     current_variant_meta: dict[str, Any],
     all_variants: list[dict[str, Any]],
     run_folder: Path,
-    default_reference: int = 90,
+    default_reference: int | None = None,
 ) -> tuple[int, list[dict[str, Any]] | None]:
     """Find the best reference variant for counterfactual analysis.
 
     Prefers variants with same vad_filter and chunk_length as current variant.
-    Falls back to default_reference if no better match exists.
+    Falls back to baseline_variant_num if no better match exists.
 
     Args:
         current_variant_meta: Metadata for the current variant
         all_variants: List of all variant metadata dictionaries
         run_folder: Path to run folder containing JSON files
-        default_reference: Default reference variant number to use as fallback
+        default_reference: Default reference variant number to use as fallback (defaults to baseline_variant_num)
 
     Returns:
         Tuple of (reference_variant_number, reference_segments or None)
     """
+    if default_reference is None:
+        default_reference = baseline_variant_num
     current_config = normalize_transcription_config(current_variant_meta.get("transcription_config", {}))
     current_vad = current_config.get("vad_filter")
     current_chunk = current_config.get("chunk_length")
@@ -936,9 +940,28 @@ def main() -> int:
         requested_numbers = {int(v.strip()) for v in args.variants.split(",")}
         variants = [v for v in variants if v.get("variant_number") in requested_numbers]
 
-    # Load baseline variant (Variant 5) for diff calculations
+    # Load baseline variant for diff calculations
+    # Try baseline variant first (from registry), then variant 1, then first available variant
     baseline_stats = None
-    baseline_data = load_variant_data(run_folder, 5)
+    baseline_variant_num_local = None
+
+    # Try baseline variant first
+    baseline_data = load_variant_data(run_folder, baseline_variant_num)
+    if baseline_data:
+        baseline_variant_num_local = baseline_variant_num
+    else:
+        # Try variant 1 as fallback
+        baseline_data = load_variant_data(run_folder, 1)
+        if baseline_data:
+            baseline_variant_num_local = 1
+        else:
+            # Try first available variant as last resort
+            variant_numbers = sorted([v.get("variant_number") for v in variants if v.get("variant_number") is not None])
+            if variant_numbers:
+                baseline_data = load_variant_data(run_folder, variant_numbers[0])
+                if baseline_data:
+                    baseline_variant_num_local = variant_numbers[0]
+
     if baseline_data:
         baseline_segments = baseline_data["json_data"].get("segments", [])
         baseline_stats_calc = calculate_transcript_stats(baseline_segments)
@@ -952,9 +975,15 @@ def main() -> int:
         if far_speaker_range:
             baseline_far_stats = calculate_words_in_range(baseline_segments, far_speaker_range[0], far_speaker_range[1])
             baseline_stats["far_range_words"] = baseline_far_stats["words_in_range"]
-        print("Loaded baseline variant 5 for diff calculations", file=sys.stderr)  # noqa: T201
+        print(f"Loaded baseline variant {baseline_variant_num_local} for diff calculations", file=sys.stderr)  # noqa: T201
     else:
-        print("Warning: Could not load baseline variant 5 for diff calculations", file=sys.stderr)  # noqa: T201
+        available_variants = sorted([v.get("variant_number") for v in variants if v.get("variant_number") is not None])
+        available_str = ", ".join(map(str, available_variants)) if available_variants else "none"
+        print(  # noqa: T201
+            f"Warning: Could not load baseline variant for diff calculations. "
+            f"Tried variants {baseline_variant_num}, 1, and first available. Available variants: {available_str}",
+            file=sys.stderr,
+        )
 
     # Generate reports
     report_lines: list[str] = []
@@ -979,9 +1008,7 @@ def main() -> int:
             continue
 
         # Find best reference variant for counterfactual analysis (same vad_filter/chunk_length)
-        reference_num, reference_segments = find_best_reference_variant(
-            variant_meta, variants, run_folder, default_reference=90
-        )
+        reference_num, reference_segments = find_best_reference_variant(variant_meta, variants, run_folder)
 
         # Use reference segments for counterfactual analysis (but not for the reference variant itself)
         ref_segs_for_this_variant = reference_segments if variant_number != reference_num else None
