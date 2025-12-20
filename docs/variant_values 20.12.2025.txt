@@ -1,0 +1,1488 @@
+================================================================================
+VERIFICATION: Transcription Parameters for All Enabled Variants
+================================================================================
+
+Enabled variants: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49, 50, 51]
+
+
+================================================================================
+Variant 1: baseline_true_defaults
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 5358.76x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpe7_8t7_p/test.wav',)
+    Kwargs:
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 2: baseline_no_vad
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33420.75x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp4ggmu47a/test.wav',)
+    Kwargs:
+      - language: et
+      - vad_filter: False
+
+  VERIFICATION RESULT:
+
+    ✅ vad_filter: False (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 3: diag_control_no_vad_chunk20_beam5
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 29810.26x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpdh453jhs/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 4: diag_ns_090_lp_045
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33500.83x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpn4mryz8a/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - log_prob_threshold: -0.45
+      - no_speech_threshold: 0.9
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ no_speech_threshold: 0.9 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.45 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 5: diag_ns_090_lp_050
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33052.04x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp24lo_uji/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - log_prob_threshold: -0.5
+      - no_speech_threshold: 0.9
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ no_speech_threshold: 0.9 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.5 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 6: diag_ns_093_lp_045
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34407.74x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpirvlkvn9/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - log_prob_threshold: -0.45
+      - no_speech_threshold: 0.93
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ no_speech_threshold: 0.93 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.45 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 7: prod_vad_thr035_sil800_pad300
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34351.38x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp8dkc8580/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - task: transcribe
+      - vad_filter: True
+      - vad_parameters: {'threshold': 0.35, 'min_silence_duration_ms': 800, 'speech_pad_ms': 300}
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: True (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ vad_parameters: {'threshold': 0.35, 'min_silence_duration_ms': 800, 'speech_pad_ms': 300} (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 8: prod_vad_thr025_sil600_pad400
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 28263.50x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpyu45lw3e/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - task: transcribe
+      - vad_filter: True
+      - vad_parameters: {'threshold': 0.25, 'min_silence_duration_ms': 600, 'speech_pad_ms': 400}
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: True (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ vad_parameters: {'threshold': 0.25, 'min_silence_duration_ms': 600, 'speech_pad_ms': 400} (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 9: prod_vad_thr035_minspeech150_sil800_pad300
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33989.50x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpyqg9jo6d/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - task: transcribe
+      - vad_filter: True
+      - vad_parameters: {'threshold': 0.35, 'min_speech_duration_ms': 150, 'min_silence_duration_ms': 800, 'speech_pad_ms': 300}
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: True (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ vad_parameters: {'threshold': 0.35, 'min_speech_duration_ms': 150, 'min_silence_duration_ms': 800, 'speech_pad_ms': 300} (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 10: prod_vad_thr035_sil800_pad500
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34211.29x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp7quls4ka/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: True
+      - language: et
+      - task: transcribe
+      - vad_filter: True
+      - vad_parameters: {'threshold': 0.35, 'min_silence_duration_ms': 800, 'speech_pad_ms': 500}
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: True (matches config)
+    ✅ condition_on_previous_text: True (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ vad_parameters: {'threshold': 0.35, 'min_silence_duration_ms': 800, 'speech_pad_ms': 500} (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 11: prod_vad_thr035_sil800_pad300_noctx
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31207.62x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmprondplfa/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - chunk_length: 20
+      - condition_on_previous_text: False
+      - language: et
+      - task: transcribe
+      - vad_filter: True
+      - vad_parameters: {'threshold': 0.35, 'min_silence_duration_ms': 800, 'speech_pad_ms': 300}
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 20 (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: True (matches config)
+    ✅ condition_on_previous_text: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ vad_parameters: {'threshold': 0.35, 'min_silence_duration_ms': 800, 'speech_pad_ms': 300} (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 12: decode_beam6
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31022.96x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpmrlyiewc/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 13: decode_beam7
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 23643.20x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpin_juos6/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 7 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 14: decode_beam6_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33078.11x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpppce5b8l/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - language: et
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 15: decode_beam7_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34606.47x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpde3uinxu/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 7 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 16: guardlite_beam6
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33500.83x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpvxtjmmon/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - language: et
+      - log_prob_threshold: -0.46
+      - no_speech_threshold: 0.95
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ no_speech_threshold: 0.95 (matches config)
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.46 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 17: guardlite_beam7
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 32896.50x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpnlxqlzln/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - log_prob_threshold: -0.46
+      - no_speech_threshold: 0.95
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ no_speech_threshold: 0.95 (matches config)
+    ✅ beam_size: 7 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.46 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 18: guardlite_beam6_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 32768.00x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpnr7owltp/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - language: et
+      - log_prob_threshold: -0.46
+      - no_speech_threshold: 0.95
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ no_speech_threshold: 0.95 (matches config)
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.46 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 19: noctx_beam6_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33825.03x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp3zknenx6/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - condition_on_previous_text: False
+      - language: et
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ condition_on_previous_text: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 20: noctx_guardlite_beam6_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34127.78x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpc_4q8chr/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - condition_on_previous_text: False
+      - language: et
+      - log_prob_threshold: -0.46
+      - no_speech_threshold: 0.95
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ no_speech_threshold: 0.95 (matches config)
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ condition_on_previous_text: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.46 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 21: guardlite_beam6_pat12_chunk25
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 30415.55x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp6vnc4iyt/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - chunk_length: 25
+      - language: et
+      - log_prob_threshold: -0.46
+      - no_speech_threshold: 0.95
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 25 (matches config)
+    ✅ no_speech_threshold: 0.95 (matches config)
+    ✅ beam_size: 6 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.46 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 22: lnorm3_aresampl_noparamtrans
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31920.12x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmprj3ws4fl/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 23: level_p0_control
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34407.74x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpwo9ts220/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 24: level_p1_limiter
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34072.33x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpmoe045_1/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 25: level_p2_volume_1_5db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35157.62x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp3h9pk_ry/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 26: level_p3_volume_3db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 32164.91x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpecwz_nkz/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 27: level_p4_peaknorm_n6db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33635.16x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpxyc9zucj/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 28: level_p5_peaknorm_n3db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31045.92x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpyqs8suzq/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 29: level_p6_peaknorm_n3db_max3db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34127.78x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp9jqul2v3/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 30: level_p7_sox_peaknorm_n3db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34778.64x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpk16mdmhl/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 31: level_p8_compressor
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34072.33x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpo2yy5o6p/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 32: level_p9_dynaudnorm
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33447.40x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpq83wjham/test.wav',)
+    Kwargs:
+      - beam_size: 5
+      - language: et
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ beam_size: 5 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 33: baseline_no_vad_word_timestamps
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31631.25x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpmvljwtl8/test.wav',)
+    Kwargs:
+      - language: et
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 34: baseline_word_timestamps
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33235.37x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpqqll1rl0/test.wav',)
+    Kwargs:
+      - language: et
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 35: baseline_beam7
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 29599.89x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpbbh7cvfk/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 7 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 36: baseline_p2_volume_1_5db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33474.09x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp1orfbz4b/test.wav',)
+    Kwargs:
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 37: baseline_p8_compressor
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35128.17x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpl40nqb7p/test.wav',)
+    Kwargs:
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 38: beam7_guardlite_softened
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33581.30x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp21zp26bh/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - chunk_length: 25
+      - language: et
+      - log_prob_threshold: -0.525
+      - no_speech_threshold: 0.85
+      - patience: 1.2
+      - task: transcribe
+      - vad_filter: False
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 25 (matches config)
+    ✅ no_speech_threshold: 0.85 (matches config)
+    ✅ beam_size: 7 (matches config)
+    ✅ vad_filter: False (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ task: transcribe (matches config)
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+    ✅ log_prob_threshold: -0.525 (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 39: p2_volume_1_5db_beam6
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31418.01x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpaezwl2nt/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 6 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 40: p2_volume_1_5db_beam7
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 28630.06x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpfgai3f_8/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 7 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 41: p2_volume_2_0db
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 32091.08x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp0apd1b1s/test.wav',)
+    Kwargs:
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 42: p2_volume_1_5db_pat115
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 31488.77x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmphuqdnof7/test.wav',)
+    Kwargs:
+      - language: et
+      - patience: 1.15
+
+  VERIFICATION RESULT:
+
+    ✅ patience: 1.15 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 43: p2_volume_1_5db_beam6_pat115
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33500.83x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpenulmalz/test.wav',)
+    Kwargs:
+      - beam_size: 6
+      - language: et
+      - patience: 1.15
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 6 (matches config)
+    ✅ patience: 1.15 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 44: p2_volume_1_5db_beam7_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35069.43x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpe3lj5ccw/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - patience: 1.2
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 7 (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 45: p2_volume_1_5db_chunk25
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35454.81x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpa_1parr8/test.wav',)
+    Kwargs:
+      - chunk_length: 25
+      - language: et
+
+  VERIFICATION RESULT:
+
+    ✅ chunk_length: 25 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 46: p2_volume_1_5db_word_timestamps
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 32313.59x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpyjf93hhz/test.wav',)
+    Kwargs:
+      - language: et
+      - word_timestamps: True
+
+  VERIFICATION RESULT:
+
+    ✅ word_timestamps: True (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 47: p2_volume_1_5db_beam7_pat13
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35275.90x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmplzlqnnsd/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - patience: 1.3
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 7 (matches config)
+    ✅ patience: 1.3 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 48: p2_volume_1_5db_beam8_pat12
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 34492.63x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpe1j2o6ex/test.wav',)
+    Kwargs:
+      - beam_size: 8
+      - language: et
+      - patience: 1.2
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 8 (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 49: p2_volume_1_5db_beam7_pat12_reppat11
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 33716.27x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmph845wla8/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - patience: 1.2
+      - repetition_penalty: 1.1
+
+  VERIFICATION RESULT:
+
+    ✅ repetition_penalty: 1.1 (matches config)
+    ✅ beam_size: 7 (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 50: p2_volume_1_5db_beam7_pat12_norep3
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35484.81x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmp2hu94e1i/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - no_repeat_ngram_size: 3
+      - patience: 1.2
+
+  VERIFICATION RESULT:
+
+    ✅ no_repeat_ngram_size: 3 (matches config)
+    ✅ beam_size: 7 (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Variant 51: p2_volume_1_5db_beam7_pat12_lenpat095
+================================================================================
+  Config: TranscriptionConfig with 23 parameters
+
+🎧 Input duration: 0.2 minutes
+⏱️  Transcription completed in 0.00 seconds
+⚡ Speed: 35069.43x realtime (10.0s audio in 0.0s)
+✅ Total processing time: 0.00 seconds
+  ACTUAL PARAMETERS PASSED TO model.transcribe():
+    Args: ('/tmp/tmpkcm5qgsd/test.wav',)
+    Kwargs:
+      - beam_size: 7
+      - language: et
+      - length_penalty: 0.95
+      - patience: 1.2
+
+  VERIFICATION RESULT:
+
+    ✅ beam_size: 7 (matches config)
+    ✅ patience: 1.2 (matches config)
+    ✅ length_penalty: 0.95 (matches config)
+    ✅ language: et (matches config)
+
+  ✅ Verification PASSED
+
+================================================================================
+Summary:
+================================================================================
+
+  Variant 1: ✅ PASSED
+  Variant 2: ✅ PASSED
+  Variant 3: ✅ PASSED
+  Variant 4: ✅ PASSED
+  Variant 5: ✅ PASSED
+  Variant 6: ✅ PASSED
+  Variant 7: ✅ PASSED
+  Variant 8: ✅ PASSED
+  Variant 9: ✅ PASSED
+  Variant 10: ✅ PASSED
+  Variant 11: ✅ PASSED
+  Variant 12: ✅ PASSED
+  Variant 13: ✅ PASSED
+  Variant 14: ✅ PASSED
+  Variant 15: ✅ PASSED
+  Variant 16: ✅ PASSED
+  Variant 17: ✅ PASSED
+  Variant 18: ✅ PASSED
+  Variant 19: ✅ PASSED
+  Variant 20: ✅ PASSED
+  Variant 21: ✅ PASSED
+  Variant 22: ✅ PASSED
+  Variant 23: ✅ PASSED
+  Variant 24: ✅ PASSED
+  Variant 25: ✅ PASSED
+  Variant 26: ✅ PASSED
+  Variant 27: ✅ PASSED
+  Variant 28: ✅ PASSED
+  Variant 29: ✅ PASSED
+  Variant 30: ✅ PASSED
+  Variant 31: ✅ PASSED
+  Variant 32: ✅ PASSED
+  Variant 33: ✅ PASSED
+  Variant 34: ✅ PASSED
+  Variant 35: ✅ PASSED
+  Variant 36: ✅ PASSED
+  Variant 37: ✅ PASSED
+  Variant 38: ✅ PASSED
+  Variant 39: ✅ PASSED
+  Variant 40: ✅ PASSED
+  Variant 41: ✅ PASSED
+  Variant 42: ✅ PASSED
+  Variant 43: ✅ PASSED
+  Variant 44: ✅ PASSED
+  Variant 45: ✅ PASSED
+  Variant 46: ✅ PASSED
+  Variant 47: ✅ PASSED
+  Variant 48: ✅ PASSED
+  Variant 49: ✅ PASSED
+  Variant 50: ✅ PASSED
+  Variant 51: ✅ PASSED
+
+✅ All variants verified successfully!
