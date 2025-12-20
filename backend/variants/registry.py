@@ -57,6 +57,9 @@ def _get_all_variants() -> list[Variant]:
       - 49: Variant 44 + repetition_penalty=1.1 (add repetition penalty)
       - 50: Variant 44 + no_repeat_ngram_size=3 (explicit n-gram blocking)
       - 51: Variant 44 + length_penalty=0.95 (tune length bias)
+    - Variants 52-57: Volume level variants (36, 42, 44 with different volume_db)
+      - 52-54: Variants 36, 42, 44 with volume_db=1.0
+      - 55-57: Variants 36, 42, 44 with volume_db=2.0
     """
     return [
         # Group 1: No preprocessing, baseline configs (simplest) - Variants 1-2
@@ -130,113 +133,39 @@ def _get_all_variants() -> list[Variant]:
                 )[3]
             )(),
         ),
-        # Group 8: Variant 44 derivatives (one-change-only tweaks) - Variants 47-51
-        # Variant 47: Variant 44 + patience=1.3 (increased patience, keep beam=7)
+        # Variants 52-57: Volume level variants (36, 42, 44 with different volume_db)
+        # Variant 52: Variant 36 with volume_db=1.0
         Variant(
-            name="p2_volume_1_5db_beam7_pat13",
-            number=47,
+            name="baseline_p2_volume_1_0db",
+            number=52,
             preprocess_steps=[
                 PreprocessStep(
-                    name="volume_1_5db_limiter",
+                    name="volume_1_0db_limiter",
                     enabled=True,
                     step_type="volume_limiter",
-                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                    config=VolumeLimiterStepConfig(volume_db=1.0),
                 ),
             ],
-            transcription_config=(
-                lambda: (
-                    config := create_baseline_config(),
-                    config.set("beam_size", 7),
-                    config.set("patience", 1.3),
-                    config,
-                )[3]
-            )(),
+            transcription_config=create_baseline_config(),
         ),
-        # Variant 48: Variant 44 + beam_size=8 (increased beam, keep patience=1.2)
+        # Variant 53: Variant 42 with volume_db=1.0
         Variant(
-            name="p2_volume_1_5db_beam8_pat12",
-            number=48,
+            name="p2_volume_1_0db_pat12",
+            number=53,
             preprocess_steps=[
                 PreprocessStep(
-                    name="volume_1_5db_limiter",
+                    name="volume_1_0db_limiter",
                     enabled=True,
                     step_type="volume_limiter",
-                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                    config=VolumeLimiterStepConfig(volume_db=1.0),
                 ),
             ],
             transcription_config=(
                 lambda: (
                     config := create_baseline_config(),
-                    config.set("beam_size", 8),
                     config.set("patience", 1.2),
                     config,
-                )[3]
-            )(),
-        ),
-        # Variant 49: Variant 44 + repetition_penalty=1.1 (add repetition penalty)
-        Variant(
-            name="p2_volume_1_5db_beam7_pat12_reppat11",
-            number=49,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="volume_1_5db_limiter",
-                    enabled=True,
-                    step_type="volume_limiter",
-                    config=VolumeLimiterStepConfig(volume_db=1.5),
-                ),
-            ],
-            transcription_config=(
-                lambda: (
-                    config := create_baseline_config(),
-                    config.set("beam_size", 7),
-                    config.set("patience", 1.2),
-                    config.set("repetition_penalty", 1.1),
-                    config,
-                )[4]
-            )(),
-        ),
-        # Variant 50: Variant 44 + no_repeat_ngram_size=3 (explicit n-gram blocking)
-        Variant(
-            name="p2_volume_1_5db_beam7_pat12_norep3",
-            number=50,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="volume_1_5db_limiter",
-                    enabled=True,
-                    step_type="volume_limiter",
-                    config=VolumeLimiterStepConfig(volume_db=1.5),
-                ),
-            ],
-            transcription_config=(
-                lambda: (
-                    config := create_baseline_config(),
-                    config.set("beam_size", 7),
-                    config.set("patience", 1.2),
-                    config.set("no_repeat_ngram_size", 3),
-                    config,
-                )[4]
-            )(),
-        ),
-        # Variant 51: Variant 44 + length_penalty=0.95 (tune length bias)
-        Variant(
-            name="p2_volume_1_5db_beam7_pat12_lenpat095",
-            number=51,
-            preprocess_steps=[
-                PreprocessStep(
-                    name="volume_1_5db_limiter",
-                    enabled=True,
-                    step_type="volume_limiter",
-                    config=VolumeLimiterStepConfig(volume_db=1.5),
-                ),
-            ],
-            transcription_config=(
-                lambda: (
-                    config := create_baseline_config(),
-                    config.set("beam_size", 7),
-                    config.set("patience", 1.2),
-                    config.set("length_penalty", 0.95),
-                    config,
-                )[4]
+                )[2]
             )(),
         ),
     ]
@@ -266,8 +195,8 @@ def get_builtin_variants() -> list[Variant]:
     All variants now use declarative preprocessing steps.
     """
     all_variants = _get_all_variants()
-    # Active variants: 1, 36, 42, 44
-    active_variant_numbers = {1} | {36} | {42} | {44}
+    # Active variants: 1, 36, 42, 44, 52-53
+    active_variant_numbers = {1} | {36} | {42} | {44} | set(range(52, 54))
     # active_variant_numbers = set(range(1, 52))
     return [v for v in all_variants if v.number in active_variant_numbers]
 
@@ -295,7 +224,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-51)
+        number: Variant number (1-57)
 
     Returns:
         Variant instance or None if not found
