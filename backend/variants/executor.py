@@ -732,8 +732,15 @@ def transcribe_with_minimal_params(
     # Only include vad_parameters if vad_filter is True (or not explicitly False)
     if transcribe_kwargs.get("vad_filter") is True:
         # Merge vad_threshold into vad_parameters dict (like in transcribe.py)
+        # Only merge if vad_threshold was explicitly set (not just using default)
         vad_params = dict(getattr(transcription_config, "vad_parameters", {}))
-        if hasattr(transcription_config, "vad_threshold") and transcription_config.vad_threshold is not None:
+        # Check if vad_threshold was explicitly set by checking _explicit_fields
+        # or if it's in the original to_kwargs() result (before filtering)
+        vad_threshold_explicit = (
+            hasattr(transcription_config, "_explicit_fields")
+            and "vad_threshold" in transcription_config._explicit_fields
+        )
+        if vad_threshold_explicit and transcription_config.vad_threshold is not None:
             vad_params["threshold"] = transcription_config.vad_threshold
         # Include vad_parameters if we have any (even if just from vad_threshold)
         if vad_params:
