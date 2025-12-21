@@ -13,9 +13,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
 
-from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
+from backend.database import (
+    FileMetricRecord,
+    RunRecord,
+    TranscriptionDatabase,
+    get_default_db_path,
+)
 
 
 def test_production_db_migration_and_data_insertion() -> None:
@@ -27,13 +31,23 @@ def test_production_db_migration_and_data_insertion() -> None:
     3. Adds a new run record
     4. Adds new file metric records linked to that run
     5. Verifies the data was inserted correctly
-    """
-    # Get production database path
-    prod_db_path = Path.home() / ".local" / "share" / "stt-faster" / "transcribe_state.duckdb"
 
-    # Skip test if production database doesn't exist
-    if not prod_db_path.exists():
-        pytest.skip("Production database not found - skipping migration integration test")
+    Note: This test requires the production database to exist.
+    The production database is created when the application runs in production mode.
+    To create it, run the application at least once, which will create the database
+    at the default location (typically ~/.local/share/stt-faster/transcribe_state.duckdb).
+    """
+    # Get production database path using the same function the application uses
+    # This respects XDG_DATA_HOME environment variable if set
+    prod_db_path = get_default_db_path()
+
+    # Fail test if production database doesn't exist (required for migration testing)
+    assert prod_db_path.exists(), (
+        f"Production database not found at {prod_db_path}. "
+        "This test requires the production database to exist. "
+        "Run the application at least once to create the database, or set XDG_DATA_HOME "
+        "if using a custom data directory."
+    )
 
     # Create a temporary copy for testing
     with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as tmp:

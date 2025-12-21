@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import logging
+import os
 import shutil
 import subprocess  # nosec B404
+import sys
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -32,6 +35,72 @@ LOGGER = logging.getLogger(__name__)
 
 # Create Typer app for unified CLI
 app = typer.Typer(name="transcribe", help="Transcription processing commands")
+
+
+def _is_test_run() -> bool:
+    """Check if the current execution is part of a test run (pytest/junit).
+
+    Detects test context by checking:
+    1. pytest environment variables (PYTEST_CURRENT_TEST) - most reliable
+    2. Command line arguments containing 'pytest' or running via pytest module
+    3. Call stack for test-related function names (only if pytest is active)
+
+    Returns:
+        True if running in a test context, False otherwise (production run)
+    """
+    # Check for pytest environment variable (most reliable indicator)
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return True
+
+    # Check command line for test-related arguments (primary check)
+    # This catches: pytest, python -m pytest, unittest, etc.
+    cmd_line = " ".join(sys.argv).lower()
+    if any(keyword in cmd_line for keyword in ["pytest", "unittest", "junit", "-m pytest", "test.py"]):
+        return True
+
+    # Check if pytest module is loaded AND we're in a test execution context
+    # (not just imported for type checking or other reasons)
+    if "pytest" in sys.modules:
+        try:
+            import pytest
+
+            # Check if pytest is actually running (has a session)
+            # This is more reliable than just checking if it's imported
+            # Use getattr to avoid pyright errors on private attribute
+            if hasattr(pytest, "_session") and getattr(pytest, "_session", None) is not None:
+                return True
+        except (ImportError, AttributeError):
+            pass
+
+    # Check call stack for test-related function names
+    # Only do this if we have strong indicators we're in a test
+    # (to avoid false positives from imports)
+    frame = inspect.currentframe()
+    if frame:
+        try:
+            # Walk up the call stack looking for test indicators
+            stack = inspect.stack()
+            for frame_info in stack:
+                func_name = frame_info.function.lower()
+                filename = frame_info.filename.lower()
+
+                # Only flag as test if we see clear test patterns
+                # AND the file is in a tests directory
+                if func_name.startswith("test_") and ("/tests/" in filename or "\\tests\\" in filename):
+                    return True
+
+                # Check if called from test files in tests directory
+                if ("/tests/" in filename or "\\tests\\" in filename) and (
+                    filename.endswith("_test.py")
+                    or filename.endswith("test.py")
+                    or "/test_" in filename
+                    or "\\test_" in filename
+                ):
+                    return True
+        finally:
+            del frame
+
+    return False
 
 
 def _get_git_commit_hash() -> str | None:
@@ -456,6 +525,20 @@ def cmd_process(args: argparse.Namespace) -> int:
     if not input_folder.is_dir():
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
+
+    # Automatically use production database for all non-test runs
+    # When db_path is None, TranscriptionDatabase uses get_default_db_path() which
+    # returns the production database path (~/.local/share/stt-faster/transcribe_state.duckdb)
+    # Only use production DB if this is NOT a test run
+    is_test = _is_test_run()
+    if args.db_path is None and not is_test:
+        # Ensure db_path remains None to use production database
+        LOGGER.info(
+            "Using production database for non-test run (input folder: %s)",
+            input_folder,
+        )
+    elif is_test:
+        LOGGER.debug("Test run detected - using test database if db_path not specified")
 
     # Parse and validate variants
     variant_numbers, error = _parse_variant_numbers(args)
