@@ -1,12 +1,14 @@
 """Unit tests for transcription database operations."""
 
 import inspect
+import os
 import re
 from dataclasses import fields
 from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
+import pytest
 
 from backend.database import (
     FileMetricRecord,
@@ -278,6 +280,7 @@ def test_schema_migration_adds_rnnoise_model_column(tmp_path: Path) -> None:
     db = TranscriptionDatabase(db_path)
 
     # Verify the column was added
+    assert db.conn is not None
     columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
     column_names = {row[0] for row in columns_result}
     assert "rnnoise_model" in column_names, "Migration should have added rnnoise_model column"
@@ -304,6 +307,7 @@ def test_schema_migration_adds_rnnoise_model_column(tmp_path: Path) -> None:
     db.record_file_metric(record)
 
     # Verify the data was stored correctly
+    assert db.conn is not None
     result = db.conn.execute(
         "SELECT rnnoise_model FROM file_metrics WHERE audio_path = ?",
         ("/test/audio.mp3",),
@@ -332,13 +336,26 @@ def test_migration_on_production_database() -> None:
     # This respects XDG_DATA_HOME environment variable if set
     prod_db_path = get_default_db_path()
 
-    # Fail test if production database doesn't exist (required for migration testing)
-    assert prod_db_path.exists(), (
-        f"Production database not found at {prod_db_path}. "
-        "This test requires the production database to exist. "
-        "Run the application at least once to create the database, or set XDG_DATA_HOME "
-        "if using a custom data directory."
-    )
+    # Check if we're running in CI (GitHub Actions, act, or other CI systems)
+    is_ci = bool(os.getenv("CI") or os.getenv("GITHUB_ACTIONS") or os.getenv("ACT"))
+
+    # Handle missing production database differently based on environment
+    if not prod_db_path.exists():
+        if is_ci:
+            # In CI, skip the test since production database won't exist
+            pytest.skip(
+                f"Production database not found at {prod_db_path}. "
+                "This test requires the production database to exist. "
+                "Skipping in CI environment where production database is not available."
+            )
+        else:
+            # In local environment, fail the test to ensure developers create the database
+            assert False, (
+                f"Production database not found at {prod_db_path}. "
+                "This test requires the production database to exist. "
+                "Run the application at least once to create the database, or set XDG_DATA_HOME "
+                "if using a custom data directory."
+            )
 
     # Create a temporary copy for testing
     with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as tmp:
@@ -352,6 +369,7 @@ def test_migration_on_production_database() -> None:
         db = TranscriptionDatabase(test_db_path)
 
         # Get all columns from file_metrics table
+        assert db.conn is not None
         columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
         db_columns = {row[0] for row in columns_result}
 
@@ -522,6 +540,7 @@ def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
     db = TranscriptionDatabase(db_path)
 
     # Verify the column was added
+    assert db.conn is not None
     columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
     column_names = {row[0] for row in columns_result}
     assert "rnnoise_mix" in column_names, "Migration should have added rnnoise_mix column"
@@ -548,6 +567,7 @@ def test_schema_migration_adds_rnnoise_mix_column(tmp_path: Path) -> None:
     db.record_file_metric(record)
 
     # Verify the data was stored correctly
+    assert db.conn is not None
     result = db.conn.execute(
         "SELECT rnnoise_mix FROM file_metrics WHERE audio_path = ?",
         ("/test/audio2.mp3",),
@@ -664,6 +684,7 @@ def test_schema_migration_adds_both_rnnoise_columns(tmp_path: Path) -> None:
     db = TranscriptionDatabase(db_path)
 
     # Verify both columns were added
+    assert db.conn is not None
     columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
     column_names = {row[0] for row in columns_result}
     assert "rnnoise_model" in column_names, "Migration should have added rnnoise_model column"
@@ -691,6 +712,7 @@ def test_schema_migration_adds_both_rnnoise_columns(tmp_path: Path) -> None:
     db.record_file_metric(record)
 
     # Verify both values were stored correctly
+    assert db.conn is not None
     result = db.conn.execute(
         "SELECT rnnoise_model, rnnoise_mix FROM file_metrics WHERE audio_path = ?",
         ("/test/audio3.mp3",),
@@ -714,6 +736,7 @@ def test_file_metrics_schema_consistency(temp_db: TranscriptionDatabase) -> None
     3. The database schema matches what the code expects
     """
     # Get actual database columns
+    assert temp_db.conn is not None
     columns_result = temp_db.conn.execute("DESCRIBE file_metrics").fetchall()
     db_columns = {row[0] for row in columns_result}
 
@@ -739,7 +762,7 @@ def test_file_metrics_schema_consistency(temp_db: TranscriptionDatabase) -> None
     }
 
     # Expected database columns from dataclass (excluding id which is auto-generated)
-    expected_columns_from_dataclass = set()
+    expected_columns_from_dataclass: set[str] = set()
     for field in fields(FileMetricRecord):
         if field.name in field_to_column_mapping:
             expected_columns_from_dataclass.add(field_to_column_mapping[field.name])
@@ -989,6 +1012,7 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
     db = TranscriptionDatabase(db_path)
 
     # Get database columns
+    assert db.conn is not None
     columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
     db_columns = {row[0] for row in columns_result}
 
