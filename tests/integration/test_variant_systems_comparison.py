@@ -33,8 +33,12 @@ class TestVariantSystemsComparison:
         test_audio = project_root / "tests" / "test_short.mp3"
         if not test_audio.exists():
             test_audio = project_root / "tests" / "test.mp3"
-        if not test_audio.exists():
-            pytest.skip("No test audio file found (test_short.mp3 or test.mp3)")
+        assert test_audio.exists(), (
+            f"No test audio file found. Expected one of: "
+            f"{project_root / 'tests' / 'test_short.mp3'} or "
+            f"{project_root / 'tests' / 'test.mp3'}. "
+            "This test requires a test audio file to be present."
+        )
         return test_audio
 
     @pytest.fixture

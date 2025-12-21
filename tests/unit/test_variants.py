@@ -9,7 +9,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import pytest
 
 from backend.preprocess.config import TranscriptionConfig
 from backend.variants.registry import (
@@ -94,8 +93,7 @@ class TestVariantRegistry:
     def test_get_variant_by_number(self) -> None:
         """Test getting variant by number."""
         all_variants = get_all_variants()
-        if not all_variants:
-            pytest.skip("No variants defined")
+        assert len(all_variants) > 0, "No variants defined - this test requires at least one variant to be configured"
 
         # Test with an actual variant
         test_variant = all_variants[0]
@@ -111,8 +109,7 @@ class TestVariantRegistry:
     def test_get_variant_by_name(self) -> None:
         """Test getting variant by name."""
         all_variants = get_all_variants()
-        if not all_variants:
-            pytest.skip("No variants defined")
+        assert len(all_variants) > 0, "No variants defined - this test requires at least one variant to be configured"
 
         # Test with an actual variant
         test_variant = all_variants[0]
@@ -210,8 +207,7 @@ class TestVariantFiltering:
         """Test filtering variants by number."""
         variants = get_builtin_variants()
         # Filter out one variant
-        if not variants:
-            pytest.skip("No active variants to test")
+        assert len(variants) > 0, "No active variants to test - this test requires at least one active variant"
 
         skip_set = {variants[0].number}  # Skip the first active variant
         filtered = [v for v in variants if v.number not in skip_set]
@@ -235,8 +231,7 @@ class TestVariantFiltering:
     def test_all_variants_accessible_after_filtering(self) -> None:
         """Test that all variants remain accessible after filtering."""
         variants = get_builtin_variants()
-        if not variants:
-            pytest.skip("No active variants to test")
+        assert len(variants) > 0, "No active variants to test - this test requires at least one active variant"
 
         # Skip one active variant
         skip_set = {variants[0].number}

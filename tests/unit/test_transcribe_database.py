@@ -8,7 +8,12 @@ from pathlib import Path
 
 import duckdb
 
-from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
+from backend.database import (
+    FileMetricRecord,
+    RunRecord,
+    TranscriptionDatabase,
+    get_default_db_path,
+)
 
 
 def test_add_file(temp_db: TranscriptionDatabase) -> None:
@@ -314,18 +319,26 @@ def test_migration_on_production_database() -> None:
 
     This test copies the actual production database (if it exists) and verifies
     that all migrations run successfully and all required columns exist.
+
+    Note: This test requires the production database to exist.
+    The production database is created when the application runs in production mode.
+    To create it, run the application at least once, which will create the database
+    at the default location (typically ~/.local/share/stt-faster/transcribe_state.duckdb).
     """
     import shutil
     import tempfile
 
-    # Get production database path
-    prod_db_path = Path.home() / ".local" / "share" / "stt-faster" / "transcribe_state.duckdb"
+    # Get production database path using the same function the application uses
+    # This respects XDG_DATA_HOME environment variable if set
+    prod_db_path = get_default_db_path()
 
-    # Skip test if production database doesn't exist
-    if not prod_db_path.exists():
-        import pytest
-
-        pytest.skip("Production database not found - skipping migration test")
+    # Fail test if production database doesn't exist (required for migration testing)
+    assert prod_db_path.exists(), (
+        f"Production database not found at {prod_db_path}. "
+        "This test requires the production database to exist. "
+        "Run the application at least once to create the database, or set XDG_DATA_HOME "
+        "if using a custom data directory."
+    )
 
     # Create a temporary copy for testing
     with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as tmp:
