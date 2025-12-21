@@ -60,7 +60,7 @@ Variant 3: diag_control_no_vad_chunk20_beam5
     Args: ('/tmp/tmpdh453jhs/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - language: et
       - task: transcribe
       - vad_filter: False
@@ -68,7 +68,7 @@ Variant 3: diag_control_no_vad_chunk20_beam5
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: False (matches config)
     ✅ task: transcribe (matches config)
@@ -90,7 +90,7 @@ Variant 4: diag_ns_090_lp_045
     Args: ('/tmp/tmpn4mryz8a/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - log_prob_threshold: -0.45
@@ -101,7 +101,7 @@ Variant 4: diag_ns_090_lp_045
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ no_speech_threshold: 0.9 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: False (matches config)
@@ -126,7 +126,7 @@ Variant 5: diag_ns_090_lp_050
     Args: ('/tmp/tmp24lo_uji/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - log_prob_threshold: -0.5
@@ -137,7 +137,7 @@ Variant 5: diag_ns_090_lp_050
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ no_speech_threshold: 0.9 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: False (matches config)
@@ -162,7 +162,7 @@ Variant 6: diag_ns_093_lp_045
     Args: ('/tmp/tmpirvlkvn9/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - log_prob_threshold: -0.45
@@ -173,7 +173,7 @@ Variant 6: diag_ns_093_lp_045
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ no_speech_threshold: 0.93 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: False (matches config)
@@ -198,7 +198,7 @@ Variant 7: prod_vad_thr035_sil800_pad300
     Args: ('/tmp/tmp8dkc8580/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - task: transcribe
@@ -208,7 +208,7 @@ Variant 7: prod_vad_thr035_sil800_pad300
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: True (matches config)
     ✅ condition_on_previous_text: True (matches config)
@@ -232,7 +232,7 @@ Variant 8: prod_vad_thr025_sil600_pad400
     Args: ('/tmp/tmpyu45lw3e/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - task: transcribe
@@ -242,7 +242,7 @@ Variant 8: prod_vad_thr025_sil600_pad400
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: True (matches config)
     ✅ condition_on_previous_text: True (matches config)
@@ -266,7 +266,7 @@ Variant 9: prod_vad_thr035_minspeech150_sil800_pad300
     Args: ('/tmp/tmpyqg9jo6d/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - task: transcribe
@@ -276,7 +276,7 @@ Variant 9: prod_vad_thr035_minspeech150_sil800_pad300
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: True (matches config)
     ✅ condition_on_previous_text: True (matches config)
@@ -300,7 +300,7 @@ Variant 10: prod_vad_thr035_sil800_pad500
     Args: ('/tmp/tmp7quls4ka/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: True
       - language: et
       - task: transcribe
@@ -310,7 +310,7 @@ Variant 10: prod_vad_thr035_sil800_pad500
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: True (matches config)
     ✅ condition_on_previous_text: True (matches config)
@@ -334,7 +334,7 @@ Variant 11: prod_vad_thr035_sil800_pad300_noctx
     Args: ('/tmp/tmprondplfa/test.wav',)
     Kwargs:
       - beam_size: 5
-      - chunk_length: 20
+      - chunk_length: 30
       - condition_on_previous_text: False
       - language: et
       - task: transcribe
@@ -344,7 +344,7 @@ Variant 11: prod_vad_thr035_sil800_pad300_noctx
 
   VERIFICATION RESULT:
 
-    ✅ chunk_length: 20 (matches config)
+    ✅ chunk_length: 30 (matches config)
     ✅ beam_size: 5 (matches config)
     ✅ vad_filter: True (matches config)
     ✅ condition_on_previous_text: False (matches config)
