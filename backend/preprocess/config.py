@@ -263,7 +263,7 @@ class TranscriptionConfig:
     task: str = "transcribe"  # "transcribe" or "translate"
 
     # Chunk processing
-    chunk_length: int = 20  # Length of audio chunks in seconds
+    chunk_length: int = 30  # Length of audio chunks in seconds
 
     # VAD (Voice Activity Detection) parameters
     vad_filter: bool = True

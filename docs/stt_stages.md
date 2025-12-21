@@ -31,7 +31,7 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 | **Transcription** | Beam size | `5` | `5` | env: `STT_TRANSCRIBE_BEAM_SIZE` |
 | **Transcription** | Patience | `1.1` | `1.0` | Beam search patience, env: `STT_TRANSCRIBE_PATIENCE` |
 | **Transcription** | Word timestamps | `False` | `False` | env: `STT_TRANSCRIBE_WORD_TIMESTAMPS` |
-| **Transcription** | Chunk length | `20` s | `30` s | Audio chunk length in seconds, env: `STT_TRANSCRIBE_CHUNK_LENGTH` |
+| **Transcription** | Chunk length | `30` s | `30` s | Audio chunk length in seconds, env: `STT_TRANSCRIBE_CHUNK_LENGTH` |
 | **Transcription** | Language | Auto-detect or forced | `None` (auto-detect) or `et` (if preset starts with "et-") | Default: auto-detect, forced based on preset |
 | **Transcription** | VAD filter | `True` | `True` | Enable voice activity detection, env: `STT_TRANSCRIBE_VAD_FILTER` |
 | **Transcription** | VAD threshold | `0.35` | `0.4` | Speech probability threshold, env: `STT_TRANSCRIBE_VAD_THRESHOLD` |
