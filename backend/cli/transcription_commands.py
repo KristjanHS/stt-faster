@@ -105,7 +105,7 @@ def _format_overrides_concise(overrides: dict[str, Any]) -> str:
         overrides: Dictionary of override values
 
     Returns:
-        Concise string representation, e.g., "vad_filter=false, chunk_length=20, beam_size=5"
+        Concise string representation, e.g., "vad_filter=false, chunk_length=30, beam_size=5"
     """
     if not overrides:
         return "none"
