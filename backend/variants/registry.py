@@ -60,6 +60,13 @@ def _get_all_variants() -> list[Variant]:
     - Variants 52-57: Volume level variants (36, 42, 44 with different volume_db)
       - 52-54: Variants 36, 42, 44 with volume_db=1.0
       - 55-57: Variants 36, 42, 44 with volume_db=2.0
+    - Variants 58-63: Chunk length variants (1, 36, 42, 44, 52, 53 with chunk_length=30)
+      - 58: Variant 1 + chunk_length=30
+      - 59: Variant 36 + chunk_length=30
+      - 60: Variant 42 + chunk_length=30
+      - 61: Variant 44 + chunk_length=30
+      - 62: Variant 52 + chunk_length=30
+      - 63: Variant 53 + chunk_length=30
     """
     return [
         # Group 1: No preprocessing, baseline configs (simplest) - Variants 1-2
@@ -168,6 +175,124 @@ def _get_all_variants() -> list[Variant]:
                 )[2]
             )(),
         ),
+        # Variants 58-63: Chunk length variants (1, 36, 42, 44, 52, 53 with chunk_length=30)
+        # Variant 58: Variant 1 + chunk_length=30
+        Variant(
+            name="baseline_true_defaults_chunk30",
+            number=58,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("chunk_length", 30),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 59: Variant 36 + chunk_length=30
+        Variant(
+            name="baseline_p2_volume_1_5db_chunk30",
+            number=59,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("chunk_length", 30),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 60: Variant 42 + chunk_length=30
+        Variant(
+            name="p2_volume_1_5db_pat12_chunk30",
+            number=60,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("patience", 1.2),
+                    config.set("chunk_length", 30),
+                    config,
+                )[3]
+            )(),
+        ),
+        # Variant 61: Variant 44 + chunk_length=30
+        Variant(
+            name="p2_volume_1_5db_beam7_pat12_chunk30",
+            number=61,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("chunk_length", 30),
+                    config,
+                )[4]
+            )(),
+        ),
+        # Variant 62: Variant 52 + chunk_length=30
+        Variant(
+            name="baseline_p2_volume_1_0db_chunk30",
+            number=62,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_0db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.0),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("chunk_length", 30),
+                    config,
+                )[2]
+            )(),
+        ),
+        # Variant 63: Variant 53 + chunk_length=30
+        Variant(
+            name="p2_volume_1_0db_pat12_chunk30",
+            number=63,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_0db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.0),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("patience", 1.2),
+                    config.set("chunk_length", 30),
+                    config,
+                )[3]
+            )(),
+        ),
     ]
 
 
@@ -195,8 +320,8 @@ def get_builtin_variants() -> list[Variant]:
     All variants now use declarative preprocessing steps.
     """
     all_variants = _get_all_variants()
-    # Active variants: 1, 36, 42, 44, 52-53
-    active_variant_numbers = {1} | {36} | {42} | {44} | set(range(52, 54))
+    # Active variants: 1, 36, 42, 44, 52-53, 58-63
+    active_variant_numbers = {1} | {36} | {42} | {44} | set(range(52, 54)) | set(range(58, 64))
     # active_variant_numbers = set(range(1, 52))
     return [v for v in all_variants if v.number in active_variant_numbers]
 
@@ -224,7 +349,7 @@ def get_variant_by_number(number: int) -> Variant | None:
     Searches through all variants (both active and inactive).
 
     Args:
-        number: Variant number (1-57)
+        number: Variant number (1-63)
 
     Returns:
         Variant instance or None if not found
