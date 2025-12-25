@@ -8,7 +8,7 @@ REM CONFIGURATION: Edit variant numbers here
 REM ========================================
 REM Specify variant numbers separated by spaces (e.g., "1 36 44" or "44")
 REM For single variant, just use one number (e.g., "16")
-set "VARIANTS=1 44"
+set "VARIANTS=53 52"
 
 setlocal enabledelayedexpansion
 

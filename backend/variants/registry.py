@@ -165,6 +165,72 @@ def _get_all_variants() -> list[Variant]:
                 )[3]
             )(),
         ),
+        # Variant 56: Variant 44 + repetition_penalty=1.05
+        Variant(
+            name="p2_volume_1_5db_beam7_pat12_rep105",
+            number=56,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("repetition_penalty", 1.05),
+                    config,
+                )[4]
+            )(),
+        ),
+        # Variant 57: Variant 44 + no_repeat_ngram_size=2
+        Variant(
+            name="p2_volume_1_5db_beam7_pat12_norep2",
+            number=57,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("no_repeat_ngram_size", 2),
+                    config,
+                )[4]
+            )(),
+        ),
+        # Variant 58: Variant 44 + length_penalty=0.98
+        Variant(
+            name="p2_volume_1_5db_beam7_pat12_len098",
+            number=58,
+            preprocess_steps=[
+                PreprocessStep(
+                    name="volume_1_5db_limiter",
+                    enabled=True,
+                    step_type="volume_limiter",
+                    config=VolumeLimiterStepConfig(volume_db=1.5),
+                ),
+            ],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("length_penalty", 0.98),
+                    config,
+                )[4]
+            )(),
+        ),
     ]
 
 
@@ -197,12 +263,17 @@ def get_builtin_variants() -> list[Variant]:
     - Variant 43: Variant 36 + patience=1.1
     - Variant 44: Variant 36 + beam_size=7 + patience=1.2 with volume_db=1.5
     - Variant 45: Variant 44 with volume_db=1.1
+    - Variant 54: Variant 44 + patience=1.3
+    - Variant 55: Variant 44 + beam_size=8
+    - Variant 56: Variant 44 + repetition_penalty=1.1
+    - Variant 57: Variant 44 + no_repeat_ngram_size=3
+    - Variant 58: Variant 44 + length_penalty=0.95
     - Variant 52: Variant 36 with volume_db=1.0
     - Variant 53: Variant 42 with volume_db=1.0
     """
     all_variants = _get_all_variants()
     # active_variant_numbers = {1} | {36} | set(range(42, 46)) | set(range(52, 54))
-    active_variant_numbers = {53} | {1} | {44} | {52} | {42} | {43} | {52} | {53}
+    active_variant_numbers = {44, 56, 57, 58}
 
     return [v for v in all_variants if v.number in active_variant_numbers]
 
