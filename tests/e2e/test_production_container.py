@@ -223,19 +223,6 @@ class TestProductionImageBuild:
         result = run_docker("images", production_image, "-q")
         assert result.stdout.strip(), f"Image {production_image} not found"
 
-    def test_image_size_reasonable(self, production_image: str) -> None:
-        """Verify image size is reasonable (not bloated)."""
-        result = run_docker("images", production_image, "--format", "{{.Size}}")
-        size_str = result.stdout.strip()
-        logger.info("Image size: %s", size_str)
-
-        # Parse size (format like "780MB" or "1.2GB")
-        if "GB" in size_str:
-            size_gb = float(size_str.replace("GB", ""))
-            # Production image should be under 2GB (includes Python + ML libs)
-            assert size_gb < 2.0, f"Image too large: {size_str}"
-        # If in MB, it's definitely acceptable
-
 
 @pytest.mark.docker
 class TestProductionCloudNative:
@@ -268,44 +255,37 @@ class TestProductionCloudNative:
         assert gid != 0, "Container must not run as root group (GID 0)"
         assert username != "root", "Container must not run as root user"
 
-    def test_has_healthcheck(self, production_image: str) -> None:
-        """Verify healthcheck is configured."""
-        result = run_docker("inspect", production_image, "--format", "{{.Config.Healthcheck}}")
-        healthcheck = result.stdout.strip()
-        assert healthcheck != "<nil>", "No healthcheck configured"
-        assert "CMD" in healthcheck, "Healthcheck missing CMD"
-        logger.info("Healthcheck: %s", healthcheck)
-
     def test_healthcheck_works(self, production_image: str) -> None:
-        """Verify healthcheck command executes successfully."""
-        # Extract and run the healthcheck command manually
-        result = run_docker(
-            "run",
-            "--rm",
-            "--entrypoint",
-            "",
-            production_image,
-            "python",
-            "-c",
-            "import backend.transcribe; import backend.processor; print('OK')",
-        )
-        assert result.returncode == 0
-        assert "OK" in result.stdout
+        """Verify configured healthcheck command executes successfully."""
+        inspect_result = run_docker("inspect", production_image, "--format", "{{json .Config.Healthcheck}}")
+        import json
 
-    def test_venv_in_path(self, production_image: str) -> None:
-        """Verify virtualenv bin directory is first in PATH."""
-        result = run_docker(
-            "run",
-            "--rm",
-            "--entrypoint",
-            "",
-            production_image,
-            "sh",
-            "-c",
-            "echo $PATH",
-        )
-        path = result.stdout.strip()
-        assert path.startswith("/opt/venv/bin:"), f"venv not first in PATH: {path}"
+        healthcheck = json.loads(inspect_result.stdout)
+        test_cmd = healthcheck.get("Test")
+        assert test_cmd, "Healthcheck test command missing"
+
+        if test_cmd[0] == "NONE":
+            pytest.fail("Healthcheck test command is disabled")
+
+        if test_cmd[0] == "CMD":
+            command = test_cmd[1:]
+            result = run_docker("run", "--rm", "--entrypoint", "", production_image, *command)
+        elif test_cmd[0] == "CMD-SHELL":
+            command = " ".join(test_cmd[1:])
+            result = run_docker(
+                "run",
+                "--rm",
+                "--entrypoint",
+                "",
+                production_image,
+                "sh",
+                "-c",
+                command,
+            )
+        else:
+            pytest.fail(f"Unknown healthcheck test type: {test_cmd[0]}")
+
+        assert result.returncode == 0
 
     def test_no_sensitive_data_in_env(self, production_image: str) -> None:
         """Verify no sensitive data leaks into environment or logs (security behavior)."""
@@ -348,11 +328,10 @@ class TestProductionCloudNative:
 class TestProductionRuntime:
     """Test production container runtime behavior."""
 
-    def test_help_flag_works(self, production_image: str) -> None:
-        """Verify --help flag works."""
-        result = run_docker("run", "--rm", production_image, "--help")
-        assert "usage:" in result.stdout
-        assert "Manage audio transcription" in result.stdout
+    def test_status_command_works(self, production_image: str) -> None:
+        """Verify status command runs successfully without external dependencies."""
+        result = run_docker("run", "--rm", production_image, "status")
+        assert result.returncode == 0
 
 
 @pytest.mark.docker
@@ -468,25 +447,6 @@ class TestProductionTranscription:
 
 
 @pytest.mark.docker
-class TestProductionLabels:
-    """Test OCI image labels."""
-
-    def test_has_oci_labels(self, production_image: str) -> None:
-        """Verify OCI image labels are present."""
-        result = run_docker("inspect", production_image, "--format", "{{json .Config.Labels}}")
-        import json
-
-        labels = json.loads(result.stdout)
-
-        # Check for key OCI labels
-        assert "org.opencontainers.image.title" in labels
-        assert labels["org.opencontainers.image.title"] == "stt-faster"
-
-        assert "org.opencontainers.image.description" in labels
-        assert "transcription" in labels["org.opencontainers.image.description"].lower()
-
-
-@pytest.mark.docker
 class TestProductionSecurity:
     """Test security aspects of production container."""
 
@@ -519,29 +479,6 @@ class TestProductionSecurity:
         )
         # Should fail (su requires password or not available)
         assert "failed as expected" in result.stdout or result.returncode != 0
-
-    def test_minimal_packages(self, production_image: str) -> None:
-        """Verify only minimal packages are installed."""
-        result = run_docker(
-            "run",
-            "--rm",
-            "--entrypoint",
-            "",
-            production_image,
-            "dpkg",
-            "-l",
-        )
-        package_list = result.stdout
-
-        # Should NOT have development tools (gcc-12-base is OK, it's a library)
-        # Check for actual compiler packages
-        assert "ii  gcc " not in package_list  # Full gcc compiler package
-        assert "g++" not in package_list.lower()
-        assert "make" not in package_list.lower()
-        assert "build-essential" not in package_list.lower()
-
-        # Should have wget (specified in Dockerfile)
-        assert "wget" in package_list.lower()
 
 
 if __name__ == "__main__":

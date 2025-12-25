@@ -134,15 +134,21 @@ class TestDockerRuntime:
 class TestDockerPythonEnvironment:
     """Test Python environment inside container."""
 
-    def test_non_root_user(self, docker_container: None) -> None:
-        """Verify container runs as non-root user."""
-        result = exec_in_container("whoami")
-        assert result.stdout.strip() == "appuser"
-
-    def test_hf_cache_directory(self, docker_container: None) -> None:
-        """Verify HuggingFace cache directory exists."""
-        result = exec_in_container("ls", "-ld", "/hf_cache")
-        assert "appuser" in result.stdout
+    def test_hf_cache_configured_and_writable(self, docker_container: None) -> None:
+        """Verify HuggingFace cache is configured and writable."""
+        result = exec_in_container(
+            "python",
+            "-c",
+            (
+                "import os, pathlib, uuid; "
+                "hf_home = os.environ.get('HF_HOME'); "
+                "assert hf_home == '/hf_cache', f'Unexpected HF_HOME: {hf_home}'; "
+                "test_path = pathlib.Path(hf_home) / f'test_{uuid.uuid4().hex}'; "
+                "test_path.write_text('ok'); "
+                "print(test_path)"
+            ),
+        )
+        assert result.returncode == 0
 
 
 class TestDockerVolumes:
