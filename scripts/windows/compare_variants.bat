@@ -107,7 +107,7 @@ echo ========================================
 echo Builtin Variant Comparison
 echo ========================================
 echo.
-echo Model: TalTech Estonian Whisper (et-large)
+echo Model: TalTech Estonian Whisper (default: et-subs)
 echo Language: Estonian
 echo Processing audio file: !AUDIO_FILE!
 echo WSL path: !WSL_INPUT_DIR!
@@ -120,12 +120,14 @@ REM   HF_HUB_CACHE - Hugging Face hub cache
 REM Output: Both txt and json formats
 REM Output structure: variant_outputs/variant_XXX_name/processed/
 REM Note: transcribe_manager.py processes folders, so we pass the directory containing the file
+REM Note: Using default preset (et-subs) - can be overridden with --preset if needed
 echo Starting transcription...
 echo NOTE: You will see real-time progress for each variant as it processes.
 echo.
 
 REM Run transcription with output going directly to console for real-time display
-wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --preset et-large --language et --output-format both --variants '!VARIANTS!'"
+REM Using default preset (et-subs) - remove --preset to use default
+wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --language et --output-format both --variants '!VARIANTS!'"
 set "TRANSCRIBE_ERROR=!errorlevel!"
 
 echo.
