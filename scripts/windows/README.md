@@ -15,7 +15,7 @@ One-click audio transcription for Windows + WSL users.
    Example: `%USERPROFILE%\Downloads\transcribe\`
 
 2. **Add audio files** to the same folder  
-   Supported: `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`, `.wma`
+   Supported: `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`, `.wma`, `.aac`
 
 3. **Double-click** the batch file
 
