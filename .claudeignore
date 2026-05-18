@@ -1,0 +1,41 @@
+# Build artifacts
+*.egg-info/
+__pycache__/
+.venv/
+.venv-ci/
+.ruff_cache/
+.pytest_cache/
+.uv-cache/
+.uv-cache-hooks/
+.pre-commit-cache/
+.mypy_cache/
+
+# Sibling AI-tool configs (tracked but not for Claude context)
+.codex/
+.cursor/
+.gemini/
+
+# Runtime artifacts
+logs/
+reports/
+tmp*/
+*.db
+*.sqlite*
+wget-log*
+
+# Models / large caches
+models/
+.cache/
+model_cache/
+
+# Archived docs / one-off session outputs
+docs/archived/
+docs/plans/archived/
+docs/analysis/
+
+# Windows scripts (WSL interop disabled)
+*.bat
+*.cmd
+
+# Generated/exported variant data
+docs/variant_values*.txt
