@@ -53,7 +53,7 @@ agent-specific integration details and health checks.
 
 ## Overview
 
-This project uses GitHub Actions for CI/CD and security scanning, with automated release processes for promoting changes from `dev` to `main`.
+This project uses GitHub Actions for CI/CD and security scanning on the `main` branch.
 
 ## Available Workflows
 
@@ -71,7 +71,7 @@ This project uses GitHub Actions for CI/CD and security scanning, with automated
 
 ### 3. CI Pipeline (`python-lint-test.yml`)
 - **Purpose**: Linting, testing, and type checking
-- **Triggers**: PR to main/dev, manual, weekly schedule
+- **Triggers**: PR to main, manual, weekly schedule
 - **Jobs**: `lint` → `fast_tests` (depends on `lint`), `pyright`, `docker_smoke_tests`
 - **Duration**: 5-15 minutes for fast tests
 

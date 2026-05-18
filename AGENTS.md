@@ -14,7 +14,7 @@ How to work safely and correctly in this repo. Follow unless a human overrides.
 - Prefer local tools; check `which` before Docker/CI wrappers.  
 - Avoid `docker compose down -v` except for test-only stacks.  
 - Pipe pager-prone commands with `| cat` (use `bash -o pipefail -c 'cmd | cat'`).  
-- Git: Conventional Commits, default to `dev`, use `git --no-pager log`.  
+- Git: Conventional Commits; use `git --no-pager log`.  
 - When plan-only, gather context, output a numbered plan, stop; once approved, store in `docs_AI_coder/plan.md`.
 
 ## Commands & tasks (stop on first failure)  
