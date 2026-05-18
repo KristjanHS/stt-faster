@@ -231,6 +231,65 @@ def _get_all_variants() -> list[Variant]:
                 )[4]
             )(),
         ),
+        # Variant 60: Variant 44 without volume amplification (for loud sources, e.g. Teams call audio)
+        Variant(
+            name="noamp_beam7_pat12",
+            number=60,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config,
+                )[3]
+            )(),
+        ),
+        # Variant 61: Variant 56 without volume amplification
+        Variant(
+            name="noamp_beam7_pat12_rep105",
+            number=61,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("repetition_penalty", 1.05),
+                    config,
+                )[4]
+            )(),
+        ),
+        # Variant 62: Variant 57 without volume amplification
+        Variant(
+            name="noamp_beam7_pat12_norep2",
+            number=62,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("no_repeat_ngram_size", 2),
+                    config,
+                )[4]
+            )(),
+        ),
+        # Variant 63: Variant 58 without volume amplification
+        Variant(
+            name="noamp_beam7_pat12_len098",
+            number=63,
+            preprocess_steps=[],
+            transcription_config=(
+                lambda: (
+                    config := create_baseline_config(),
+                    config.set("beam_size", 7),
+                    config.set("patience", 1.2),
+                    config.set("length_penalty", 0.98),
+                    config,
+                )[4]
+            )(),
+        ),
     ]
 
 
@@ -270,10 +329,14 @@ def get_builtin_variants() -> list[Variant]:
     - Variant 58: Variant 44 + length_penalty=0.95
     - Variant 52: Variant 36 with volume_db=1.0
     - Variant 53: Variant 42 with volume_db=1.0
+    - Variant 60: Variant 44 without volume amplification (no preprocess)
+    - Variant 61: Variant 56 without volume amplification
+    - Variant 62: Variant 57 without volume amplification
+    - Variant 63: Variant 58 without volume amplification
     """
     all_variants = _get_all_variants()
     # active_variant_numbers = {1} | {36} | set(range(42, 46)) | set(range(52, 54))
-    active_variant_numbers = {44, 56, 57, 58}
+    active_variant_numbers = {60, 61, 62, 63}
 
     return [v for v in all_variants if v.number in active_variant_numbers]
 

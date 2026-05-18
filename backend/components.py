@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 # Supported audio file extensions
-SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma"}
+SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma", ".aac"}
 
 # Folder names for processed and failed files
 PROCESSED_FOLDER_NAME = "processed"

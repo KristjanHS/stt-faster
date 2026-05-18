@@ -152,7 +152,7 @@ Input Folder/
 
 ### Supported Formats
 
-- `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`, `.wma`
+- `.wav`, `.mp3`, `.m4a`, `.flac`, `.ogg`, `.wma`, `.aac`
 
 ## Dependencies
 
