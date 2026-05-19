@@ -155,7 +155,7 @@ docker compose -f docker/docker-compose.yml down
 **Current state:** Removed (not needed for pure transcription tool).
 
 If you need LLM features:
-- See `.cursor/plans/architecture_refactoring_plan.md`
+- See `.cursor/plans/archived/architecture_refactoring_plan.md` (historical refactor plan)
 - Consider Issue #1: Identity Crisis
 
 ---
@@ -249,5 +249,5 @@ docker compose -f docker/docker-compose.yml config | grep volumes -A 10
 
 - [Main README](../README.md) - Project overview and setup
 - [Testing Approach](../docs/testing_approach.md) - Test strategy
-- [Architecture Plan](../.cursor/plans/architecture_refactoring_plan.md) - Refactoring details
+- [Architecture Plan (archived)](../.cursor/plans/archived/architecture_refactoring_plan.md) - Historical refactor plan, completed
 

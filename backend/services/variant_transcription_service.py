@@ -40,14 +40,13 @@ class VariantTranscriptionService:
         if not any(step.enabled for step in variant.preprocess_steps) and not variant.custom_preprocess_runner:
             self.preprocess_config.enabled = False
 
-        # Create preprocessing runner from variant
+        # Create preprocessing runner from variant.
+        # No VariantRunContext: this service doesn't write intermediate files,
+        # so all context fields are at their defaults (None / False).
         self.preprocess_runner = create_variant_preprocess_runner(
             variant,
             self.preprocess_config,
             base_name=None,
-            datetime_suffix=None,
-            output_dir=None,
-            copy_intermediate=False,
         )
 
         # Get transcription config based on variant preset

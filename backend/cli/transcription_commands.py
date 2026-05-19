@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import inspect
 import json
 import logging
 import os
@@ -37,69 +36,24 @@ LOGGER = logging.getLogger(__name__)
 app = typer.Typer(name="transcribe", help="Transcription processing commands")
 
 
+_TEST_RUN_SENTINELS: tuple[str, ...] = ("pytest", "unittest", "junit")
+
+
 def _is_test_run() -> bool:
-    """Check if the current execution is part of a test run (pytest/junit).
+    """Return True when this process is running under a test runner.
 
-    Detects test context by checking:
-    1. pytest environment variables (PYTEST_CURRENT_TEST) - most reliable
-    2. Command line arguments containing 'pytest' or running via pytest module
-    3. Call stack for test-related function names (only if pytest is active)
-
-    Returns:
-        True if running in a test context, False otherwise (production run)
+    PYTEST_CURRENT_TEST is set by pytest for each test item; the argv
+    sentinel check covers unittest/junit + bare `pytest` invocations that
+    have not yet entered a test item. The sentinel is matched against
+    each argv token's basename so it does not false-positive on path
+    arguments like `--db-path /tmp/pytest_results/db.duckdb`.
     """
-    # Check for pytest environment variable (most reliable indicator)
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return True
-
-    # Check command line for test-related arguments (primary check)
-    # This catches: pytest, python -m pytest, unittest, etc.
-    cmd_line = " ".join(sys.argv).lower()
-    if any(keyword in cmd_line for keyword in ["pytest", "unittest", "junit", "-m pytest", "test.py"]):
-        return True
-
-    # Check if pytest module is loaded AND we're in a test execution context
-    # (not just imported for type checking or other reasons)
-    if "pytest" in sys.modules:
-        try:
-            import pytest
-
-            # Check if pytest is actually running (has a session)
-            # This is more reliable than just checking if it's imported
-            # Use getattr to avoid pyright errors on private attribute
-            if hasattr(pytest, "_session") and getattr(pytest, "_session", None) is not None:
-                return True
-        except (ImportError, AttributeError):
-            pass
-
-    # Check call stack for test-related function names
-    # Only do this if we have strong indicators we're in a test
-    # (to avoid false positives from imports)
-    frame = inspect.currentframe()
-    if frame:
-        try:
-            # Walk up the call stack looking for test indicators
-            stack = inspect.stack()
-            for frame_info in stack:
-                func_name = frame_info.function.lower()
-                filename = frame_info.filename.lower()
-
-                # Only flag as test if we see clear test patterns
-                # AND the file is in a tests directory
-                if func_name.startswith("test_") and ("/tests/" in filename or "\\tests\\" in filename):
-                    return True
-
-                # Check if called from test files in tests directory
-                if ("/tests/" in filename or "\\tests\\" in filename) and (
-                    filename.endswith("_test.py")
-                    or filename.endswith("test.py")
-                    or "/test_" in filename
-                    or "\\test_" in filename
-                ):
-                    return True
-        finally:
-            del frame
-
+    for arg in sys.argv:
+        basename = os.path.basename(arg).lower()
+        if any(s in basename for s in _TEST_RUN_SENTINELS):
+            return True
     return False
 
 
@@ -352,6 +306,103 @@ def _process_single_variant(
         return 1
 
 
+def _run_single_variant(
+    variant: Variant,
+    args: argparse.Namespace,
+    input_folder: Path,
+    run_folder: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Process one variant inside a multi-variant run.
+
+    Returns (variant_meta, results): the metadata block destined for
+    ``run_meta.json`` and the per-variant counts dict consumed by the
+    overall summary. On failure the returned dicts encode the error
+    rather than raising — multi-variant runs must continue past a
+    single failing variant.
+    """
+    overrides = _get_variant_overrides(variant)
+    overrides_str = _format_overrides_concise(overrides)
+    console.print(f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] (overrides: {overrides_str})")
+
+    try:
+        run_config = RunConfig.from_env_and_variant(input_folder, variant)
+        run_config.model_preset = args.preset
+        run_config.language = args.language
+        run_config.output_format = args.output_format
+
+        transcription_service = ServiceFactory.create_transcription_service(
+            variant=variant,
+            preset=args.preset,
+            language=args.language,
+            output_format=args.output_format,
+        )
+        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        file_mover = ServiceFactory.create_file_mover()
+        output_writer = ServiceFactory.create_output_writer()
+
+        processor = TranscriptionProcessor(
+            transcription_service=transcription_service,
+            state_store=state_store,
+            file_mover=file_mover,
+            output_writer=output_writer,
+            run_config=run_config,
+            disable_file_moving=True,
+        )
+
+        # Single run folder for all variants; the processor prefixes filenames
+        # with variant number so outputs don't collide.
+        processor.processed_folder = run_folder
+        processor.failed_folder = run_folder / "failed"
+        processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
+        processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
+        processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
+        processor.processed_folder.mkdir(exist_ok=True, parents=True)
+        processor.failed_folder.mkdir(exist_ok=True, parents=True)
+
+        results = processor.process_folder()
+
+        json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
+        json_filename = json_files[0].name if json_files else None
+
+        transcription_config = variant.transcription_config
+        variant_meta: dict[str, Any] = {
+            "variant_number": variant.number,
+            "variant_name": variant.name,
+            "json_filename": json_filename,
+            "transcription_config": {
+                "beam_size": getattr(transcription_config, "beam_size", None),
+                "chunk_length": getattr(transcription_config, "chunk_length", None),
+                "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
+                "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
+                "vad_filter": getattr(transcription_config, "vad_filter", None),
+                "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
+            },
+            "results": {
+                "succeeded": results.get("succeeded", 0),
+                "failed": results.get("failed", 0),
+            },
+        }
+
+        console.print(
+            f"[green]✓[/green] Variant {variant.number} completed: "
+            f"{results.get('succeeded', 0)} succeeded, {results.get('failed', 0)} failed"
+        )
+        return variant_meta, results
+
+    except Exception as error:
+        console.print(f"[red]✗[/red] Variant {variant.number} failed: {error}")
+        if getattr(args, "verbose", False):
+            LOGGER.exception("Full error details:")
+        failed_meta: dict[str, Any] = {
+            "variant_number": variant.number,
+            "variant_name": variant.name,
+            "error": str(error),
+            "results": {"succeeded": 0, "failed": 0},
+        }
+        failed_results: dict[str, Any] = {"succeeded": 0, "failed": 0, "error": str(error)}
+        return failed_meta, failed_results
+
+
 def _process_multi_variant(
     args: argparse.Namespace,
     input_folder: Path,
@@ -372,110 +423,18 @@ def _process_multi_variant(
     git_commit = _get_git_commit_hash()
     timestamp = datetime.now()
     timestamp_str = timestamp.isoformat()
-    # Create timestamped folder name (filesystem-safe)
     timestamp_folder = timestamp.strftime("%Y-%m-%dT%H-%M-%S")
 
-    # Create single timestamped output directory directly under input folder
     run_folder = input_folder / timestamp_folder
     run_folder.mkdir(exist_ok=True)
 
-    # Collect all variant metadata
     all_variant_metadata: list[dict[str, Any]] = []
     all_results: dict[int, dict[str, Any]] = {}
 
     for variant in variants:
-        overrides = _get_variant_overrides(variant)
-        overrides_str = _format_overrides_concise(overrides)
-        console.print(f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] (overrides: {overrides_str})")
-
-        try:
-            # Create services using factory
-            # Create run configuration for this variant
-            run_config = RunConfig.from_env_and_variant(input_folder, variant)
-            run_config.model_preset = args.preset
-            run_config.language = args.language
-            run_config.output_format = args.output_format
-
-            transcription_service = ServiceFactory.create_transcription_service(
-                variant=variant,
-                preset=args.preset,
-                language=args.language,
-                output_format=args.output_format,
-            )
-            state_store = ServiceFactory.create_state_store(db_path=args.db_path)
-            file_mover = ServiceFactory.create_file_mover()
-            output_writer = ServiceFactory.create_output_writer()
-
-            # Create processor with variant-specific output handling
-            # Disable file moving so all variants can process the same input files
-            processor = TranscriptionProcessor(
-                transcription_service=transcription_service,
-                state_store=state_store,
-                file_mover=file_mover,
-                output_writer=output_writer,
-                run_config=run_config,
-                disable_file_moving=True,
-            )
-
-            # Use single run folder for all outputs
-            # Files will be prefixed with variant number in the processor
-            processor.processed_folder = run_folder
-            processor.failed_folder = run_folder / "failed"
-            # Set output base dir and store variant info for filename prefixing
-            processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
-            processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
-            processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
-            processor.processed_folder.mkdir(exist_ok=True, parents=True)
-            processor.failed_folder.mkdir(exist_ok=True, parents=True)
-
-            results = processor.process_folder()
-            all_results[variant.number] = results
-
-            # Find JSON file(s) created for this variant
-            # Pattern: variant_{number:03d}_{name}_*.json
-            json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
-            json_filename = json_files[0].name if json_files else None
-
-            # Collect variant metadata
-            transcription_config = variant.transcription_config
-            variant_meta = {
-                "variant_number": variant.number,
-                "variant_name": variant.name,
-                "json_filename": json_filename,  # Store exact filename for easy lookup
-                "transcription_config": {
-                    "beam_size": getattr(transcription_config, "beam_size", None),
-                    "chunk_length": getattr(transcription_config, "chunk_length", None),
-                    "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
-                    "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
-                    "vad_filter": getattr(transcription_config, "vad_filter", None),
-                    "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
-                },
-                "results": {
-                    "succeeded": results.get("succeeded", 0),
-                    "failed": results.get("failed", 0),
-                },
-            }
-            all_variant_metadata.append(variant_meta)
-
-            console.print(
-                f"[green]✓[/green] Variant {variant.number} completed: "
-                f"{results.get('succeeded', 0)} succeeded, {results.get('failed', 0)} failed"
-            )
-
-        except Exception as error:
-            console.print(f"[red]✗[/red] Variant {variant.number} failed: {error}")
-            if getattr(args, "verbose", False):
-                LOGGER.exception("Full error details:")
-            all_results[variant.number] = {"succeeded": 0, "failed": 0, "error": str(error)}
-            # Add failed variant to metadata
-            all_variant_metadata.append(
-                {
-                    "variant_number": variant.number,
-                    "variant_name": variant.name,
-                    "error": str(error),
-                    "results": {"succeeded": 0, "failed": 0},
-                }
-            )
+        variant_meta, results = _run_single_variant(variant, args, input_folder, run_folder)
+        all_variant_metadata.append(variant_meta)
+        all_results[variant.number] = results
 
     # Write single run_meta.json with all variants
     run_meta = {
@@ -526,10 +485,10 @@ def cmd_process(args: argparse.Namespace) -> int:
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    # Automatically use production database for all non-test runs
-    # When db_path is None, TranscriptionDatabase uses get_default_db_path() which
-    # returns the production database path (~/.local/share/stt-faster/transcribe_state.duckdb)
-    # Only use production DB if this is NOT a test run
+    # When db_path is None, downstream ServiceFactory.create_state_store falls
+    # back to get_default_db_path() (~/.local/share/stt-faster/transcribe_state.duckdb).
+    # The test-run check below only adjusts log verbosity — it does NOT
+    # redirect to a separate test database; tests pass an explicit db_path.
     is_test = _is_test_run()
     if args.db_path is None and not is_test:
         # Ensure db_path remains None to use production database

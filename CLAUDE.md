@@ -25,7 +25,7 @@ Batch speech-to-text pipeline built on `faster-whisper` (Estonian default, Engli
 3. **No `print` in app or test code.** Use `logging` (Ruff T201 enforces this). Log files only under `logs/`; structured logging with proper levels.
 4. **Never `docker compose down -v` on non-test stacks** — removes volumes and any persisted state. Plain `down` only, unless the compose file is explicitly test-only.
 5. **Run pre-commit + tests after edits.** If a failure persists after a fix, stop and surface logs before retrying (max three attempts). State expected vs. actual before deciding whether to change the test or the code.
-6. **No summary docs.** Don't create `TASK_SUMMARY.md`-style trailing artifacts. End summaries belong in chat / the commit message unless explicitly requested. Plans (when approved) go in `docs_AI_coder/plan.md`.
+6. **No summary docs.** Don't create `TASK_SUMMARY.md`-style trailing artifacts. End summaries belong in chat / the commit message unless explicitly requested. Plans (when approved) go in `docs/plans/`.
 7. **Conventional Commits.** Primary branch is `main`.
 8. **Secrets stay out of git.** `.secrets.baseline` (detect-secrets) gates this — don't bypass.
 
@@ -48,5 +48,5 @@ When running `pytest tests/ -q` over the full suite, pass `timeout: 300000` to t
 
 | Rule file | Triggers on | Key content |
 |-----------|-------------|-------------|
-| `.claude/rules/plan-hygiene.md` | `docs/**`, `docs_AI_coder/**`, `CLAUDE.md`, `.claude/rules/**` | Write-gate (no plan doc for ≤2-file/1-session work), archival rules, multi-stage gating, feature-removal grep |
+| `.claude/rules/plan-hygiene.md` | `docs/**`, `CLAUDE.md`, `.claude/rules/**` | Write-gate (no plan doc for ≤2-file/1-session work), archival rules, multi-stage gating, feature-removal grep |
 | `.claude/rules/rule-authoring.md` | `.claude/rules/**` | Copy shipped-fix form verbatim when adding rule examples — design-doc forms often carry the pre-fix shape |

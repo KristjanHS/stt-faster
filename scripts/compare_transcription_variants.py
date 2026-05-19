@@ -15,7 +15,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.variants import execute_variant, get_builtin_variants
+from backend.run_config import VariantRunContext
+from backend.variants.executor import execute_variant
+from backend.variants.registry import get_builtin_variants
 
 LOGGER = logging.getLogger(__name__)
 
@@ -194,10 +196,12 @@ def main() -> int:
             audio_path=str(audio_path),
             preset=args.preset,
             language=args.language,
-            output_dir=output_dir,
-            output_base_path=output_base_path,
-            datetime_suffix=datetime_suffix,
-            copy_intermediate=args.intermcopy,
+            context=VariantRunContext(
+                output_dir=output_dir,
+                output_base_path=output_base_path,
+                datetime_suffix=datetime_suffix,
+                copy_intermediate=args.intermcopy,
+            ),
         )
         results.append(result)
 

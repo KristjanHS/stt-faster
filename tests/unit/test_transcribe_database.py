@@ -373,10 +373,12 @@ def test_migration_on_production_database() -> None:
         columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
         db_columns = {row[0] for row in columns_result}
 
-        # Extract INSERT columns from source code
-        from backend.database import TranscriptionDatabase as DB
+        # Extract INSERT columns from source code (parsed from the free function
+        # in backend.database.file_metrics; the TranscriptionDatabase method is
+        # a thin delegate post-Stage-D.2 split)
+        from backend.database.file_metrics import record_file_metric
 
-        source = inspect.getsource(DB.record_file_metric)
+        source = inspect.getsource(record_file_metric)
         match = re.search(r"INSERT INTO file_metrics\s*\((.*?)\)\s*VALUES", source, re.DOTALL)
         assert match is not None, "Could not parse INSERT statement"
         columns_text = match.group(1)
@@ -740,12 +742,13 @@ def test_file_metrics_schema_consistency(temp_db: TranscriptionDatabase) -> None
     columns_result = temp_db.conn.execute("DESCRIBE file_metrics").fetchall()
     db_columns = {row[0] for row in columns_result}
 
-    # Extract column names from the INSERT statement in record_file_metric
-    # Read the actual INSERT statement from the source code to ensure we test against reality
-    from backend.database import TranscriptionDatabase as DB
+    # Extract column names from the INSERT statement in record_file_metric.
+    # Parse the free function in backend.database.file_metrics; the
+    # TranscriptionDatabase method is a thin delegate post-Stage-D.2 split.
+    from backend.database.file_metrics import record_file_metric
 
-    # Get the source code of record_file_metric method
-    source = inspect.getsource(DB.record_file_metric)
+    # Get the source code of the persistence function
+    source = inspect.getsource(record_file_metric)
 
     # Extract the INSERT statement from the source
     match = re.search(r"INSERT INTO file_metrics\s*\((.*?)\)\s*VALUES", source, re.DOTALL)
@@ -1016,10 +1019,11 @@ def test_file_metrics_schema_consistency_catches_missing_column(tmp_path: Path) 
     columns_result = db.conn.execute("DESCRIBE file_metrics").fetchall()
     db_columns = {row[0] for row in columns_result}
 
-    # Extract INSERT columns from source code (same logic as main test)
-    from backend.database import TranscriptionDatabase as DB
+    # Extract INSERT columns from source code (same logic as main test).
+    # Free function lives in backend.database.file_metrics post-Stage-D.2 split.
+    from backend.database.file_metrics import record_file_metric
 
-    source = inspect.getsource(DB.record_file_metric)
+    source = inspect.getsource(record_file_metric)
     match = re.search(r"INSERT INTO file_metrics\s*\((.*?)\)\s*VALUES", source, re.DOTALL)
     assert match is not None, "Could not parse INSERT statement"
     columns_text = match.group(1)

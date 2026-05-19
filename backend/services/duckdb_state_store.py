@@ -4,7 +4,16 @@ from backend.database import FileMetricRecord, RunRecord, TranscriptionDatabase
 
 
 class DuckDBStateStore:
-    """Concrete implementation using DuckDB."""
+    """Concrete StateStore (`backend.services.interfaces.StateStore`) backed by `TranscriptionDatabase`.
+
+    The methods here are thin one-liners — by design. They exist to keep
+    `TranscriptionDatabase` (DuckDB-flavored) from leaking into every
+    caller of the `StateStore` Protocol. Swapping in an in-memory or
+    SQLite-backed store for tests or future backends means writing a
+    sibling class, not editing every `state_store=` callsite. Removing
+    this wrapper would couple the processor/components layer to the
+    concrete DB type and erase the Protocol seam.
+    """
 
     def __init__(self, db: TranscriptionDatabase):
         self._db = db

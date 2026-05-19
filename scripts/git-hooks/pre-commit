@@ -32,21 +32,15 @@ else
     exit 1
 fi
 
-# Run pre-commit on all files
-# This will run: ruff (fix + format), yamlfmt, detect-secrets, and custom secrets scan
-"$PRE_COMMIT_CMD" run --all-files 2>&1
-EXIT_CODE=$?
-
-if [ $EXIT_CODE -ne 0 ]; then
+# Delegate staging/stash isolation to the pre-commit framework itself — `pre-commit run`
+# (no `--all-files`) already restricts hooks to the staged set and stashes unstaged work
+# for the duration of the run. Full-repo sweep = `make pre-commit`.
+if ! "$PRE_COMMIT_CMD" run 2>&1; then
     log ERROR "❌ Pre-commit checks failed. Please fix the issues and try again."
     log INFO "💡 You can run individual hooks with: pre-commit run <hook-id>"
     log INFO "💡 Or run on specific files: pre-commit run --files <file1> <file2>"
     exit 1
 fi
-
-# Stage any files that were modified by the pre-commit hooks
-log INFO "✓ Staging any files modified by pre-commit hooks..."
-git add -u
 
 log INFO "✅ Pre-commit checks passed successfully."
 log INFO "🎉 All checks completed: Ruff formatting, YAML formatting, and secrets scanning"

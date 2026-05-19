@@ -7,6 +7,7 @@ from typing import NoReturn
 import typer
 
 from backend.cli import db, transcription_commands
+from backend.config import setup_logging
 
 app = typer.Typer(
     name="stt-faster",
@@ -21,6 +22,7 @@ app.add_typer(db.app, name="db")
 
 def main() -> NoReturn:
     """Main entrypoint for stt-faster CLI."""
+    setup_logging()
     app()
     raise SystemExit(0)
 

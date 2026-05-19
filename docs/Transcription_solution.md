@@ -130,8 +130,8 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
    - Supports custom preprocessing runners and transcription configs
    - Handles model loading, caching, and transcription execution
 
-4. **Database** (`backend/database.py`)
-   - SQLite-based tracking of processed files
+4. **Database** (`backend/database/`)
+   - DuckDB-based tracking of processed files
    - Records run metadata and file-level metrics
    - Provides status summaries and history
 
