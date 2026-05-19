@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
-from huggingface_hub.utils.tqdm import disable_progress_bars
+from huggingface_hub.utils import disable_progress_bars  # pyright: ignore[reportPrivateImportUsage]
 
 from backend.exceptions import ModelNotFoundError
 

@@ -36,19 +36,25 @@ LOGGER = logging.getLogger(__name__)
 app = typer.Typer(name="transcribe", help="Transcription processing commands")
 
 
-_TEST_RUN_SENTINELS: tuple[str, ...] = ("pytest", "unittest", "junit", "test.py")
+_TEST_RUN_SENTINELS: tuple[str, ...] = ("pytest", "unittest", "junit")
 
 
 def _is_test_run() -> bool:
     """Return True when this process is running under a test runner.
 
-    PYTEST_CURRENT_TEST is set by pytest for each test item; argv sentinels
-    cover unittest/junit and direct `python test_*.py` invocations.
+    PYTEST_CURRENT_TEST is set by pytest for each test item; the argv
+    sentinel check covers unittest/junit + bare `pytest` invocations that
+    have not yet entered a test item. The sentinel is matched against
+    each argv token's basename so it does not false-positive on path
+    arguments like `--db-path /tmp/pytest_results/db.duckdb`.
     """
     if os.environ.get("PYTEST_CURRENT_TEST"):
         return True
-    cmd_line = " ".join(sys.argv).lower()
-    return any(s in cmd_line for s in _TEST_RUN_SENTINELS)
+    for arg in sys.argv:
+        basename = os.path.basename(arg).lower()
+        if any(s in basename for s in _TEST_RUN_SENTINELS):
+            return True
+    return False
 
 
 def _get_git_commit_hash() -> str | None:
@@ -479,10 +485,10 @@ def cmd_process(args: argparse.Namespace) -> int:
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    # Automatically use production database for all non-test runs
-    # When db_path is None, TranscriptionDatabase uses get_default_db_path() which
-    # returns the production database path (~/.local/share/stt-faster/transcribe_state.duckdb)
-    # Only use production DB if this is NOT a test run
+    # When db_path is None, downstream ServiceFactory.create_state_store falls
+    # back to get_default_db_path() (~/.local/share/stt-faster/transcribe_state.duckdb).
+    # The test-run check below only adjusts log verbosity — it does NOT
+    # redirect to a separate test database; tests pass an explicit db_path.
     is_test = _is_test_run()
     if args.db_path is None and not is_test:
         # Ensure db_path remains None to use production database
