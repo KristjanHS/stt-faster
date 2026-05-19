@@ -374,6 +374,222 @@ def maybe_log_progress(
     return now
 
 
+def _parse_suppress_tokens(raw: str | None) -> list[int] | None:
+    """Parse ``transcription_config.suppress_tokens`` into the form faster-whisper expects.
+
+    Empty/None → ``None`` (no suppression). ``"-1"`` → ``[-1]`` (the faster-whisper default).
+    Comma-separated ints → parsed list. Malformed → log a warning and fall back to ``[-1]``.
+    """
+    if not raw:
+        return None
+    if raw == "-1":
+        return [-1]
+    try:
+        return [int(t.strip()) for t in raw.split(",")]
+    except ValueError:
+        LOGGER.warning(
+            "Invalid suppress_tokens format '%s', using default [-1]",
+            raw,
+        )
+        return [-1]
+
+
+def _apply_language_default(language: str | None, preset: str) -> str | None:
+    """Apply the Estonian-preset language default.
+
+    When ``language`` is unset and the preset name marks an Estonian model
+    (``et-*``), default to Estonian. Otherwise return ``language`` unchanged
+    (``None`` ⇒ faster-whisper auto-detects).
+    """
+    if language is None and preset.startswith("et-"):
+        return "et"
+    return language
+
+
+def _collect_segments(
+    segments: Iterable["Segment"],
+    *,
+    no_speech_threshold: float,
+    logprob_threshold: float,
+    total_audio_duration: float | None,
+    transcribe_start: float,
+) -> tuple[list[Dict[str, Any]], int, list[Dict[str, Any]]]:
+    """Drain the faster-whisper segment iterator into a payload list + skip stats.
+
+    Returns ``(segment_payloads, no_speech_skips, no_speech_skip_windows)``.
+
+    For every emitted segment we (a) build its JSON payload, (b) count it against
+    the no-speech heuristic when both ``no_speech_prob`` and ``avg_logprob`` are
+    present, and (c) emit incremental progress logs (rate-limited inside
+    :func:`maybe_log_progress`). These segments are output segments that happen
+    to match the skip heuristic — truly skipped windows produce no segment at all.
+    """
+    segment_payloads: list[Dict[str, Any]] = []
+    no_speech_skips = 0
+    no_speech_skip_windows: list[Dict[str, Any]] = []
+    audio_processed = 0.0
+    last_progress_log = transcribe_start
+
+    for segment in segments:
+        segment_payloads.append(segment_to_payload(segment))
+
+        no_speech_prob = getattr(segment, "no_speech_prob", None)
+        avg_logprob = getattr(segment, "avg_logprob", None)
+        seg_start = getattr(segment, "start", None)
+        seg_end = getattr(segment, "end", None)
+
+        if no_speech_prob is not None and avg_logprob is not None:
+            no_speech_val = float(no_speech_prob)
+            avg_logprob_val = float(avg_logprob)
+            if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
+                no_speech_skips += 1
+                skip_window = {
+                    "start": float(seg_start) if seg_start is not None else None,
+                    "end": float(seg_end) if seg_end is not None else None,
+                    "no_speech_prob": no_speech_val,
+                    "avg_logprob": avg_logprob_val,
+                }
+                skip_window = {k: v for k, v in skip_window.items() if v is not None}
+                if skip_window:
+                    no_speech_skip_windows.append(skip_window)
+
+        end_time = getattr(segment, "end", None)
+        if end_time is not None:
+            audio_processed = max(audio_processed, float(end_time))
+
+        last_progress_log = maybe_log_progress(
+            processed_seconds=audio_processed,
+            total_seconds=total_audio_duration,
+            start_time=transcribe_start,
+            last_log_time=last_progress_log,
+        )
+
+    return segment_payloads, no_speech_skips, no_speech_skip_windows
+
+
+def _build_metrics_payload(
+    *,
+    path: str,
+    preset: str,
+    preset_config: ModelConfig,
+    requested_language: str | None,
+    applied_language: str | None,
+    detected_language: str | None,
+    language_probability: float | None,
+    audio_duration: float | None,
+    overall_time: float,
+    transcribe_time: float,
+    speed_ratio: float | None,
+    preprocess_result: PreprocessResult,
+    preprocess_config: PreprocessConfig,
+    transcription_config: TranscriptionConfig,
+    segment_payloads: list[Dict[str, Any]],
+    no_speech_skips: int,
+    no_speech_skip_windows: list[Dict[str, Any]],
+) -> TranscriptionMetrics:
+    """Assemble the canonical :class:`TranscriptionMetrics` snapshot for one run.
+
+    Pure construction — no logging, no I/O, no mutation of inputs. Pulls per-step
+    preprocess details (loudnorm/denoise backends) off ``preprocess_result.metrics``
+    and merges them with the caller-supplied timing/language/segment stats.
+    """
+    preprocess_steps = [
+        {"name": step.name, "backend": step.backend, "duration": step.duration}
+        for step in preprocess_result.metrics.steps
+    ]
+
+    loudnorm_step = next((s for s in preprocess_result.metrics.steps if s.name == "loudnorm"), None)
+    denoise_step = next((s for s in preprocess_result.metrics.steps if s.name == "denoise_light"), None)
+
+    return TranscriptionMetrics(
+        # File and model info
+        audio_path=path,
+        preset=preset,
+        # Language detection
+        requested_language=requested_language,
+        applied_language=applied_language,
+        detected_language=detected_language,
+        language_probability=language_probability,
+        # Timing metrics
+        audio_duration=audio_duration,
+        total_processing_time=overall_time,
+        transcribe_duration=transcribe_time,
+        preprocess_duration=preprocess_result.metrics.total_duration,
+        speed_ratio=speed_ratio,
+        # Preprocessing configuration
+        preprocess_enabled=preprocess_config.enabled,
+        preprocess_profile=preprocess_result.profile,
+        target_sample_rate=preprocess_config.target_sample_rate,
+        target_channels=preprocess_config.target_channels,
+        preprocess_snr_before=preprocess_result.metrics.snr_before,
+        preprocess_snr_after=preprocess_result.metrics.snr_after,
+        preprocess_steps=preprocess_steps,
+        rnnoise_model=preprocess_config.rnnoise_model,
+        rnnoise_mix=preprocess_config.rnnoise_mix,
+        # Audio inspection (from input_info)
+        input_channels=preprocess_result.input_info.channels if preprocess_result.input_info else None,
+        input_sample_rate=preprocess_result.input_info.sample_rate if preprocess_result.input_info else None,
+        input_format=preprocess_result.input_info.sample_format if preprocess_result.input_info else None,
+        # Downmix/resample parameters
+        volume_adjustment_db=-6.0,  # Hardcoded in downmix_and_resample
+        resampler="soxr",  # Hardcoded in downmix_and_resample
+        sample_format="s16",  # Hardcoded in downmix_and_resample (16-bit signed)
+        # Loudness normalization parameters
+        loudnorm_preset=preprocess_config.loudnorm_preset,
+        loudnorm_target_i=preprocess_config.loudnorm_target_i(),
+        loudnorm_target_tp=preprocess_config.loudnorm_target_tp(),
+        loudnorm_target_lra=preprocess_config.loudnorm_target_lra(),
+        loudnorm_backend=loudnorm_step.backend if loudnorm_step else None,
+        # Denoise parameters
+        denoise_method="spectral_gate" if denoise_step else None,  # Hardcoded in denoise_light
+        denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
+        # SNR estimation
+        snr_estimation_method="estimate_snr_db",  # Hardcoded method
+        # Transcription parameters
+        # Note: This function always passes all parameters from transcription_config to model.transcribe(),
+        # so all values are known and captured here. For baseline/minimal variants (see variants/executor.py),
+        # some parameters may be None because they weren't explicitly passed, and faster-whisper uses
+        # its own internal defaults (which we don't know). Those None values are correctly preserved
+        # in the database to indicate unknown library defaults rather than assumed config defaults.
+        beam_size=transcription_config.beam_size,
+        patience=transcription_config.patience,
+        word_timestamps=transcription_config.word_timestamps,
+        task=transcription_config.task,
+        chunk_length=transcription_config.chunk_length,
+        vad_filter=transcription_config.vad_filter,
+        vad_threshold=transcription_config.vad_threshold,
+        vad_min_speech_duration_ms=cast(int | None, transcription_config.vad_parameters.get("min_speech_duration_ms")),
+        vad_max_speech_duration_s=transcription_config.vad_parameters.get("max_speech_duration_s"),
+        vad_min_silence_duration_ms=cast(
+            int | None, transcription_config.vad_parameters.get("min_silence_duration_ms")
+        ),
+        vad_speech_pad_ms=cast(int | None, transcription_config.vad_parameters.get("speech_pad_ms")),
+        temperature=transcription_config.temperature,
+        temperature_increment_on_fallback=transcription_config.temperature_increment_on_fallback,
+        best_of=transcription_config.best_of,
+        compression_ratio_threshold=transcription_config.compression_ratio_threshold,
+        logprob_threshold=transcription_config.logprob_threshold,
+        no_speech_threshold=transcription_config.no_speech_threshold,
+        length_penalty=transcription_config.length_penalty,
+        repetition_penalty=transcription_config.repetition_penalty,
+        no_repeat_ngram_size=transcription_config.no_repeat_ngram_size,
+        suppress_tokens=transcription_config.suppress_tokens,
+        condition_on_previous_text=transcription_config.condition_on_previous_text,
+        initial_prompt=transcription_config.initial_prompt,
+        # Model parameters
+        model_id=preset_config.model_id,
+        device=preset_config.device,
+        compute_type=preset_config.compute_type,
+        # Output parameters (these will come from processor context in future enhancement)
+        output_format=None,  # Not available at this level, will be set by processor
+        float_precision=FLOAT_PRECISION,
+        # Segment statistics
+        segment_count=len(segment_payloads),
+        no_speech_skips_count=no_speech_skips,  # Always record, even if 0
+        no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
+    )
+
+
 def transcribe(
     path: str,
     preset: str = "et-large",
@@ -410,9 +626,7 @@ def transcribe(
 
         # Auto-detect language based on preset if not explicitly provided
         requested_language = language
-        applied_language = requested_language
-        if applied_language is None:
-            applied_language = "et" if preset.startswith("et-") else None
+        applied_language = _apply_language_default(requested_language, preset)
 
         # Log language configuration
         if applied_language:
@@ -426,22 +640,7 @@ def transcribe(
         vad_params = dict(transcription_config.vad_parameters)
         vad_params["threshold"] = transcription_config.vad_threshold
 
-        # Parse suppress_tokens from string to list[int] or None
-        # faster-whisper expects Optional[List[int]], default is [-1]
-        suppress_tokens_list: list[int] | None = None
-        if transcription_config.suppress_tokens:
-            if transcription_config.suppress_tokens == "-1":
-                suppress_tokens_list = [-1]  # Default value
-            else:
-                # Parse comma-separated token IDs
-                try:
-                    suppress_tokens_list = [int(t.strip()) for t in transcription_config.suppress_tokens.split(",")]
-                except ValueError:
-                    LOGGER.warning(
-                        "Invalid suppress_tokens format '%s', using default [-1]",
-                        transcription_config.suppress_tokens,
-                    )
-                    suppress_tokens_list = [-1]
+        suppress_tokens_list = _parse_suppress_tokens(transcription_config.suppress_tokens)
 
         segments, info = model.transcribe(
             str(preprocess_result.output_path),
@@ -470,55 +669,13 @@ def transcribe(
         if total_audio_duration and not duration_hint:
             LOGGER.info("Input duration: %.1f minutes", total_audio_duration / 60)
 
-        segment_payloads: list[Dict[str, Any]] = []
-        audio_processed = 0.0
-        last_progress_log = transcribe_start
-        no_speech_skips = 0
-        no_speech_skip_windows: list[Dict[str, Any]] = []
-
-        # Track segments that would have been skipped due to no_speech_threshold
-        no_speech_threshold = transcription_config.no_speech_threshold
-        logprob_threshold = transcription_config.logprob_threshold
-
-        for segment in segments:
-            segment_payloads.append(segment_to_payload(segment))
-
-            # Track segments that match skip criteria
-            # (no_speech_prob > threshold AND avg_logprob <= threshold)
-            # Note: These are segments that passed but match skip criteria.
-            # Truly skipped windows don't appear in output.
-            no_speech_prob = getattr(segment, "no_speech_prob", None)
-            avg_logprob = getattr(segment, "avg_logprob", None)
-            seg_start = getattr(segment, "start", None)
-            seg_end = getattr(segment, "end", None)
-
-            if no_speech_prob is not None and avg_logprob is not None:
-                no_speech_val = float(no_speech_prob)
-                avg_logprob_val = float(avg_logprob)
-                if no_speech_val > no_speech_threshold and avg_logprob_val <= logprob_threshold:
-                    no_speech_skips += 1
-                    # Add to debug list
-                    skip_window = {
-                        "start": float(seg_start) if seg_start is not None else None,
-                        "end": float(seg_end) if seg_end is not None else None,
-                        "no_speech_prob": no_speech_val,
-                        "avg_logprob": avg_logprob_val,
-                    }
-                    # Remove None values
-                    skip_window = {k: v for k, v in skip_window.items() if v is not None}
-                    if skip_window:
-                        no_speech_skip_windows.append(skip_window)
-
-            end_time = getattr(segment, "end", None)
-            if end_time is not None:
-                audio_processed = max(audio_processed, float(end_time))
-
-            last_progress_log = maybe_log_progress(
-                processed_seconds=audio_processed,
-                total_seconds=total_audio_duration,
-                start_time=transcribe_start,
-                last_log_time=last_progress_log,
-            )
+        segment_payloads, no_speech_skips, no_speech_skip_windows = _collect_segments(
+            segments,
+            no_speech_threshold=transcription_config.no_speech_threshold,
+            logprob_threshold=transcription_config.logprob_threshold,
+            total_audio_duration=total_audio_duration,
+            transcribe_start=transcribe_start,
+        )
 
         transcribe_time = time.time() - transcribe_start
 
@@ -552,103 +709,24 @@ def transcribe(
             LOGGER.info("⚡ Speed: %.2fx realtime (%.1fs audio in %.1fs)", speed_ratio, duration, transcribe_time)
         LOGGER.info("✅ Total processing time: %.2f seconds", overall_time)
 
-        preprocess_steps = [
-            {"name": step.name, "backend": step.backend, "duration": step.duration}
-            for step in preprocess_result.metrics.steps
-        ]
-
-        # Extract preprocessing step details for new metrics fields
-        loudnorm_step = next((s for s in preprocess_result.metrics.steps if s.name == "loudnorm"), None)
-        denoise_step = next((s for s in preprocess_result.metrics.steps if s.name == "denoise_light"), None)
-
-        metrics_payload = TranscriptionMetrics(
-            # File and model info
-            audio_path=path,
+        metrics_payload = _build_metrics_payload(
+            path=path,
             preset=preset,
-            # Language detection
+            preset_config=preset_config,
             requested_language=requested_language,
             applied_language=applied_language,
             detected_language=detected_lang,
             language_probability=lang_prob,
-            # Timing metrics
             audio_duration=duration,
-            total_processing_time=overall_time,
-            transcribe_duration=transcribe_time,
-            preprocess_duration=preprocess_result.metrics.total_duration,
+            overall_time=overall_time,
+            transcribe_time=transcribe_time,
             speed_ratio=speed_ratio,
-            # Preprocessing configuration
-            preprocess_enabled=preprocess_config.enabled,
-            preprocess_profile=preprocess_result.profile,
-            target_sample_rate=preprocess_config.target_sample_rate,
-            target_channels=preprocess_config.target_channels,
-            preprocess_snr_before=preprocess_result.metrics.snr_before,
-            preprocess_snr_after=preprocess_result.metrics.snr_after,
-            preprocess_steps=preprocess_steps,
-            rnnoise_model=preprocess_config.rnnoise_model,
-            rnnoise_mix=preprocess_config.rnnoise_mix,
-            # Audio inspection (from input_info)
-            input_channels=preprocess_result.input_info.channels if preprocess_result.input_info else None,
-            input_sample_rate=preprocess_result.input_info.sample_rate if preprocess_result.input_info else None,
-            input_format=preprocess_result.input_info.sample_format if preprocess_result.input_info else None,
-            # Downmix/resample parameters
-            volume_adjustment_db=-6.0,  # Hardcoded in downmix_and_resample
-            resampler="soxr",  # Hardcoded in downmix_and_resample
-            sample_format="s16",  # Hardcoded in downmix_and_resample (16-bit signed)
-            # Loudness normalization parameters
-            loudnorm_preset=preprocess_config.loudnorm_preset,
-            loudnorm_target_i=preprocess_config.loudnorm_target_i(),
-            loudnorm_target_tp=preprocess_config.loudnorm_target_tp(),
-            loudnorm_target_lra=preprocess_config.loudnorm_target_lra(),
-            loudnorm_backend=loudnorm_step.backend if loudnorm_step else None,
-            # Denoise parameters
-            denoise_method="spectral_gate" if denoise_step else None,  # Hardcoded in denoise_light
-            denoise_library="noisereduce" if denoise_step else None,  # Hardcoded in denoise_light
-            # SNR estimation
-            snr_estimation_method="estimate_snr_db",  # Hardcoded method
-            # Transcription parameters
-            # Note: This function always passes all parameters from transcription_config to model.transcribe(),
-            # so all values are known and captured here. For baseline/minimal variants (see variants/executor.py),
-            # some parameters may be None because they weren't explicitly passed, and faster-whisper uses
-            # its own internal defaults (which we don't know). Those None values are correctly preserved
-            # in the database to indicate unknown library defaults rather than assumed config defaults.
-            beam_size=transcription_config.beam_size,
-            patience=transcription_config.patience,
-            word_timestamps=transcription_config.word_timestamps,
-            task=transcription_config.task,
-            chunk_length=transcription_config.chunk_length,
-            vad_filter=transcription_config.vad_filter,
-            vad_threshold=transcription_config.vad_threshold,
-            vad_min_speech_duration_ms=cast(
-                int | None, transcription_config.vad_parameters.get("min_speech_duration_ms")
-            ),
-            vad_max_speech_duration_s=transcription_config.vad_parameters.get("max_speech_duration_s"),
-            vad_min_silence_duration_ms=cast(
-                int | None, transcription_config.vad_parameters.get("min_silence_duration_ms")
-            ),
-            vad_speech_pad_ms=cast(int | None, transcription_config.vad_parameters.get("speech_pad_ms")),
-            temperature=transcription_config.temperature,
-            temperature_increment_on_fallback=transcription_config.temperature_increment_on_fallback,
-            best_of=transcription_config.best_of,
-            compression_ratio_threshold=transcription_config.compression_ratio_threshold,
-            logprob_threshold=transcription_config.logprob_threshold,
-            no_speech_threshold=transcription_config.no_speech_threshold,
-            length_penalty=transcription_config.length_penalty,
-            repetition_penalty=transcription_config.repetition_penalty,
-            no_repeat_ngram_size=transcription_config.no_repeat_ngram_size,
-            suppress_tokens=transcription_config.suppress_tokens,
-            condition_on_previous_text=transcription_config.condition_on_previous_text,
-            initial_prompt=transcription_config.initial_prompt,
-            # Model parameters
-            model_id=preset_config.model_id,
-            device=preset_config.device,
-            compute_type=preset_config.compute_type,
-            # Output parameters (these will come from processor context in future enhancement)
-            output_format=None,  # Not available at this level, will be set by processor
-            float_precision=FLOAT_PRECISION,
-            # Segment statistics
-            segment_count=len(segment_payloads),
-            no_speech_skips_count=no_speech_skips,  # Always record, even if 0
-            no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
+            preprocess_result=preprocess_result,
+            preprocess_config=preprocess_config,
+            transcription_config=transcription_config,
+            segment_payloads=segment_payloads,
+            no_speech_skips=no_speech_skips,
+            no_speech_skip_windows=no_speech_skip_windows,
         )
         if metrics_collector:
             metrics_collector(metrics_payload)
