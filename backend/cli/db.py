@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import sys
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -10,6 +10,8 @@ import typer
 from rich.console import Console
 
 from backend.database import TranscriptionDatabase
+
+LOGGER = logging.getLogger(__name__)
 
 app = typer.Typer(name="db", help="Database inspection commands")
 console = Console()
@@ -137,11 +139,8 @@ def show(
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
-        if "--verbose" in sys.argv or "-v" in sys.argv:
-            import traceback
-
-            traceback.print_exc()
-        raise typer.Exit(1)
+        LOGGER.exception("db show failed", exc_info=e)
+        raise typer.Exit(1) from e
 
 
 @app.command()
@@ -196,11 +195,8 @@ def recent(
 
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
-        if "--verbose" in sys.argv or "-v" in sys.argv:
-            import traceback
-
-            traceback.print_exc()
-        raise typer.Exit(1)
+        LOGGER.exception("db recent failed", exc_info=e)
+        raise typer.Exit(1) from e
 
 
 @app.command()

@@ -15,7 +15,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from backend.variants import execute_variant, get_builtin_variants
+from backend.variants.executor import execute_variant
+from backend.variants.registry import get_builtin_variants
 
 LOGGER = logging.getLogger(__name__)
 
