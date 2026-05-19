@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
+from typing import Annotated, Any
 
 import typer
 from rich.console import Console
@@ -15,6 +15,8 @@ LOGGER = logging.getLogger(__name__)
 
 app = typer.Typer(name="db", help="Database inspection commands")
 console = Console()
+
+RunRow = dict[str, Any]
 
 
 def get_timezone_offset(timezone_name: str) -> timedelta:
@@ -57,6 +59,121 @@ def format_timestamp(dt: datetime, tz_offset: timedelta) -> tuple[str, str]:
     return utc_str, local_str
 
 
+def _resolve_run_timestamps(run: RunRow, tz_offset: timedelta) -> tuple[str, str] | None:
+    """Return ``(utc_str, local_str)`` for a run row, or ``None`` if the row carries no datetime."""
+    recorded_at = run.get("recorded_at")
+    if not isinstance(recorded_at, datetime):
+        return None
+    return format_timestamp(recorded_at, tz_offset)
+
+
+def _fetch_run_for_show(run_id: int | None) -> RunRow:
+    """Load the run targeted by ``db show``. Raises ``typer.Exit`` on miss / empty history."""
+    with TranscriptionDatabase() as db:
+        if run_id is not None:
+            run = db.get_run_by_id(run_id)
+            if not run:
+                console.print(f"[red]Run ID {run_id} not found in database[/red]")
+                raise typer.Exit(1)
+            return run
+        runs = db.get_run_history(limit=1)
+        if not runs:
+            console.print("[yellow]No runs found in database[/yellow]")
+            raise typer.Exit(0)
+        return runs[0]
+
+
+def _print_timing_block(run: RunRow) -> None:
+    """Print the optional ``--- Timing ---`` rows for a run."""
+    console.print("\n[bold]--- Timing ---[/bold]")
+    total_time = run.get("total_processing_time")
+    if total_time:
+        console.print(f"Total processing time: {total_time:.2f} seconds ({total_time / 60:.2f} minutes)")
+    preprocess_time = run.get("total_preprocess_time")
+    if preprocess_time:
+        console.print(f"Preprocessing time: {preprocess_time:.2f} seconds")
+    transcribe_time = run.get("total_transcribe_time")
+    if transcribe_time:
+        console.print(f"Transcription time: {transcribe_time:.2f} seconds ({transcribe_time / 60:.2f} minutes)")
+    audio_duration = run.get("total_audio_duration")
+    if audio_duration:
+        console.print(f"Total audio duration: {audio_duration:.2f} seconds ({audio_duration / 60:.2f} minutes)")
+    speed_ratio = run.get("speed_ratio")
+    if speed_ratio:
+        console.print(f"Speed ratio: {speed_ratio:.2f}x realtime")
+
+
+def _print_run_details(run: RunRow, run_id: int | None, timezone: str, tz_offset: timedelta) -> None:
+    """Print the full single-run detail view used by ``db show``."""
+    timestamps = _resolve_run_timestamps(run, tz_offset)
+    if timestamps is None:
+        console.print(f"[red]Unexpected timestamp type: {type(run.get('recorded_at'))}[/red]")
+        raise typer.Exit(1)
+    utc_str, local_str = timestamps
+
+    console.print("=" * 80)
+    if run_id is not None:
+        console.print(f"[bold]RUN INFORMATION (ID: {run_id})[/bold]")
+    else:
+        console.print("[bold]LATEST RUN INFORMATION[/bold]")
+    console.print("=" * 80)
+    console.print(f"\nRun ID: {run['id']}")
+    console.print(f"Recorded at (UTC): {utc_str}")
+    console.print(f"Recorded at ({timezone}): {local_str}")
+    console.print(f"\nInput folder: {run.get('input_folder', 'N/A')}")
+    console.print(f"Preset: {run.get('preset', 'N/A')}")
+    console.print(f"Language: {run.get('language', 'N/A')}")
+
+    console.print("\n[bold]--- Configuration ---[/bold]")
+    console.print(f"Preprocess enabled: {run.get('preprocess_enabled', False)}")
+    if run.get("preprocess_profile"):
+        console.print(f"Preprocess profile: {run.get('preprocess_profile')}")
+    console.print(f"Model: {run.get('model_id', 'N/A')}")
+    console.print(f"Device: {run.get('device', 'N/A')}")
+    console.print(f"Compute type: {run.get('compute_type', 'N/A')}")
+
+    console.print("\n[bold]--- Results ---[/bold]")
+    console.print(f"Files found: {run.get('files_found', 0)}")
+    console.print(f"Succeeded: {run.get('succeeded', 0)}")
+    console.print(f"Failed: {run.get('failed', 0)}")
+
+    _print_timing_block(run)
+    console.print("=" * 80)
+
+
+def _print_runs_compact(runs: list[RunRow], tz_offset: timedelta) -> None:
+    """Render the ``db recent --compact`` listing."""
+    console.print(f"\n[bold]Recent {len(runs)} runs (compact):[/bold]\n")
+    for run in runs:
+        timestamps = _resolve_run_timestamps(run, tz_offset)
+        if timestamps is None:
+            continue
+        _, local_str = timestamps
+        console.print(
+            f"  {run['id']:4d} | {local_str} | "
+            f"Succeeded: {run.get('succeeded', 0):3d} | Failed: {run.get('failed', 0):3d}"
+        )
+
+
+def _print_runs_full(runs: list[RunRow], tz_offset: timedelta, timezone: str) -> None:
+    """Render the default per-run summary listing for ``db recent``."""
+    console.print(f"\n[bold]Recent {len(runs)} runs:[/bold]\n")
+    for run in runs:
+        timestamps = _resolve_run_timestamps(run, tz_offset)
+        if timestamps is None:
+            continue
+        utc_str, local_str = timestamps
+
+        console.print("=" * 80)
+        console.print(f"[bold]Run ID: {run['id']}[/bold]")
+        console.print(f"Recorded at (UTC): {utc_str}")
+        console.print(f"Recorded at ({timezone}): {local_str}")
+        console.print(f"Input folder: {run.get('input_folder', 'N/A')}")
+        console.print(f"Preset: {run.get('preset', 'N/A')}")
+        console.print(f"Succeeded: {run.get('succeeded', 0)} | Failed: {run.get('failed', 0)}")
+        console.print("")
+
+
 @app.command()
 def show(
     run_id: Annotated[int | None, typer.Argument(help="Run ID to show. If not provided, shows the latest run.")] = None,
@@ -66,77 +183,8 @@ def show(
     tz_offset = get_timezone_offset(timezone)
 
     try:
-        db = TranscriptionDatabase()
-        if run_id is not None:
-            run = db.get_run_by_id(run_id)
-            if not run:
-                console.print(f"[red]Run ID {run_id} not found in database[/red]")
-                db.close()
-                raise typer.Exit(1)
-        else:
-            runs = db.get_run_history(limit=1)
-            if not runs:
-                console.print("[yellow]No runs found in database[/yellow]")
-                db.close()
-                raise typer.Exit(0)
-            run = runs[0]
-        db.close()
-        recorded_at = run.get("recorded_at")
-
-        # Convert to local timezone for display
-        if isinstance(recorded_at, datetime):
-            if recorded_at.tzinfo is None:
-                recorded_at = recorded_at.replace(tzinfo=UTC)
-            utc_str, local_str = format_timestamp(recorded_at, tz_offset)
-
-            console.print("=" * 80)
-            if run_id is not None:
-                console.print(f"[bold]RUN INFORMATION (ID: {run_id})[/bold]")
-            else:
-                console.print("[bold]LATEST RUN INFORMATION[/bold]")
-            console.print("=" * 80)
-            console.print(f"\nRun ID: {run['id']}")
-            console.print(f"Recorded at (UTC): {utc_str}")
-            console.print(f"Recorded at ({timezone}): {local_str}")
-            console.print(f"\nInput folder: {run.get('input_folder', 'N/A')}")
-            console.print(f"Preset: {run.get('preset', 'N/A')}")
-            console.print(f"Language: {run.get('language', 'N/A')}")
-
-            console.print("\n[bold]--- Configuration ---[/bold]")
-            console.print(f"Preprocess enabled: {run.get('preprocess_enabled', False)}")
-            if run.get("preprocess_profile"):
-                console.print(f"Preprocess profile: {run.get('preprocess_profile')}")
-            console.print(f"Model: {run.get('model_id', 'N/A')}")
-            console.print(f"Device: {run.get('device', 'N/A')}")
-            console.print(f"Compute type: {run.get('compute_type', 'N/A')}")
-
-            console.print("\n[bold]--- Results ---[/bold]")
-            console.print(f"Files found: {run.get('files_found', 0)}")
-            console.print(f"Succeeded: {run.get('succeeded', 0)}")
-            console.print(f"Failed: {run.get('failed', 0)}")
-
-            console.print("\n[bold]--- Timing ---[/bold]")
-            total_time = run.get("total_processing_time")
-            if total_time:
-                console.print(f"Total processing time: {total_time:.2f} seconds ({total_time / 60:.2f} minutes)")
-            preprocess_time = run.get("total_preprocess_time")
-            if preprocess_time:
-                console.print(f"Preprocessing time: {preprocess_time:.2f} seconds")
-            transcribe_time = run.get("total_transcribe_time")
-            if transcribe_time:
-                console.print(f"Transcription time: {transcribe_time:.2f} seconds ({transcribe_time / 60:.2f} minutes)")
-            audio_duration = run.get("total_audio_duration")
-            if audio_duration:
-                console.print(f"Total audio duration: {audio_duration:.2f} seconds ({audio_duration / 60:.2f} minutes)")
-            speed_ratio = run.get("speed_ratio")
-            if speed_ratio:
-                console.print(f"Speed ratio: {speed_ratio:.2f}x realtime")
-
-            console.print("=" * 80)
-        else:
-            console.print(f"[red]Unexpected timestamp type: {type(recorded_at)}[/red]")
-            raise typer.Exit(1)
-
+        run = _fetch_run_for_show(run_id)
+        _print_run_details(run, run_id, timezone, tz_offset)
     except typer.Exit:
         raise
     except Exception as e:
@@ -155,45 +203,17 @@ def recent(
     tz_offset = get_timezone_offset(timezone)
 
     try:
-        db = TranscriptionDatabase()
-        runs = db.get_run_history(limit=limit)
-        db.close()
+        with TranscriptionDatabase() as db:
+            runs = db.get_run_history(limit=limit)
 
         if not runs:
             console.print("[yellow]No runs found in database[/yellow]")
             raise typer.Exit(0)
 
         if compact:
-            # Compact format: ID, timestamp, succeeded/failed
-            console.print(f"\n[bold]Recent {len(runs)} runs (compact):[/bold]\n")
-            for run in runs:
-                recorded_at = run.get("recorded_at")
-                if isinstance(recorded_at, datetime):
-                    if recorded_at.tzinfo is None:
-                        recorded_at = recorded_at.replace(tzinfo=UTC)
-                    _, local_str = format_timestamp(recorded_at, tz_offset)
-                    console.print(
-                        f"  {run['id']:4d} | {local_str} | "
-                        f"Succeeded: {run.get('succeeded', 0):3d} | Failed: {run.get('failed', 0):3d}"
-                    )
+            _print_runs_compact(runs, tz_offset)
         else:
-            # Full format
-            console.print(f"\n[bold]Recent {len(runs)} runs:[/bold]\n")
-            for run in runs:
-                recorded_at = run.get("recorded_at")
-                if isinstance(recorded_at, datetime):
-                    if recorded_at.tzinfo is None:
-                        recorded_at = recorded_at.replace(tzinfo=UTC)
-                    utc_str, local_str = format_timestamp(recorded_at, tz_offset)
-
-                    console.print("=" * 80)
-                    console.print(f"[bold]Run ID: {run['id']}[/bold]")
-                    console.print(f"Recorded at (UTC): {utc_str}")
-                    console.print(f"Recorded at ({timezone}): {local_str}")
-                    console.print(f"Input folder: {run.get('input_folder', 'N/A')}")
-                    console.print(f"Preset: {run.get('preset', 'N/A')}")
-                    console.print(f"Succeeded: {run.get('succeeded', 0)} | Failed: {run.get('failed', 0)}")
-                    console.print("")
+            _print_runs_full(runs, tz_offset, timezone)
 
     except typer.Exit:
         raise
