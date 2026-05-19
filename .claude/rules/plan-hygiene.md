@@ -1,7 +1,6 @@
 ---
 paths:
   - "docs/**/*.md"
-  - "docs_AI_coder/**/*.md"
   - "**/CLAUDE.md"
   - "docs/plans/**/*.md"
   - ".claude/rules/**/*.md"
@@ -17,7 +16,7 @@ last_verified: 2026-05-18
 ## Plan archival
 - Plans representing a single shipped session (≤ 1 day end-to-end, all commits reference the plan path or feature name): `git rm`, don't `git mv`. Git log is the audit trail; the archived md is a second copy. Archive only plans whose design rationale isn't fully captured in commit messages.
 
-Shipped plans left in `docs/plans/` (or `docs_AI_coder/`) auto-load into future sessions and masquerade as active work. When a plan-survey step finds a plan fully shipped, `git mv` it into an `archived/` sibling the same session — don't just note shipped status and move on.
+Shipped plans left in `docs/plans/` auto-load into future sessions and masquerade as active work. When a plan-survey step finds a plan fully shipped, `git mv` it into an `archived/` sibling the same session — don't just note shipped status and move on.
 
 Before `git mv`: grep the plan path across the codebase, docs, and `CLAUDE.md` and update references to the archived location. If a sibling plan references the archived one with conditional/status language (`"Doc A pending"`, `"if X ships first"`, `"either can ship first"`), the condition has resolved — resolve sibling status notes and post-archive diff-list section headers to state the realized order concretely, not as a hypothetical.
 
@@ -30,7 +29,7 @@ When a multi-stage split IS warranted: one file per stage under `docs/plans/`, e
 ## Doc hygiene
 Session-generated audits, analyses, and reports go in an `archived/` or `analysis/` subfolder (and should be `.claudeignore`'d) — not in the reference-doc root. The `docs/` root is for trigger-indexed reference docs listed in `CLAUDE.md`. Don't drop one-off session outputs into the reference tier.
 
-Migration tasks (moving content out of a module/subsystem): before committing, grep the old identifier across `docs/`, `docs_AI_coder/`, `CLAUDE.md`, and `.claude/rules/`. Additive migrations leave stale prose in downstream docs the migrator never opened.
+Migration tasks (moving content out of a module/subsystem): before committing, grep the old identifier across `docs/`, `CLAUDE.md`, and `.claude/rules/`. Additive migrations leave stale prose in downstream docs the migrator never opened.
 
 vN → vN+1 design migrations: grep both the identifier AND the *human-readable feature names* that the old design used. Identifier-level sweeps come up clean while stale wording survives in comments, docstrings, and architecture notes.
 

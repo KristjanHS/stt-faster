@@ -14,6 +14,9 @@ __pycache__/
 .codex/
 .cursor/
 .gemini/
+AGENTS.md
+CODEX_RULES.md
+gemini.md
 
 # Runtime artifacts
 logs/

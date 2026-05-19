@@ -25,7 +25,7 @@ Batch speech-to-text pipeline built on `faster-whisper` (Estonian default, Engli
 3. **No `print` in app or test code.** Use `logging` (Ruff T201 enforces this). Log files only under `logs/`; structured logging with proper levels.
 4. **Never `docker compose down -v` on non-test stacks** — removes volumes and any persisted state. Plain `down` only, unless the compose file is explicitly test-only.
 5. **Run pre-commit + tests after edits.** If a failure persists after a fix, stop and surface logs before retrying (max three attempts). State expected vs. actual before deciding whether to change the test or the code.
-6. **No summary docs.** Don't create `TASK_SUMMARY.md`-style trailing artifacts. End summaries belong in chat / the commit message unless explicitly requested. Plans (when approved) go in `docs_AI_coder/plan.md`.
+6. **No summary docs.** Don't create `TASK_SUMMARY.md`-style trailing artifacts. End summaries belong in chat / the commit message unless explicitly requested. Plans (when approved) go in `docs/plans/`.
 7. **Conventional Commits.** Primary branch is `main`.
 8. **Secrets stay out of git.** `.secrets.baseline` (detect-secrets) gates this — don't bypass.
 
