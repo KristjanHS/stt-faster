@@ -587,6 +587,11 @@ def _build_metrics_payload(
         segment_count=len(segment_payloads),
         no_speech_skips_count=no_speech_skips,  # Always record, even if 0
         no_speech_skip_windows=no_speech_skip_windows if no_speech_skip_windows else None,
+        # Full-config path knows real thresholds, so "matching the rule" == "skipped"
+        # (same data as the legacy fields above; populate both per the canonical-field comment
+        # at TranscriptionMetrics.no_speech_skips_count).
+        segments_matching_no_speech_rule_count=no_speech_skips,
+        segments_matching_no_speech_rule_windows=no_speech_skip_windows if no_speech_skip_windows else None,
     )
 
 
