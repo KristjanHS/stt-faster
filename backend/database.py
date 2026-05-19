@@ -374,7 +374,7 @@ def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnect
             LOGGER.debug("Normalized tables exist, skipping migration 4 (transcription params in run_configs)")
             return
     except Exception as exc:
-        LOGGER.debug("migration check failed: %s", exc)
+        LOGGER.debug("migration 4 normalized-table probe failed: %s", exc)
 
     existing_columns = _get_columns(conn, "runs")
     transcription_columns = {
@@ -428,7 +428,7 @@ def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnect
             LOGGER.debug("Normalized tables exist, skipping migration 5 (preprocessing params in run_configs)")
             return
     except Exception as exc:
-        LOGGER.debug("migration check failed: %s", exc)
+        LOGGER.debug("migration 5 normalized-table probe failed: %s", exc)
 
     existing_columns = _get_columns(conn, "runs")
     preprocessing_columns = {
@@ -478,7 +478,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
             LOGGER.debug("Normalized tables already exist, skipping migration 6 (schema already normalized)")
             return
     except Exception as exc:
-        LOGGER.debug("migration check — Continue to check old columns failed: %s", exc)
+        LOGGER.debug("migration 6 normalized-table probe failed; will fall through to old-column check: %s", exc)
 
     # Check if migration is needed by looking for old wide columns
     try:
@@ -547,7 +547,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
         transaction_started = True
     except Exception as exc:
         LOGGER.debug(
-            "DuckDB may not support explicit transactions for DDL, continue anyway: %s",
+            "migration 6 BEGIN TRANSACTION failed (DuckDB may not support explicit transactions for DDL): %s",
             exc,
         )
 
@@ -566,12 +566,12 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
                 try:
                     conn.execute("DROP TABLE IF EXISTS runs_new")
                 except Exception as exc:
-                    LOGGER.debug("cleanup failed: %s", exc)
+                    LOGGER.debug("migration 6 abort-path: runs_new drop failed: %s", exc)
                 if transaction_started:
                     try:
                         conn.execute("COMMIT")
                     except Exception as exc:
-                        LOGGER.debug("transaction commit failed: %s", exc)
+                        LOGGER.debug("migration 6 abort-path: commit failed: %s", exc)
                 return
         except Exception:
             existing_normalized = set()
@@ -643,16 +643,16 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
             try:
                 conn.execute("DROP TABLE IF EXISTS runs_new")
             except Exception as exc:
-                LOGGER.debug("cleanup failed: %s", exc)
+                LOGGER.debug("migration 6 no-data-path: runs_new drop failed: %s", exc)
             try:
                 conn.execute("DROP TABLE IF EXISTS file_metrics_new")
             except Exception as exc:
-                LOGGER.debug("cleanup failed: %s", exc)
+                LOGGER.debug("migration 6 no-data-path: file_metrics_new drop failed: %s", exc)
             if transaction_started:
                 try:
                     conn.execute("COMMIT")
                 except Exception as exc:
-                    LOGGER.debug("transaction commit failed: %s", exc)
+                    LOGGER.debug("migration 6 no-data-path: commit failed: %s", exc)
             return
 
         # Get all existing runs
@@ -802,15 +802,15 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
         try:
             conn.execute("DROP TABLE IF EXISTS run_parameters")
         except Exception as exc:
-            LOGGER.debug("migration cleanup failed: %s", exc)
+            LOGGER.debug("migration 6 drop run_parameters failed: %s", exc)
         try:
             conn.execute("DROP TABLE IF EXISTS run_metrics")
         except Exception as exc:
-            LOGGER.debug("migration cleanup failed: %s", exc)
+            LOGGER.debug("migration 6 drop run_metrics failed: %s", exc)
         try:
             conn.execute("DROP TABLE IF EXISTS run_configs")
         except Exception as exc:
-            LOGGER.debug("migration cleanup failed: %s", exc)
+            LOGGER.debug("migration 6 drop run_configs failed: %s", exc)
         # Note: We don't touch file_metrics - it doesn't have a foreign key constraint
         # and its structure doesn't change in this migration
 
@@ -834,7 +834,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
                     try:
                         conn.execute("DROP TABLE IF EXISTS runs_new")
                     except Exception as exc:
-                        LOGGER.debug("cleanup failed: %s", exc)
+                        LOGGER.debug("migration 6 already-normalized branch: runs_new drop failed: %s", exc)
                 else:
                     # Runs exists but is not normalized - we can't drop it due to foreign keys
                     # This shouldn't happen if the early checks worked, but handle it gracefully
@@ -842,7 +842,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
                     try:
                         conn.execute("DROP TABLE IF EXISTS runs_new")
                     except Exception as exc:
-                        LOGGER.debug("cleanup failed: %s", exc)
+                        LOGGER.debug("migration 6 stuck-old-schema branch: runs_new drop failed: %s", exc)
             else:
                 # Runs doesn't exist, safe to rename
                 try:
@@ -898,7 +898,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
             try:
                 conn.execute("ALTER TABLE runs ALTER COLUMN id SET DEFAULT nextval('seq_runs_id')")
             except Exception as exc:
-                LOGGER.debug("Skip if table has foreign key dependencies failed: %s", exc)
+                LOGGER.debug("migration 6 runs.id sequence default failed (likely foreign-key blocked): %s", exc)
         conn.execute("CREATE SEQUENCE IF NOT EXISTS seq_run_parameters_id START 1")
         conn.execute("ALTER TABLE run_parameters ALTER COLUMN id SET DEFAULT nextval('seq_run_parameters_id')")
 
@@ -907,7 +907,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
             try:
                 conn.execute("COMMIT")
             except Exception as exc:
-                LOGGER.debug("DuckDB may auto-commit, that's fine: %s", exc)
+                LOGGER.debug("migration 6 final commit failed (DuckDB may auto-commit): %s", exc)
 
         LOGGER.info("Completed runs table normalization migration")
     except Exception:
@@ -917,7 +917,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
                 conn.execute("ROLLBACK")
             except Exception as exc:
                 LOGGER.debug(
-                    "DuckDB may not support rollback for DDL, log and continue: %s",
+                    "migration 6 rollback failed (DuckDB may not support rollback for DDL): %s",
                     exc,
                 )
         raise
@@ -1043,7 +1043,7 @@ class TranscriptionDatabase:
                     self.conn.execute("ALTER TABLE runs ALTER COLUMN id SET DEFAULT nextval('seq_runs_id')")
             except Exception as exc:
                 LOGGER.debug(
-                    "If we can't check or alter, continue - sequence will work anyway: %s",
+                    "_init_db runs.id sequence default skipped (probe or ALTER failed; sequence still works): %s",
                     exc,
                 )
 
@@ -1548,7 +1548,7 @@ class TranscriptionDatabase:
             self.conn.execute("BEGIN TRANSACTION")
             transaction_started = True
         except Exception as exc:
-            LOGGER.debug("DuckDB may auto-commit, continue anyway: %s", exc)
+            LOGGER.debug("record_run: BEGIN TRANSACTION failed (DuckDB may auto-commit): %s", exc)
 
         try:
             # Insert core run data
@@ -1696,7 +1696,7 @@ class TranscriptionDatabase:
                 try:
                     self.conn.commit()
                 except Exception as exc:
-                    LOGGER.debug("transaction commit failed: %s", exc)
+                    LOGGER.debug("record_run: commit failed: %s", exc)
 
             LOGGER.debug("Recorded run with ID: %s", run_id)
             return run_id
@@ -1708,7 +1708,7 @@ class TranscriptionDatabase:
                     self.conn.rollback()
                 except Exception as exc:
                     LOGGER.debug(
-                        "DuckDB may not support rollback, continue anyway: %s",
+                        "record_run: rollback failed (DuckDB may not support rollback): %s",
                         exc,
                     )
             msg = f"Failed to record run: {e}"
