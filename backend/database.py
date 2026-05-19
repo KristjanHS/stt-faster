@@ -316,6 +316,47 @@ def _add_columns_if_missing(
         conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
 
 
+def _begin_transaction(conn: duckdb.DuckDBPyConnection, label: str) -> bool:
+    """Issue BEGIN TRANSACTION; return whether it succeeded.
+
+    DuckDB may auto-commit DDL or not support explicit transactions in some modes;
+    we log and treat that as "no transaction started" so callers can short-circuit
+    matching COMMIT/ROLLBACK calls.
+    """
+    try:
+        conn.execute("BEGIN TRANSACTION")
+        return True
+    except Exception as exc:
+        LOGGER.debug(
+            "%s: BEGIN TRANSACTION failed (DuckDB may not support explicit transactions): %s",
+            label,
+            exc,
+        )
+        return False
+
+
+def _commit_transaction(conn: duckdb.DuckDBPyConnection, label: str) -> None:
+    """Issue COMMIT; log on failure rather than raising.
+
+    Used on cleanup/auto-commit paths where the caller has already decided that a
+    swallowed commit error is acceptable (the alternative is leaking the failure
+    to a caller who has no meaningful recovery). Callers that need failure to
+    propagate should issue `conn.commit()` directly.
+    """
+    try:
+        conn.execute("COMMIT")
+    except Exception as exc:
+        LOGGER.debug("%s: commit failed: %s", label, exc)
+
+
+def _rollback_transaction(conn: duckdb.DuckDBPyConnection, label: str) -> None:
+    """Issue ROLLBACK; log on failure rather than raising."""
+    try:
+        conn.execute("ROLLBACK")
+    except Exception as exc:
+        LOGGER.debug("%s: rollback failed (DuckDB may not support rollback): %s", label, exc)
+
+
 def _migration_001_add_rnnoise_columns(conn: duckdb.DuckDBPyConnection) -> None:
     """Add rnnoise_model and rnnoise_mix columns to file_metrics."""
     existing_columns = _get_columns(conn, "file_metrics")
@@ -517,15 +558,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
     LOGGER.info("Starting runs table normalization migration")
 
     # Wrap migration in transaction for atomicity
-    transaction_started = False
-    try:
-        conn.execute("BEGIN TRANSACTION")
-        transaction_started = True
-    except Exception as exc:
-        LOGGER.debug(
-            "migration 6 BEGIN TRANSACTION failed (DuckDB may not support explicit transactions for DDL): %s",
-            exc,
-        )
+    transaction_started = _begin_transaction(conn, "migration 6")
 
     try:
         # Check if normalized tables already exist (from _init_db for new databases)
@@ -544,10 +577,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
                 except Exception as exc:
                     LOGGER.debug("migration 6 abort-path: runs_new drop failed: %s", exc)
                 if transaction_started:
-                    try:
-                        conn.execute("COMMIT")
-                    except Exception as exc:
-                        LOGGER.debug("migration 6 abort-path: commit failed: %s", exc)
+                    _commit_transaction(conn, "migration 6 abort-path")
                 return
         except Exception:
             existing_normalized = set()
@@ -625,10 +655,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
             except Exception as exc:
                 LOGGER.debug("migration 6 no-data-path: file_metrics_new drop failed: %s", exc)
             if transaction_started:
-                try:
-                    conn.execute("COMMIT")
-                except Exception as exc:
-                    LOGGER.debug("migration 6 no-data-path: commit failed: %s", exc)
+                _commit_transaction(conn, "migration 6 no-data-path")
             return
 
         # Get all existing runs
@@ -880,22 +907,13 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
 
         # Commit transaction if we started one
         if transaction_started:
-            try:
-                conn.execute("COMMIT")
-            except Exception as exc:
-                LOGGER.debug("migration 6 final commit failed (DuckDB may auto-commit): %s", exc)
+            _commit_transaction(conn, "migration 6 final")
 
         LOGGER.info("Completed runs table normalization migration")
     except Exception:
         # Rollback on error if transaction was started
         if transaction_started:
-            try:
-                conn.execute("ROLLBACK")
-            except Exception as exc:
-                LOGGER.debug(
-                    "migration 6 rollback failed (DuckDB may not support rollback for DDL): %s",
-                    exc,
-                )
+            _rollback_transaction(conn, "migration 6")
         raise
 
 
@@ -1519,12 +1537,7 @@ class TranscriptionDatabase:
         recorded_at = _format_timestamp(record.recorded_at)
 
         # Begin transaction for atomicity
-        transaction_started = False
-        try:
-            self.conn.execute("BEGIN TRANSACTION")
-            transaction_started = True
-        except Exception as exc:
-            LOGGER.debug("record_run: BEGIN TRANSACTION failed (DuckDB may auto-commit): %s", exc)
+        transaction_started = _begin_transaction(self.conn, "record_run")
 
         try:
             # Insert core run data
@@ -1664,29 +1677,21 @@ class TranscriptionDatabase:
                     param_data,
                 )
 
-            # Commit transaction if we started one
+            # Commit transaction if we started one. On the started path we let
+            # failure propagate to the outer except so callers see DatabaseError;
+            # on the auto-commit fallback we swallow because there's nothing to
+            # roll back to.
             if transaction_started:
                 self.conn.commit()
             else:
-                # DuckDB may auto-commit, but ensure commit anyway
-                try:
-                    self.conn.commit()
-                except Exception as exc:
-                    LOGGER.debug("record_run: commit failed: %s", exc)
+                _commit_transaction(self.conn, "record_run")
 
             LOGGER.debug("Recorded run with ID: %s", run_id)
             return run_id
 
         except Exception as e:
-            # Rollback on error if transaction was started
             if transaction_started:
-                try:
-                    self.conn.rollback()
-                except Exception as exc:
-                    LOGGER.debug(
-                        "record_run: rollback failed (DuckDB may not support rollback): %s",
-                        exc,
-                    )
+                _rollback_transaction(self.conn, "record_run")
             msg = f"Failed to record run: {e}"
             raise DatabaseError(msg) from e
 
