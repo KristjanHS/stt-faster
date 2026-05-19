@@ -28,6 +28,23 @@ class EffectiveRunConfig:
 
 
 @dataclass(slots=True)
+class VariantRunContext:
+    """Per-variant runtime context: where outputs go and how intermediates are named.
+
+    Bundles the four kwargs previously threaded through ``execute_variant`` and
+    ``create_variant_preprocess_runner`` (``output_dir``, ``output_base_path``,
+    ``datetime_suffix``, ``copy_intermediate``). ``base_name`` stays a per-call
+    argument of ``create_variant_preprocess_runner`` because it is derived from
+    either ``output_base_path`` or the input audio path inside ``execute_variant``.
+    """
+
+    output_dir: Path | None = None
+    output_base_path: Path | None = None
+    datetime_suffix: str | None = None
+    copy_intermediate: bool = False
+
+
+@dataclass(slots=True)
 class RunConfig:
     """Validated configuration with inheritance support.
 
