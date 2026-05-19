@@ -4,6 +4,8 @@
 
 **Scope**: `backend/` only. `tests/`, `scripts/`, `frontend/`, vendored `.cache/` excluded. False-positives for `from __future__ import annotations` filtered out (always reported as unused; mandatory for PEP 604 union syntax on 3.10).
 
+**Pressure-test pass (2026-05-19)**: a follow-up scan extended the audit to `tests/`, `scripts/`, `frontend/`, and `docs/` and ran inversion against the two highest-LOC recommendations (FFmpeg pipeline unification and database split). Results inline as "Pressure-test caveat / found" callouts under §1.2, §1.4, §2.1, plus a new Priority 6 section for cross-cutting findings the per-file analyzer missed. Two original audit claims were amended: (a) `TranscriptionDatabase` cannot be retired (5 script callers); (b) the FFmpeg-pipeline duplication is intentional coexistence (do not unify).
+
 **Top-of-file size table** (largest):
 
 | LOC | File |
@@ -35,6 +37,8 @@ Analyzer flags (HIGH/MED):
 
 **Action**: collapse empty configs into a sentinel; drop the `StepConfig`/`BaseStepConfig` layer; keep typed dataclasses only where they carry real fields (`DenoiseCustomStepConfig`, `LoudnormOnlyStepConfig`, `AresamplLoudnormFixedStepConfig`, `AresamplLoudnormFixed2StepConfig`, `VolumeLimiterStepConfig`, `PeakNormalize2passStepConfig`, `SoxPeakNormalizeStepConfig`, `LoudnormHighpassStepConfig`).
 
+> **Pressure-test caveat (2026-05-19)**: the 9 empty `*StepConfig` dataclasses are not test-imported, but they are **runtime-constructed by `get_builtin_variants()` in `backend/variants/registry.py`** when variant definitions reference them by class. Collapsing to a sentinel requires coordinated registry updates (rewrite the variant definitions to use the sentinel) — not a pure deletion. Verify by grepping `registry.py` and any variant fixture files for each class name before removing.
+
 ### 1.3 Drop NotImplementedError "executor" classes
 `variants/steps.py` defines `FFmpegExecutor`, `SoxExecutor`, `PreprocessStepsExecutor`, `PythonExecutor`, each declared against the `StepExecutor` Protocol. Most methods in each are stubs that raise `NotImplementedError("...should use OtherExecutor")` — analyzer reports LCOM=21 (very low cohesion) for all four.
 
@@ -43,9 +47,19 @@ The "executor" indirection is fake polymorphism: `Step.execute` (L882, cognitive
 **Action**: replace 4 executor classes + 1 Protocol with a small set of module-level functions (`run_resample`, `run_loudnorm_only`, `run_denoise`, `run_ffmpeg_pipeline`, ...) and a single `STEP_HANDLERS: dict[str, Callable]` dispatch table. Removes ~700 lines from `steps.py`.
 
 ### 1.4 Prune dead re-exports / unused imports
-- `backend/variants/__init__.py` re-exports 8 symbols (`execute_variant`, `get_all_variants`, …); analyzer reports none of them imported via the package alias outside of two callsites that already do `from backend.variants import …`. Either keep `__all__` minimal (only the names actually imported through `backend.variants`) or delete the re-export wall.
-- `backend/__init__.py` lazy `__getattr__` re-exports `transcribe`, `transcribe_to_json`, `pick_model` — confirm callers; analyzer didn't find call sites. If unused, drop the file body to a one-line module docstring.
-- Specific unused imports: `Segment`, `TranscriptionInfo` in `transcribe.py:107`; `Variant` in `services/factory.py:22`; `Variant` in `processor.py:20`; `TranscriptionProcessor` in `components.py:21`.
+
+**`backend/variants/__init__.py` re-exports** (`Variant`, `PreprocessStep`, `execute_variant`, `get_all_variants`, `get_builtin_variants`, `get_variant_by_name`, `get_variant_by_number`, `create_variant_preprocess_runner`, `create_variant_transcribe_config`):
+- Pressure-test (2026-05-19) found **one external caller**: `scripts/compare_transcription_variants.py:18` uses `from backend.variants import execute_variant, get_builtin_variants`.
+- The audit's named P1.3 smoke seam `scripts/variant_checks/verify_all_variants.py` imports from submodules (`backend.variants.registry`, `backend.variants.executor`) **not** through the re-export wall — pruning the wall does **not** break that script.
+- **Action**: either update `scripts/compare_transcription_variants.py` to import from submodules first, then delete the re-exports; or keep `__all__` containing just `execute_variant` + `get_builtin_variants` and drop the rest. Do not delete the wall without coordinating the script update.
+
+**`backend/__init__.py` lazy `__getattr__` re-exports** (`transcribe`, `transcribe_to_json`, `pick_model`):
+- Pressure-test confirmed **zero external callers** via the package alias; all consumers use `from backend.transcribe import ...` directly.
+- **Action**: safe to drop the `__getattr__` body and reduce `backend/__init__.py` to a docstring.
+
+**Private-symbol fragility (separate finding)**: `scripts/db/check_parameter_completeness.py:26` imports `_get_all_variants` (leading underscore) directly from `backend.variants.registry`. Not in scope for P1.4 itself, but flag for any future rename of registry internals.
+
+**Specific unused imports**: `Segment`, `TranscriptionInfo` in `transcribe.py:107`; `Variant` in `services/factory.py:22`; `Variant` in `processor.py:20`; `TranscriptionProcessor` in `components.py:21`.
 
 ### 1.5 Replace `try: ... except: pass` stubs in `database.py`
 22 `except Exception: pass` blocks reported (lines 376, 430, 480, 548, 566, 571, 643, 647, 652, 802, 806, 810, 834, 842, 898, 907, 917, 1041, …). Most guard "migration probe" reads (e.g. checking for normalized-table existence). Add `logger.debug("...skipping: %s", exc)` per project Rule #3 (no `print`, structured logging only) so the migrations don't silently swallow real schema errors.
@@ -73,7 +87,7 @@ The "executor" indirection is fake polymorphism: `Step.execute` (L882, cognitive
 - `database/file_metrics.py` — `record_file_metric`, etc.
 - `database/state.py` — file-tracking (queued/in-progress/done) used by `services/duckdb_state_store.py`.
 
-Then `TranscriptionDatabase` becomes a thin coordinator delegating to the modules, or callers import them directly and the class is retired.
+**Façade is mandatory, not optional.** Pressure-test (2026-05-19) confirmed 5 script callers import `TranscriptionDatabase` directly: `scripts/transcribe_manager.py:26`, `scripts/db/show_run.py:20`, `scripts/db/show_recent_runs.py:20`, `scripts/db/check_orphaned_metrics.py:19`, `scripts/db/check_parameter_completeness.py:24`. The original wording ("or callers import them directly and the class is retired") would silently break all five. Keep `from backend.database import TranscriptionDatabase` working — either by promoting `TranscriptionDatabase` to a thin coordinator in `backend/database/__init__.py`, or by re-exporting it from a renamed implementation module. **Do not retire the class.**
 
 ### 2.2 Collapse migration 003/004/005 duplication
 Migrations 003, 004, 005 each loop over a `{column_name: column_type}` dict and run the same `if column_type == "DOUBLE": ... elif "VARCHAR" ... elif "INTEGER" ... elif "BOOLEAN"` ladder (3 occurrences × ~12 lines each, flagged 3× by find_duplicates). The commit-on-COMMIT-or-ROLLBACK pattern in `database.py` lines 568/649/904/914 is also a 4-way duplicate.
@@ -151,6 +165,43 @@ Also: `process_file` (L141) is 80 lines, cyclomatic 16, cognitive 45 — extract
 
 ---
 
+## Priority 6 — Cross-cutting findings the per-file analyzer missed (added 2026-05-19)
+
+These came from a pressure-test pass that grepped `tests/`, `scripts/`, `frontend/`, and `docs/` against the audit's proposals, plus an independent cross-module scan.
+
+### 6.1 Delete `backend/test_cuDNN.py` (vestigial GPU smoke test)
+- Confirmed no imports; not registered in any test runner; not in `.gitignore`. Same class as `transcribe.py.backup` (P1.1).
+- **Action**: `git rm backend/test_cuDNN.py`, or `git mv` to `scripts/` if it's still occasionally useful as a manual smoke. Decide based on whether the team runs it.
+
+### 6.2 CLI traceback-by-argv bypasses logging framework (correctness, not LOC)
+`backend/cli/db.py:138–143` and `:197–202` use:
+```
+except Exception as exc:
+    if "--verbose" in sys.argv:
+        import traceback
+        traceback.print_exc()
+    ...
+```
+This bypasses the rich-tracebacks logger already configured at `backend/cli/config.py:42` (`rich_tracebacks=True`), and the string-in-argv flag check is brittle. Per project Rule #3 (no `print`, structured logging only), both handlers should use `logger.exception(...)` and let the configured handler render the traceback when the log level allows it. Fixes a latent bug, not LOC reduction.
+
+### 6.3 Cross-module `BEGIN TRANSACTION` duplicate inside `database.py`
+Separate from the migration column-loop dedup in P2.2. Lines 546–550 and 1543–1547 both wrap `conn.execute("BEGIN TRANSACTION")` in identical try/except-pass guards (DuckDB auto-commit fallback). Extract `_begin_transaction_or_continue(conn)` alongside `_commit_or_rollback` in P2.2; both helpers live in `database/_txn.py` or similar.
+
+### 6.4 (informational, do **not** unify) Two FFmpeg pipelines are intentional coexistence
+Pressure-test (2026-05-19) traced the relationship between `backend/preprocess/orchestrator.py` (calls `run_ffmpeg_pipeline` from `preprocess/steps/ffmpeg_pipeline.py`) and `backend/variants/preprocess_steps.py` + `backend/variants/steps.py` (21 direct `ffmpeg.run()` sites). They are **not** duplicates:
+- `orchestrator` is the production single-path pipeline (fixed chain, monolithic `PreprocessConfig`, called from `transcribe.transcribe()` and `services/factory.py`).
+- `variants/preprocess_steps` is the research/experimentation system (19+ composable steps, per-step `*StepConfig`, used to compare filter chains).
+- Git history: orchestrator first (`e9fb300` "preprocessing iter 1"), variants added later (`3e34b01` "preprocessing variants added"), with `tests/integration/test_variant_systems_comparison.py` explicitly labeling them as two systems ("legacy system remains untouched and functional").
+- **Action**: none on the cross-pipeline axis. P2.5 (intra-variants `_run_single_filter` extraction) remains valid; do not extend it to absorb the orchestrator path.
+
+### 6.5 (informational, defer) Config schemas across 3 files are layered, not duplicated
+`backend/model_config.py` (model presets), `backend/preprocess/config.py` (env-var ingest), and `backend/run_config.py` (composite `RunConfig`) compose rather than duplicate. The "add a field, touch 3 places" friction is real but pressure-testing for boundary reasons should come **before** any consolidation pass — same trap as 6.4. Not actionable in this audit.
+
+### 6.6 Stale archived plan
+`docs/plans/archived/archit_audit_problem1_solutions.md` embeds `TranscriptionDatabase(db_path)` example code. With P2.1 patched to keep the class as a façade (see above), the staleness risk is downgraded — the imports remain correct. Leave as-is unless the façade approach changes.
+
+---
+
 ## Sequencing & guardrails
 
 1. **P1 first** (1.1 → 1.5) — all of P1 should land as one or two small PRs. Touches few callers; reduces noise for P2 review.
@@ -160,10 +211,13 @@ Also: `process_file` (L141) is 80 lines, cyclomatic 16, cognitive 45 — extract
 
 **For every change**:
 - `make pyright && make unit` after each commit (project Rule #5).
-- After moving symbols across modules, `grep -rn '\bOldName\b' tests/` — pyright won't catch test-only `from x import OldName` until the test runs (per `~/.claude/rules/python-refactors.md` "Removing exported constants").
+- After moving symbols across modules, grep `tests/` **and `scripts/`** for `\bOldName\b` — pyright won't catch test-only or script-only `from x import OldName` until they run (per `~/.claude/rules/python-refactors.md` "Removing exported constants"). The pressure-test pass (2026-05-19) found 5 script callers of `TranscriptionDatabase` and 1 of the `backend.variants` re-export wall that the original audit missed; scripts/ is part of the import surface.
 - For migrations (P2.2), exercise with a copy of `transcribe_state.db` and confirm `_init_db` is idempotent on a fresh DuckDB file.
 - `_migration_006_normalize_runs_schema` carries 375 lines of irreversible schema reshape — do not refactor its body until there is an integration test that round-trips an old-shape DB through it. Move it into a module untouched first; refactor later.
-- **P1.3 (flattening `Step.execute`) has the same risk class.** The 100-line if/elif at `variants/steps.py:882` is the only place step-type → executor wiring is encoded; getting one branch wrong silently swaps step behaviour. Before replacing with a dispatch dict, add an integration test that runs each step type at least once (a "every-variant smoke" pass through `scripts/variant_checks/verify_all_variants.py` or equivalent), and verify the new dispatch produces byte-identical output on a representative input per step type.
+- **P1.3 (flattening `Step.execute`) has the same risk class.** The 100-line if/elif at `variants/steps.py:882` is the only place step-type → executor wiring is encoded; getting one branch wrong silently swaps step behaviour. Before replacing with a dispatch dict, add an integration test that runs each step type at least once (a "every-variant smoke" pass through `scripts/variant_checks/verify_all_variants.py` or equivalent), and verify the new dispatch produces byte-identical output on a representative input per step type. `verify_all_variants.py` imports from `backend.variants.executor` (`transcribe_with_minimal_params`, `create_variant_transcribe_config`), `backend.variants.registry` (`get_builtin_variants`, `get_variant_by_number`), `backend.preprocess.orchestrator` (`PreprocessResult`), and `backend.preprocess.metrics` (`PreprocessMetrics`) — those submodule names are load-bearing for the smoke seam; do not rename them under P1/P2 without coordinated script updates.
+- **P2.1 (database split) must preserve the `from backend.database import TranscriptionDatabase` surface** — 5 scripts depend on it (see §2.1). Either keep the class as a façade in `backend/database/__init__.py`, or re-export it from the renamed implementation module. Verify with `python -c "from backend.database import TranscriptionDatabase"` after the split.
+- **P1.4 prune of `backend/variants/__init__.py` re-exports must precede or coincide with updating `scripts/compare_transcription_variants.py:18`** to import from submodules. The `backend/__init__.py` `__getattr__` drop is independent and has no script callers.
+- **P1.2 collapse of empty `*StepConfig` dataclasses** must also touch `backend/variants/registry.py` and any variant definition files — the empty configs are runtime-constructed by `get_builtin_variants()`, not just declared (see §1.2 caveat).
 
 ## Expected outcome (rough)
 
@@ -179,5 +233,8 @@ Also: `process_file` (L141) is 80 lines, cyclomatic 16, cognitive 45 — extract
 | 2.4 `variants/executor.py` extract | −150 |
 | 2.5 `preprocess_steps.py` dedup | −60 |
 | 4. RunSummarizer → functions | −20 |
+| 6.1 Delete `test_cuDNN.py` | small (~50) |
+| 6.2 CLI logging fix | net 0 (correctness) |
+| 6.3 `BEGIN TRANSACTION` extract | −10 |
 
-**Total**: ~−1150 backend lines, two of the three top-3 largest files drop below the 800-line large-file threshold.
+**Total**: ~−1200 backend lines, two of the three top-3 largest files drop below the 800-line large-file threshold. Note: 6.2 is a latent-bug fix that ships as part of this audit but is not counted as LOC reduction.
