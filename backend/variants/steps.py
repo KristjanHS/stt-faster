@@ -14,7 +14,6 @@ two callers.
 from __future__ import annotations
 
 import logging
-import re
 import shutil
 import subprocess  # nosec B404 - sox invocation with fixed arguments
 import time
@@ -155,69 +154,14 @@ def _handle_peak_normalize_2pass(
     step_index: int,
 ) -> StepMetrics:
     del step_index
-    step_name = "peak_normalize_2pass"
     cfg = config if isinstance(config, PeakNormalize2passStepConfig) else PeakNormalize2passStepConfig()
-    target_sample_rate = global_config.target_sample_rate
-    start = time.time()
-    try:
-        # Pass 1: volumedetect
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
-        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "null",
-            af="volumedetect",
-            f="null",
-        )
-        _, stderr = ffmpeg.run(  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            overwrite_output=True,
-            quiet=True,
-            capture_stdout=True,
-            capture_stderr=True,
-        )
-
-        stderr_str = stderr.decode("utf-8") if isinstance(stderr, bytes) else stderr  # type: ignore[reportUnnecessaryIsInstance]
-        match = re.search(r"max_volume:\s*([-\d.]+)\s*dB", stderr_str)
-        if not match:
-            raise StepExecutionError(step_name, "Could not find max_volume in volumedetect output")
-
-        max_volume_db = float(match.group(1))
-        gain_db = max(0.0, min(-cfg.target_db - max_volume_db, cfg.max_gain_db))
-
-        LOGGER.info(
-            "Peak normalize: max_volume=%.2f dBFS, target=%.2f dBFS, applying gain=%.2f dB",
-            max_volume_db,
-            cfg.target_db,
-            gain_db,
-        )
-
-        if gain_db > 0.0:
-            filter_graph = f"volume={gain_db}dB,alimiter=limit=0.98"
-        else:
-            filter_graph = "alimiter=limit=0.98"
-
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownMemberType]
-        stream = ffmpeg.output(  # type: ignore[reportUnknownMemberType,reportUnknownArgumentType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=1,
-            af=filter_graph,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError(step_name, f"ffmpeg peak normalize failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError(step_name, f"ffmpeg peak normalize error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(
-        name=step_name,
-        backend="ffmpeg",
-        duration=duration,
-        metadata={"target_db": cfg.target_db, "max_gain_db": cfg.max_gain_db, "applied_gain_db": gain_db},
+    return _preprocess_steps.peak_normalize_2pass(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=global_config.target_sample_rate,
+        target_channels=global_config.target_channels or 1,
+        target_db=cfg.target_db,
+        max_gain_db=cfg.max_gain_db,
     )
 
 
@@ -636,6 +580,3 @@ class StepRegistry:
         if step_type not in STEP_HANDLERS:
             raise ValueError(f"Unknown step type: {step_type}")
         return Step(step_type=step_type, config=config)
-
-
-LOGGER.info("Registered %d step types", len(STEP_HANDLERS))
