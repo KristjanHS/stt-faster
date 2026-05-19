@@ -1,0 +1,74 @@
+{
+  "aresampl_loudnorm_fixed": [
+    8000,
+    -12
+  ],
+  "aresampl_loudnorm_fixed2": [
+    8000,
+    -12
+  ],
+  "compressor_limiter": [
+    8000,
+    -12
+  ],
+  "denoise": [
+    8000,
+    -14
+  ],
+  "denoise_custom": [
+    8000,
+    -12
+  ],
+  "dynaudnorm": [
+    8000,
+    -11
+  ],
+  "dynaudnorm_conservative": [
+    8000,
+    -11
+  ],
+  "ffmpeg": [
+    8000,
+    -11
+  ],
+  "highlow_aform_loudnorm": [
+    8000,
+    -12
+  ],
+  "highlow_nosampl_loudnorm": [
+    8000,
+    -13
+  ],
+  "limiter_only": [
+    8000,
+    -11
+  ],
+  "loudnorm_2pass_linear": [
+    8000,
+    -13
+  ],
+  "loudnorm_highpass": [
+    8000,
+    -12
+  ],
+  "loudnorm_only": [
+    8000,
+    -12
+  ],
+  "peak_normalize_2pass": [
+    8000,
+    -8
+  ],
+  "resample": [
+    8000,
+    -11
+  ],
+  "sox_peak_normalize": [
+    8000,
+    -3
+  ],
+  "volume_limiter": [
+    8000,
+    -8
+  ]
+}
