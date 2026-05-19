@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
@@ -16,7 +17,7 @@ LOGGER = logging.getLogger(__name__)
 app = typer.Typer(name="db", help="Database inspection commands")
 console = Console()
 
-RunRow = dict[str, Any]
+RunRow = Mapping[str, Any]
 
 
 def get_timezone_offset(timezone_name: str) -> timedelta:
@@ -141,7 +142,7 @@ def _print_run_details(run: RunRow, run_id: int | None, timezone: str, tz_offset
     console.print("=" * 80)
 
 
-def _print_runs_compact(runs: list[RunRow], tz_offset: timedelta) -> None:
+def _print_runs_compact(runs: Sequence[RunRow], tz_offset: timedelta) -> None:
     """Render the ``db recent --compact`` listing."""
     console.print(f"\n[bold]Recent {len(runs)} runs (compact):[/bold]\n")
     for run in runs:
@@ -155,7 +156,7 @@ def _print_runs_compact(runs: list[RunRow], tz_offset: timedelta) -> None:
         )
 
 
-def _print_runs_full(runs: list[RunRow], tz_offset: timedelta, timezone: str) -> None:
+def _print_runs_full(runs: Sequence[RunRow], tz_offset: timedelta, timezone: str) -> None:
     """Render the default per-run summary listing for ``db recent``."""
     console.print(f"\n[bold]Recent {len(runs)} runs:[/bold]\n")
     for run in runs:
