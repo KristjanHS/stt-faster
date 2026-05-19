@@ -298,6 +298,24 @@ def _get_columns(conn: duckdb.DuckDBPyConnection, table_name: str) -> set[str]:
         return set()
 
 
+def _add_columns_if_missing(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    columns: dict[str, str],
+) -> None:
+    """ALTER TABLE ADD COLUMN for each column in `columns` not already on `table_name`.
+
+    `columns` maps column name → SQL type (e.g. {"patience": "DOUBLE"}). Existing
+    columns are skipped silently; each newly added column emits a DEBUG log.
+    """
+    existing_columns = _get_columns(conn, table_name)
+    for column_name, column_type in columns.items():
+        if column_name in existing_columns:
+            continue
+        LOGGER.debug("Migrating schema: adding %s column to %s", column_name, table_name)
+        conn.execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}")
+
+
 def _migration_001_add_rnnoise_columns(conn: duckdb.DuckDBPyConnection) -> None:
     """Add rnnoise_model and rnnoise_mix columns to file_metrics."""
     existing_columns = _get_columns(conn, "file_metrics")
@@ -322,7 +340,6 @@ def _migration_002_add_file_metrics_columns(conn: duckdb.DuckDBPyConnection) -> 
 
 def _migration_003_add_transcription_params_to_file_metrics(conn: duckdb.DuckDBPyConnection) -> None:
     """Add transcription parameter columns to file_metrics table."""
-    existing_columns = _get_columns(conn, "file_metrics")
     transcription_columns = {
         "patience": "DOUBLE",
         "task": "VARCHAR",
@@ -346,20 +363,7 @@ def _migration_003_add_transcription_params_to_file_metrics(conn: duckdb.DuckDBP
         "condition_on_previous_text": "BOOLEAN",
         "initial_prompt": "VARCHAR",
     }
-
-    for column_name, column_type in transcription_columns.items():
-        if column_name not in existing_columns:
-            LOGGER.debug("Migrating schema: adding %s column to file_metrics", column_name)
-            if column_type == "DOUBLE":
-                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} DOUBLE")
-            elif column_type == "VARCHAR":
-                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} VARCHAR")
-            elif column_type == "INTEGER":
-                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} INTEGER")
-            elif column_type == "BOOLEAN":
-                conn.execute(f"ALTER TABLE file_metrics ADD COLUMN {column_name} BOOLEAN")
-            else:
-                LOGGER.warning("Unknown column type %s for %s, skipping migration", column_type, column_name)
+    _add_columns_if_missing(conn, "file_metrics", transcription_columns)
 
 
 def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnection) -> None:
@@ -376,7 +380,6 @@ def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnect
     except Exception as exc:
         LOGGER.debug("migration 4 normalized-table probe failed: %s", exc)
 
-    existing_columns = _get_columns(conn, "runs")
     transcription_columns = {
         "patience": "DOUBLE",
         "task": "VARCHAR",
@@ -400,20 +403,7 @@ def _migration_004_add_transcription_params_to_runs(conn: duckdb.DuckDBPyConnect
         "condition_on_previous_text": "BOOLEAN",
         "initial_prompt": "VARCHAR",
     }
-
-    for column_name, column_type in transcription_columns.items():
-        if column_name not in existing_columns:
-            LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
-            if column_type == "DOUBLE":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
-            elif column_type == "VARCHAR":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
-            elif column_type == "INTEGER":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
-            elif column_type == "BOOLEAN":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
-            else:
-                LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+    _add_columns_if_missing(conn, "runs", transcription_columns)
 
 
 def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnection) -> None:
@@ -430,7 +420,6 @@ def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnect
     except Exception as exc:
         LOGGER.debug("migration 5 normalized-table probe failed: %s", exc)
 
-    existing_columns = _get_columns(conn, "runs")
     preprocessing_columns = {
         "volume_adjustment_db": "DOUBLE",
         "resampler": "VARCHAR",
@@ -445,20 +434,7 @@ def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnect
         "rnnoise_mix": "DOUBLE",
         "snr_estimation_method": "VARCHAR",
     }
-
-    for column_name, column_type in preprocessing_columns.items():
-        if column_name not in existing_columns:
-            LOGGER.debug("Migrating schema: adding %s column to runs", column_name)
-            if column_type == "DOUBLE":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} DOUBLE")
-            elif column_type == "VARCHAR":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} VARCHAR")
-            elif column_type == "INTEGER":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} INTEGER")
-            elif column_type == "BOOLEAN":
-                conn.execute(f"ALTER TABLE runs ADD COLUMN {column_name} BOOLEAN")
-            else:
-                LOGGER.warning("Unknown column type %s for %s, skipping", column_type, column_name)
+    _add_columns_if_missing(conn, "runs", preprocessing_columns)
 
 
 def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> None:
