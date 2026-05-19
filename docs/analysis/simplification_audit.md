@@ -163,6 +163,7 @@ Also: `process_file` (L141) is 80 lines, cyclomatic 16, cognitive 45 — extract
 - After moving symbols across modules, `grep -rn '\bOldName\b' tests/` — pyright won't catch test-only `from x import OldName` until the test runs (per `~/.claude/rules/python-refactors.md` "Removing exported constants").
 - For migrations (P2.2), exercise with a copy of `transcribe_state.db` and confirm `_init_db` is idempotent on a fresh DuckDB file.
 - `_migration_006_normalize_runs_schema` carries 375 lines of irreversible schema reshape — do not refactor its body until there is an integration test that round-trips an old-shape DB through it. Move it into a module untouched first; refactor later.
+- **P1.3 (flattening `Step.execute`) has the same risk class.** The 100-line if/elif at `variants/steps.py:882` is the only place step-type → executor wiring is encoded; getting one branch wrong silently swaps step behaviour. Before replacing with a dispatch dict, add an integration test that runs each step type at least once (a "every-variant smoke" pass through `scripts/variant_checks/verify_all_variants.py` or equivalent), and verify the new dispatch produces byte-identical output on a representative input per step type.
 
 ## Expected outcome (rough)
 

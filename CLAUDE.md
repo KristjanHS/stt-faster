@@ -48,5 +48,5 @@ When running `pytest tests/ -q` over the full suite, pass `timeout: 300000` to t
 
 | Rule file | Triggers on | Key content |
 |-----------|-------------|-------------|
-| `.claude/rules/plan-hygiene.md` | `docs/**`, `docs_AI_coder/**`, `CLAUDE.md`, `.claude/rules/**` | Write-gate (no plan doc for ≤2-file/1-session work), archival rules, multi-stage gating, feature-removal grep |
+| `.claude/rules/plan-hygiene.md` | `docs/**`, `CLAUDE.md`, `.claude/rules/**` | Write-gate (no plan doc for ≤2-file/1-session work), archival rules, multi-stage gating, feature-removal grep |
 | `.claude/rules/rule-authoring.md` | `.claude/rules/**` | Copy shipped-fix form verbatim when adding rule examples — design-doc forms often carry the pre-fix shape |
