@@ -47,7 +47,7 @@ Why not multi-file plan: per project plan-hygiene, multi-file split only after �
 ### Edits
 - Update `scripts/compare_transcription_variants.py:18` from `from backend.variants import execute_variant, get_builtin_variants` to `from backend.variants.executor import execute_variant` + `from backend.variants.registry import get_builtin_variants`.
 - Prune `backend/variants/__init__.py`: either reduce `__all__` to `["execute_variant", "get_builtin_variants"]` (the two names with confirmed external usage), or delete the re-export wall entirely. Recommend reducing `__all__` rather than deletion — keeps `Variant` and `PreprocessStep` re-exports for `tests/unit/test_variants.py` `isinstance` checks.
-- Replace `cli/db.py:138–143` and `:197–202` traceback-by-argv pattern with `logger.exception("…", exc_info=exc)`. Drop the `import traceback` and `if "--verbose" in sys.argv` branches; the rich-tracebacks logger configured in `cli/config.py:42` renders the traceback when log level allows it (audit §6.2).
+- Replace `cli/db.py:138–143` and `:197–202` traceback-by-argv pattern with `logger.exception("…", exc_info=exc)`. Drop the `import traceback` and `if "--verbose" in sys.argv` branches; the rich-tracebacks logger configured in `backend/config.py:39` renders the traceback when log level allows it (audit §6.2). **Caveat (surfaced post-Stage-B):** `setup_logging()` is not actually called from the `db` command entry path — only from `transcription_commands.py` and `scripts/transcribe_manager.py` — so `db show` / `db recent` route their `LOGGER.exception` calls through Python's `lastResort` stderr handler (plain text, no Rich formatting). Functionally equivalent (traceback prints), aesthetically not. See Stage F follow-up below.
 
 ### Gate
 - Run `scripts/compare_transcription_variants.py --help` (or its dry-run mode if it has one) — exit 0, no `ImportError`.
@@ -71,6 +71,7 @@ Why not multi-file plan: per project plan-hygiene, multi-file split only after �
 2. Delete `class StepConfig(ABC)`, `class BaseStepConfig`, and the 9 empty configs: `ResampleStepConfig`, `FFmpegStepConfig`, `DenoiseStepConfig`, `DynaudnormStepConfig`, `HighlowAformLoudnormStepConfig`, `HighlowNosamplLoudnormStepConfig`, `Loudnorm2passLinearStepConfig`, `LimiterOnlyStepConfig`, `CompressorLimiterStepConfig`, `DynaudnormConservativeStepConfig`. Keep the 8 typed configs that carry real fields.
 3. Replace `FFmpegExecutor`, `SoxExecutor`, `PreprocessStepsExecutor`, `PythonExecutor`, and the `StepExecutor` Protocol with module-level functions (`run_resample`, `run_loudnorm_only`, `run_denoise`, `run_ffmpeg_pipeline`, …) and a single `STEP_HANDLERS: dict[str, Callable]` dispatch table. Move `Step.execute` to a thin dispatch site.
 4. Delete `class Step(ABC)` and the per-step glue subclasses if they become no-ops after step 3.
+5. Convert the three lazy imports in `backend/variants/steps.py:491,511,532` (`from backend.variants import preprocess_steps`) to direct submodule imports (e.g. `from backend.variants import preprocess_steps as _preprocess_steps` or `import backend.variants.preprocess_steps as _preprocess_steps`). Stage B's `__init__.py` prune left these working only via Python's submodule fallback; under a major restructure of `steps.py` the implicit fallback is fragile. Surfaced by Stage B code review (commit `a79522c`).
 
 ### Gate
 - Smoke test added in the prerequisite passes against the refactored code with **byte-identical or property-identical** output per the snapshot strategy chosen.
@@ -136,6 +137,9 @@ Why not multi-file plan: per project plan-hygiene, multi-file split only after �
 ### Edits
 - Split `cli/db.py:show` (L59, cognitive=39) `--filter` branches into helpers.
 - Split `cli/db.py:recent` (L148, cognitive=33).
+- Narrow `cli/db.py:show` and `:recent` exception handlers: `except Exception as e:` currently swallows `typer.Exit` (subclass of `RuntimeError` via `click.exceptions.Exit`), so legitimate "not found" / "no runs" exits produce a spurious `Error: 1` line plus a traceback. Either re-raise `typer.Exit` before falling into the `LOGGER.exception` branch, or restrict the except to the specific DB error types. Pre-existing bug; Stage B made it slightly louder by emitting the traceback unconditionally. Surfaced by Stage B code review (commit `a79522c`).
+- Call `setup_logging()` from `backend/cli/main.py` (once, before subcommand dispatch) so `db show` / `db recent` `LOGGER.exception` tracebacks render through the RichHandler in `backend/config.py:39` rather than Python's plain `lastResort` stderr handler. One-line fix; has visibility implications because pure `db`-command runs currently emit zero pre-exception logging. Surfaced by Stage B code review.
+- Normalise `LOGGER.exception("…", exc_info=e)` in `cli/db.py` (Stage B added these) to the idiomatic `LOGGER.exception("…")` — inside an active `except` block, `exc_info=e` is redundant with `Logger.exception`'s built-in `exc_info=True`. Touch alongside the `show`/`recent` split since those handlers move anyway.
 - Rewrite `cli/transcription_commands.py:_is_test_run` (L40) as `any(s in path for s in SENTINELS)`.
 - Extract per-variant inner loop from `cli/transcription_commands.py:_process_multi_variant` (L355, 115 LOC).
 - Replace `_NoOpTqdm` in `transcribe.py:43` with `huggingface_hub.utils.disable_progress_bars()` if available, else move to `backend/utils/quiet_tqdm.py`.
@@ -144,6 +148,7 @@ Why not multi-file plan: per project plan-hygiene, multi-file split only after �
 ### Gate
 - `make pyright && make unit && make integration` green.
 - Stage B's `logger.exception` shape in `cli/db.py` is preserved (do NOT re-introduce traceback-by-argv when splitting `show` / `recent`).
+- `stt-faster db show 99999999` (or any not-found ID) exits with the typer-expected status WITHOUT printing `Error: 1` + traceback (confirms the `typer.Exit` swallow is fixed).
 
 ---
 
