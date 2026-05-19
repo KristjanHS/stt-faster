@@ -488,7 +488,7 @@ class PreprocessStepsExecutor:
         step_name: str,
     ) -> StepMetrics:
         """Execute loudness normalization only."""
-        from backend.variants import preprocess_steps
+        import backend.variants.preprocess_steps as preprocess_steps
 
         return preprocess_steps.loudnorm_only(  # type: ignore[reportUnknownMemberType]
             input_path=input_path,
@@ -508,7 +508,7 @@ class PreprocessStepsExecutor:
         step_name: str,
     ) -> StepMetrics:
         """Execute volume adjustment with limiter."""
-        from backend.variants import preprocess_steps
+        import backend.variants.preprocess_steps as preprocess_steps
 
         return preprocess_steps.volume_with_limiter(  # type: ignore[reportUnknownMemberType]
             input_path=input_path,
@@ -529,7 +529,7 @@ class PreprocessStepsExecutor:
         step_name: str,
     ) -> StepMetrics:
         """Execute two-pass peak normalization."""
-        from backend.variants import preprocess_steps
+        import backend.variants.preprocess_steps as preprocess_steps
 
         return preprocess_steps.peak_normalize_2pass(  # type: ignore[reportUnknownMemberType]
             input_path=input_path,
