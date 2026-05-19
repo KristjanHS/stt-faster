@@ -1,6 +1,5 @@
 @echo off
-REM Audio Transcription - ESTONIAN Language
-REM Uses: TalTech Estonian Whisper model (et-large preset)
+REM Audio Transcription - ENGLISH Language
 REM Note: Uses HF cache at ~/.cache/hf/ for faster model loading
 REM
 REM ========================================
@@ -53,11 +52,14 @@ for %%v in (!VARIANTS!) do (
 set "VARIANTS=!VARIANTS_COMMA!"
 
 echo ========================================
-echo Audio Transcription - ESTONIAN
+echo Audio Transcription - ENGLISH
 echo ========================================
 echo.
-echo Model: TalTech Estonian Whisper (large-v3-turbo)
-echo Language: Estonian
+echo Language: English
+echo     Preset                       Model                          Base Architecture      
+echo    et-large  TalTechNLP/whisper-large-v3-turbo-et-verbatim  large-v3-turbo (distilled) 
+echo    turbo     Systran/faster-distil-whisper-large-v3         large-v3 distilled         
+echo    large8gb  Systran/faster-whisper-large-v3                large-v3 (full)            
 if !VARIANT_COUNT!==1 (
     echo Variant: !VARIANTS!
 ) else (
@@ -76,10 +78,10 @@ REM Note: Using delayed expansion variable with single quotes in bash command
 REM Use --variant for single variant, --variants for multiple variants
 if !VARIANT_COUNT!==1 (
     REM Single variant - use --variant for backward compatibility
-    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --language et --output-format both --variant !VARIANTS!"
+    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --preset turbo --language en --output-format both --variant !VARIANTS!"
 ) else (
     REM Multiple variants - use --variants with comma-separated list
-    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!' --language et --output-format both --variants '!VARIANTS!'"
+    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd /home/kristjans/projects/stt-faster && .venv/bin/python scripts/transcribe_manager.py process '!WSL_INPUT_DIR!'  --preset turbo --language en --output-format both --variants '!VARIANTS!'"
 )
 
 echo.

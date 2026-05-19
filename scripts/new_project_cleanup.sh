@@ -110,7 +110,6 @@ declare -a TO_REMOVE=(
     "${ROOT_DIR}/scripts/validate_estonian_models.py"
     "${ROOT_DIR}/scripts/check_gpu.py"
     "${ROOT_DIR}/scripts/transcribe-docker"
-    "${ROOT_DIR}/scripts/transcription"
     "${ROOT_DIR}/scripts/windows"
     "${ROOT_DIR}/docs/Transcription_solution.md"
     "${ROOT_DIR}/docs/Transcription_helpfiles_win"

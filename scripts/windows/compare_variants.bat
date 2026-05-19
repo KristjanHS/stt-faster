@@ -25,7 +25,7 @@ if "!SCRIPT_DIR:~0,1!"=="E" (
 )
 
 REM Find the audio file in the directory
-for %%f in ("!SCRIPT_DIR!\*.wav" "!SCRIPT_DIR!\*.mp3" "!SCRIPT_DIR!\*.m4a" "!SCRIPT_DIR!\*.flac" "!SCRIPT_DIR!\*.ogg" "!SCRIPT_DIR!\*.aac") do (
+for %%f in ("!SCRIPT_DIR!\*.aac" "!SCRIPT_DIR!\*.wav" "!SCRIPT_DIR!\*.mp3" "!SCRIPT_DIR!\*.m4a" "!SCRIPT_DIR!\*.flac" "!SCRIPT_DIR!\*.ogg") do (
     set "AUDIO_FILE=%%f"
     goto :found
 )

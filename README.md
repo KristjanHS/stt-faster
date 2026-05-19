@@ -28,7 +28,7 @@ Batch audio transcription with Estonian (default) and English models. [Technical
 
 ### Quick Start
 
-**Windows (WSL)**: Copy `scripts/windows/transcribe_estonian.bat` or `transcribe_english.bat` to your audio folder and double-click.
+**Windows (WSL)**: Copy a batch file from `scripts/windows/` (e.g. `transcribe_estonian_Desk.bat`, `transcribe_estonian_Teams.bat`, `transcribe_english_Desk.bat`) into your audio folder and double-click. See `scripts/windows/README.md` for the full list and which variant each file targets.
 
 **Command line**:
 ```bash

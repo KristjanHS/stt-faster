@@ -3,89 +3,85 @@ AUDIO TRANSCRIPTION - HOW TO USE
 ========================================
 
 QUICK START:
-1. Drop audio files into this folder (C:\Users\PC\Downloads\transcribe\)
-2. Double-click "transcribe.bat"
-3. Wait for processing to complete
-4. Find transcripts in the "processed" folder
+1. Copy the batch file that matches your audio source into the folder
+   containing the audio files.
+2. Drop your audio files into the same folder
+   (e.g. C:\Users\PC\Downloads\transcribe\).
+3. Double-click the batch file.
+4. Find transcripts in the "processed" folder (single-variant runs) or
+   in the timestamped folder next to the audio (multi-variant runs).
 
 ========================================
 
 BATCH FILES:
 ------------
 
-📁 transcribe.bat (RECOMMENDED)
-   - Processes all audio files with DISTIL preset (balanced speed/accuracy)
-   - Creates JSON transcripts with timestamps
-   - Moves completed files to "processed" folder
-   - Moves failed files to "failed" folder
+ESTONIAN:
+  transcribe_estonian_Desk.bat       - Desk-mic / close-talk, variant 44
+  transcribe_estonian_Teams.bat      - Teams / video-call, variant 61
+  transcribe_estonian_Online.bat     - Online / mixed-source, variants 53+52
+  transcribe_estonian_32bit_cpu.bat  - CPU-only machines (et-32 preset),
+                                       variant 7
 
-🚀 transcribe_accurate.bat
-   - Same as above but uses LARGE preset (best accuracy, slower)
-   - Use for important transcriptions requiring highest quality
+ENGLISH (uses 'turbo' preset):
+  transcribe_english_Desk.bat        - Desk-mic / close-talk, variant 44
+  transcribe_english_Teams.bat       - Teams / video-call, variant 61
 
-📊 check_status.bat
-   - Shows summary of all processed files
-   - Displays counts: pending, completed, failed
+UTILITIES:
+  compare_variants.bat               - Runs every builtin variant against a
+                                       single audio file and generates the
+                                       HTML comparison report.
+  report_only.bat                    - Regenerates the variant HTML report
+                                       from existing outputs (no transcription).
+  check_status.bat                   - Prints the transcription queue status.
+
+To use a different variant, edit the `set "VARIANTS=..."` line at the top of
+the batch file. Space-separated values run multiple variants in one go,
+e.g. `set "VARIANTS=1 36 44"`.
 
 ========================================
 
 SUPPORTED FORMATS:
 -----------------
-✓ .wav
-✓ .mp3
-✓ .m4a
-✓ .flac
-✓ .ogg
-✓ .aac
+  .wav  .mp3  .m4a  .flac  .ogg  .aac
 
 ========================================
 
 OUTPUT:
 -------
-Each audio file generates a .json file with:
-- Full transcript text
-- Individual segments with timestamps
-- Detected language
-- Language probability
+Each audio file generates a .json (transcript with per-segment timestamps,
+detected language, language probability) and a .txt (plain text) when run
+with `--output-format both`, which is the default for these batch files.
 
-Example: "audio.m4a" → "audio.json"
-
-========================================
-
-FOLDERS CREATED:
----------------
-📂 processed/  - Successfully transcribed files + JSON outputs
-📂 failed/     - Files that failed processing
+Single-variant runs land under:   <audio_folder>\processed\
+Multi-variant runs land under:    <audio_folder>\YYYY-MM-DDTHH-MM-SS\
+                                  (flat files named variant_NNN_<name>_<audio>.json
+                                  plus a run_meta.json describing the run)
+Failed inputs land under:         <audio_folder>\failed\
 
 ========================================
 
 NOTES:
 ------
-- Processing is automatic and safe to run multiple times
-- File location determines status:
-  * Files in main folder → will be processed
-  * Files in "processed" folder → already done
-  * Files in "failed" folder → previously failed
-- Want to reprocess with different preset? Just move the file back!
-- Processing time: ~2 seconds per minute of audio (40min audio = ~80sec)
+- Processing is safe to run multiple times. A DuckDB state file
+  (transcribe_state.duckdb) tracks progress so already-processed files
+  are skipped.
+- To reprocess a file, move it back to the main folder or delete the
+  state file to start fresh.
+- First run downloads the model (~1.5-3 GB) to ~/.cache/hf inside WSL.
+  Later runs are fast.
 
 ========================================
 
 TROUBLESHOOTING:
 ---------------
-If transcribe.bat doesn't work:
-1. Make sure WSL2 is running
-2. Check that the Python environment exists
-3. Run check_status.bat to see database state
+If a batch file doesn't work:
+1. Make sure WSL2 is running.
+2. Confirm the venv exists at ~/projects/stt-faster/.venv (run the project
+   bootstrap if not).
+3. Run check_status.bat to see the database state.
+4. For more detail:
+     wsl -e bash -c "cd ~/projects/stt-faster && .venv/bin/python \
+       scripts/transcribe_manager.py status --verbose"
 
-For help, contact the system administrator.
-
-
-
-
-
-
-
-
-
-
+========================================
