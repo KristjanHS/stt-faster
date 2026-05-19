@@ -32,28 +32,64 @@ else
     exit 1
 fi
 
-# Capture files originally staged for this commit (null-terminated for spaces in paths).
-# Hooks run against the staged set; we re-stage only these files afterwards so that
-# auto-fixes (ruff format, etc.) land in the commit without sweeping in unrelated
-# working-tree edits. For a full-repo sweep, use `make pre-commit`.
-STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR -z)
+# Capture files originally staged for this commit into an array. Read NUL-delimited
+# so paths with spaces/newlines round-trip cleanly — `$(... -z)` would strip the NULs
+# and concatenate multi-file lists into one bogus path. Hooks run against the staged
+# set; we re-stage only these files afterwards so auto-fixes (ruff format, etc.) land
+# in the commit without sweeping in unrelated working-tree edits. For a full-repo
+# sweep, use `make pre-commit`.
+STAGED_FILES=()
+while IFS= read -r -d '' file; do
+    STAGED_FILES+=("$file")
+done < <(git diff --cached --name-only --diff-filter=ACMR -z)
 
-# Run pre-commit on staged files only (framework default when --all-files is omitted)
-"$PRE_COMMIT_CMD" run 2>&1
-EXIT_CODE=$?
+# Isolate unstaged tracked changes + untracked files so hooks (and the post-hook
+# re-stage) see *only* the staged set. Without this, partial staging (git add -p
+# with some hunks held back) would have its unstaged hunks promoted into the commit
+# by the `git add` below, because `git add -- file` re-adds the whole working tree
+# copy, not just the originally-staged content.
+NEEDS_STASH=0
+if ! git diff --quiet --ignore-submodules || \
+   [ -n "$(git ls-files --others --exclude-standard 2>/dev/null)" ]; then
+    NEEDS_STASH=1
+fi
 
-if [ $EXIT_CODE -ne 0 ]; then
+STASH_TAG="pre-commit-isolate-$$"
+if (( NEEDS_STASH )); then
+    git stash push --keep-index --include-untracked --quiet --message "$STASH_TAG"
+fi
+
+# Run pre-commit on the staged set (framework default; full-repo sweep = `make pre-commit`).
+# `|| EXIT_CODE=$?` keeps `set -e` happy and lets us continue to the stash-pop below.
+EXIT_CODE=0
+"$PRE_COMMIT_CMD" run 2>&1 || EXIT_CODE=$?
+
+# Re-stage originally-staged files in case hooks modified them. Do this *before*
+# popping the stash so the index reflects post-hook content; the pop then layers
+# unstaged-only content back on top of the working tree.
+if (( EXIT_CODE == 0 )) && (( ${#STAGED_FILES[@]} > 0 )); then
+    log INFO "✓ Re-staging originally-staged files (in case hooks modified them)..."
+    git add -- "${STAGED_FILES[@]}"
+fi
+
+# Always restore stashed unstaged + untracked content, regardless of hook outcome.
+# If a hook auto-fix overlaps with held-back unstaged hunks, the pop will conflict
+# and is left for the user to resolve — same semantics as the upstream pre-commit
+# framework's own hook runner.
+if (( NEEDS_STASH )); then
+    if ! git stash pop --quiet 2>/dev/null; then
+        log ERROR "❌ Could not auto-restore unstaged changes (likely overlap with hook fixes)."
+        log ERROR "   Find the stash: git stash list | grep '$STASH_TAG'"
+        log ERROR "   Then resolve:   git stash pop <stash@{N}>"
+        EXIT_CODE=1
+    fi
+fi
+
+if (( EXIT_CODE != 0 )); then
     log ERROR "❌ Pre-commit checks failed. Please fix the issues and try again."
     log INFO "💡 You can run individual hooks with: pre-commit run <hook-id>"
     log INFO "💡 Or run on specific files: pre-commit run --files <file1> <file2>"
     exit 1
-fi
-
-# Re-stage any of the originally-staged files that hooks modified.
-# Scoped via -- to the captured list so unrelated working-tree edits stay untouched.
-if [[ -n "$STAGED_FILES" ]]; then
-    log INFO "✓ Re-staging originally-staged files (in case hooks modified them)..."
-    printf '%s' "$STAGED_FILES" | xargs -0 -r git add --
 fi
 
 log INFO "✅ Pre-commit checks passed successfully."
