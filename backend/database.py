@@ -479,7 +479,19 @@ def _migration_005_add_preprocessing_params_to_runs(conn: duckdb.DuckDBPyConnect
 
 
 def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> None:
-    """Normalize runs table schema for Alternative 3 - split into multiple tables for flexibility."""
+    """Normalize runs table schema for Alternative 3 - split into multiple tables for flexibility.
+
+    KNOWN-LATENT BUG (out of scope for the Stage D rollout): the wide-row
+    data-migration loop further down this function creates `run_parameters`
+    without a sequence default before its INSERT, so a direct invocation against
+    a synthetic pre-006 wide-shape fixture fails with a NOT NULL constraint on
+    `run_parameters.id`. In production this never fires — the first guard below
+    short-circuits whenever the normalized tables already exist, which is true
+    for every database on every restart since the normalized schema was
+    introduced — so the data-migration loop is effectively dead code. Fixing it
+    requires a synthetic-wide-fixture test + a sequence default before the
+    INSERT, both deferred to a separate PR.
+    """
     import json
 
     # First check if normalized tables already exist (for new databases created with new schema)
@@ -913,7 +925,7 @@ def _migration_006_normalize_runs_schema(conn: duckdb.DuckDBPyConnection) -> Non
     except Exception:
         # Rollback on error if transaction was started
         if transaction_started:
-            _rollback_transaction(conn, "migration 6")
+            _rollback_transaction(conn, "migration 6 rollback")
         raise
 
 
