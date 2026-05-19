@@ -27,7 +27,6 @@ import json
 import logging
 import os
 import re
-import threading
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
@@ -36,65 +35,13 @@ from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
 from faster_whisper import WhisperModel
 from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+from huggingface_hub.utils.tqdm import disable_progress_bars
 
 from backend.exceptions import ModelNotFoundError
 
-
-class _NoOpTqdm:
-    """No-op tqdm class to disable progress bars in huggingface_hub downloads.
-
-    This class implements the minimal tqdm interface needed by huggingface_hub
-    to suppress progress bar output and avoid duplicate "Download complete" messages.
-    """
-
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
-        pass
-
-    def __enter__(self) -> "_NoOpTqdm":
-        return self
-
-    def __exit__(self, *args: Any) -> None:
-        pass
-
-    def __iter__(self) -> "_NoOpTqdm":
-        return self
-
-    def __next__(self) -> None:
-        raise StopIteration
-
-    def update(self, n: int = 1) -> None:
-        """Update progress (no-op)."""
-        pass
-
-    def set_description(self, desc: str | None = None, refresh: bool = True) -> None:
-        """Set description (no-op)."""
-        pass
-
-    def close(self) -> None:
-        """Close progress bar (no-op)."""
-        pass
-
-    def refresh(self) -> None:
-        """Refresh display (no-op)."""
-        pass
-
-    @classmethod
-    def get_lock(cls) -> threading.Lock:
-        """Return a threading lock for thread-safe operations.
-
-        Required by tqdm's thread_map function when using a custom tqdm class.
-        """
-        if not hasattr(cls, "_lock"):
-            cls._lock = threading.Lock()
-        return cls._lock
-
-    @classmethod
-    def set_lock(cls, lock: threading.Lock) -> None:
-        """Set the threading lock for thread-safe operations.
-
-        Required by tqdm's thread_map function when using a custom tqdm class.
-        """
-        cls._lock = lock
+# Disable huggingface_hub download progress bars once at import time —
+# replaces the previous _NoOpTqdm shim threaded through tqdm_class kwargs.
+disable_progress_bars()
 
 
 from backend.model_config import ModelConfig, get_preset
@@ -246,10 +193,10 @@ def _get_estonian_model_path(
     if not re.match(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$", model_id):
         raise ValueError(f"Unsafe model_id format detected: {model_id}")
 
-    # Only download ct2 folder, skip transformers/native formats
-    # Disable progress bar to avoid duplicate "Download complete" messages
-    # Note: huggingface_hub uses HTTPS by default, ensuring secure downloads
-    model_path = downloader(model_id, allow_patterns=["ct2/*"], tqdm_class=_NoOpTqdm)
+    # Only download ct2 folder, skip transformers/native formats.
+    # Progress bars are disabled module-wide via disable_progress_bars() above.
+    # huggingface_hub uses HTTPS by default, ensuring secure downloads.
+    model_path = downloader(model_id, allow_patterns=["ct2/*"])
     ct2_path = path_cls(model_path) / "ct2"
     if not ct2_path.exists():
         raise ModelNotFoundError(f"CT2 folder not found in {model_id}. Expected at: {ct2_path}")
@@ -276,9 +223,9 @@ def _get_cached_model_path(model_id: str, *, downloader: Callable[..., str] = sn
     if not re.match(r"^[a-zA-Z0-9_-]+/[a-zA-Z0-9_.-]+$", model_id):
         raise ValueError(f"Unsafe model_id format detected: {model_id}")
 
-    # Disable progress bar to avoid duplicate "Download complete" messages
-    # Note: huggingface_hub uses HTTPS by default, ensuring secure downloads
-    return downloader(model_id, tqdm_class=_NoOpTqdm)
+    # Progress bars disabled module-wide via disable_progress_bars() above.
+    # huggingface_hub uses HTTPS by default, ensuring secure downloads.
+    return downloader(model_id)
 
 
 def _resolve_model_path(
