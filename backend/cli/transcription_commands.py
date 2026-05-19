@@ -300,6 +300,103 @@ def _process_single_variant(
         return 1
 
 
+def _run_single_variant(
+    variant: Variant,
+    args: argparse.Namespace,
+    input_folder: Path,
+    run_folder: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Process one variant inside a multi-variant run.
+
+    Returns (variant_meta, results): the metadata block destined for
+    ``run_meta.json`` and the per-variant counts dict consumed by the
+    overall summary. On failure the returned dicts encode the error
+    rather than raising — multi-variant runs must continue past a
+    single failing variant.
+    """
+    overrides = _get_variant_overrides(variant)
+    overrides_str = _format_overrides_concise(overrides)
+    console.print(f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] (overrides: {overrides_str})")
+
+    try:
+        run_config = RunConfig.from_env_and_variant(input_folder, variant)
+        run_config.model_preset = args.preset
+        run_config.language = args.language
+        run_config.output_format = args.output_format
+
+        transcription_service = ServiceFactory.create_transcription_service(
+            variant=variant,
+            preset=args.preset,
+            language=args.language,
+            output_format=args.output_format,
+        )
+        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        file_mover = ServiceFactory.create_file_mover()
+        output_writer = ServiceFactory.create_output_writer()
+
+        processor = TranscriptionProcessor(
+            transcription_service=transcription_service,
+            state_store=state_store,
+            file_mover=file_mover,
+            output_writer=output_writer,
+            run_config=run_config,
+            disable_file_moving=True,
+        )
+
+        # Single run folder for all variants; the processor prefixes filenames
+        # with variant number so outputs don't collide.
+        processor.processed_folder = run_folder
+        processor.failed_folder = run_folder / "failed"
+        processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
+        processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
+        processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
+        processor.processed_folder.mkdir(exist_ok=True, parents=True)
+        processor.failed_folder.mkdir(exist_ok=True, parents=True)
+
+        results = processor.process_folder()
+
+        json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
+        json_filename = json_files[0].name if json_files else None
+
+        transcription_config = variant.transcription_config
+        variant_meta: dict[str, Any] = {
+            "variant_number": variant.number,
+            "variant_name": variant.name,
+            "json_filename": json_filename,
+            "transcription_config": {
+                "beam_size": getattr(transcription_config, "beam_size", None),
+                "chunk_length": getattr(transcription_config, "chunk_length", None),
+                "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
+                "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
+                "vad_filter": getattr(transcription_config, "vad_filter", None),
+                "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
+            },
+            "results": {
+                "succeeded": results.get("succeeded", 0),
+                "failed": results.get("failed", 0),
+            },
+        }
+
+        console.print(
+            f"[green]✓[/green] Variant {variant.number} completed: "
+            f"{results.get('succeeded', 0)} succeeded, {results.get('failed', 0)} failed"
+        )
+        return variant_meta, results
+
+    except Exception as error:
+        console.print(f"[red]✗[/red] Variant {variant.number} failed: {error}")
+        if getattr(args, "verbose", False):
+            LOGGER.exception("Full error details:")
+        failed_meta: dict[str, Any] = {
+            "variant_number": variant.number,
+            "variant_name": variant.name,
+            "error": str(error),
+            "results": {"succeeded": 0, "failed": 0},
+        }
+        failed_results: dict[str, Any] = {"succeeded": 0, "failed": 0, "error": str(error)}
+        return failed_meta, failed_results
+
+
 def _process_multi_variant(
     args: argparse.Namespace,
     input_folder: Path,
@@ -320,110 +417,18 @@ def _process_multi_variant(
     git_commit = _get_git_commit_hash()
     timestamp = datetime.now()
     timestamp_str = timestamp.isoformat()
-    # Create timestamped folder name (filesystem-safe)
     timestamp_folder = timestamp.strftime("%Y-%m-%dT%H-%M-%S")
 
-    # Create single timestamped output directory directly under input folder
     run_folder = input_folder / timestamp_folder
     run_folder.mkdir(exist_ok=True)
 
-    # Collect all variant metadata
     all_variant_metadata: list[dict[str, Any]] = []
     all_results: dict[int, dict[str, Any]] = {}
 
     for variant in variants:
-        overrides = _get_variant_overrides(variant)
-        overrides_str = _format_overrides_concise(overrides)
-        console.print(f"\n[cyan]Running variant {variant.number}: {variant.name}[/cyan] (overrides: {overrides_str})")
-
-        try:
-            # Create services using factory
-            # Create run configuration for this variant
-            run_config = RunConfig.from_env_and_variant(input_folder, variant)
-            run_config.model_preset = args.preset
-            run_config.language = args.language
-            run_config.output_format = args.output_format
-
-            transcription_service = ServiceFactory.create_transcription_service(
-                variant=variant,
-                preset=args.preset,
-                language=args.language,
-                output_format=args.output_format,
-            )
-            state_store = ServiceFactory.create_state_store(db_path=args.db_path)
-            file_mover = ServiceFactory.create_file_mover()
-            output_writer = ServiceFactory.create_output_writer()
-
-            # Create processor with variant-specific output handling
-            # Disable file moving so all variants can process the same input files
-            processor = TranscriptionProcessor(
-                transcription_service=transcription_service,
-                state_store=state_store,
-                file_mover=file_mover,
-                output_writer=output_writer,
-                run_config=run_config,
-                disable_file_moving=True,
-            )
-
-            # Use single run folder for all outputs
-            # Files will be prefixed with variant number in the processor
-            processor.processed_folder = run_folder
-            processor.failed_folder = run_folder / "failed"
-            # Set output base dir and store variant info for filename prefixing
-            processor._output_base_dir = run_folder  # type: ignore[reportPrivateUsage]
-            processor._variant_number = variant.number  # type: ignore[reportPrivateUsage]
-            processor._variant_name = variant.name  # type: ignore[reportPrivateUsage]
-            processor.processed_folder.mkdir(exist_ok=True, parents=True)
-            processor.failed_folder.mkdir(exist_ok=True, parents=True)
-
-            results = processor.process_folder()
-            all_results[variant.number] = results
-
-            # Find JSON file(s) created for this variant
-            # Pattern: variant_{number:03d}_{name}_*.json
-            json_files = list(run_folder.glob(f"variant_{variant.number:03d}_{variant.name}_*.json"))
-            json_filename = json_files[0].name if json_files else None
-
-            # Collect variant metadata
-            transcription_config = variant.transcription_config
-            variant_meta = {
-                "variant_number": variant.number,
-                "variant_name": variant.name,
-                "json_filename": json_filename,  # Store exact filename for easy lookup
-                "transcription_config": {
-                    "beam_size": getattr(transcription_config, "beam_size", None),
-                    "chunk_length": getattr(transcription_config, "chunk_length", None),
-                    "no_speech_threshold": getattr(transcription_config, "no_speech_threshold", None),
-                    "logprob_threshold": getattr(transcription_config, "logprob_threshold", None),
-                    "vad_filter": getattr(transcription_config, "vad_filter", None),
-                    "condition_on_previous_text": getattr(transcription_config, "condition_on_previous_text", None),
-                },
-                "results": {
-                    "succeeded": results.get("succeeded", 0),
-                    "failed": results.get("failed", 0),
-                },
-            }
-            all_variant_metadata.append(variant_meta)
-
-            console.print(
-                f"[green]✓[/green] Variant {variant.number} completed: "
-                f"{results.get('succeeded', 0)} succeeded, {results.get('failed', 0)} failed"
-            )
-
-        except Exception as error:
-            console.print(f"[red]✗[/red] Variant {variant.number} failed: {error}")
-            if getattr(args, "verbose", False):
-                LOGGER.exception("Full error details:")
-            all_results[variant.number] = {"succeeded": 0, "failed": 0, "error": str(error)}
-            # Add failed variant to metadata
-            all_variant_metadata.append(
-                {
-                    "variant_number": variant.number,
-                    "variant_name": variant.name,
-                    "error": str(error),
-                    "results": {"succeeded": 0, "failed": 0},
-                }
-            )
+        variant_meta, results = _run_single_variant(variant, args, input_folder, run_folder)
+        all_variant_metadata.append(variant_meta)
+        all_results[variant.number] = results
 
     # Write single run_meta.json with all variants
     run_meta = {
