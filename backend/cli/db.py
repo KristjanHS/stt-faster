@@ -137,9 +137,11 @@ def show(
             console.print(f"[red]Unexpected timestamp type: {type(recorded_at)}[/red]")
             raise typer.Exit(1)
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
-        LOGGER.exception("db show failed", exc_info=e)
+        LOGGER.exception("db show failed")
         raise typer.Exit(1) from e
 
 
@@ -193,9 +195,11 @@ def recent(
                     console.print(f"Succeeded: {run.get('succeeded', 0)} | Failed: {run.get('failed', 0)}")
                     console.print("")
 
+    except typer.Exit:
+        raise
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
-        LOGGER.exception("db recent failed", exc_info=e)
+        LOGGER.exception("db recent failed")
         raise typer.Exit(1) from e
 
 
