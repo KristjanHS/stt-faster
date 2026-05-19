@@ -3,21 +3,30 @@ audio fixture and produces snapshot-stable output.
 
 Stage C flattens `backend/variants/steps.py` (the four Executor classes plus
 the per-step `Step` glue collapse to module-level functions + a dispatch
-table). The refactor must preserve byte-/property-identical output for every
-step type — this test is the gate.
+table). The refactor must preserve property-identical output for every step
+type — this test is the gate.
 
 The test enumerates `StepRegistry.get_registered_types()` and for each:
-  1. constructs the step (default config, with overrides for configs that
-     have required fields),
+  1. constructs the step (registry-default config),
   2. executes against a transcoded copy of `tests/test_short.mp3`,
   3. asserts non-empty output,
-  4. computes a `(sample_count, rms_bucket)` snapshot and compares it against
+  4. snapshots `(sample_count, rms_bucket)` and compares against
      `tests/integration/fixtures/step_smoke_snapshots.json`.
+
+Known limitation (logged for Stage C.2): the 2-dB RMS bucket does not
+discriminate between step types that share a loudness bucket — about half
+of the 18 step types share a bucket with at least one neighbour. A
+dispatch-table swap between such steps during C.2 would pass the snapshot
+silently. The C.2 implementer should additionally spot-check
+`scripts/variant_checks/verify_all_variants.py` (named in the plan's gate)
+to catch routing errors that escape this gate. A first-N-sample MD5 was
+tried but failed on `sox_peak_normalize`, which is not byte-deterministic
+between runs.
 
 Regenerate snapshots after deliberate output-shape changes with:
 
-    UPDATE_SNAPSHOTS=1 .venv/bin/python -m pytest \
-        tests/integration/test_every_step_smoke.py
+    UPDATE_SNAPSHOTS=1 .venv/bin/python -m pytest \\
+        tests/integration/test_every_step_smoke.py -p no:xdist
 """
 
 from __future__ import annotations
@@ -34,22 +43,12 @@ from pathlib import Path
 import pytest
 
 from backend.preprocess.config import PreprocessConfig
-from backend.variants.steps import (
-    StepConfig,
-    StepRegistry,
-    VolumeLimiterStepConfig,
-)
+from backend.variants.steps import StepRegistry
 
-_SNAPSHOT_PATH = Path("tests/integration/fixtures/step_smoke_snapshots.json")
+_TESTS_DIR = Path(__file__).resolve().parent.parent
+_SNAPSHOT_PATH = Path(__file__).resolve().parent / "fixtures" / "step_smoke_snapshots.json"
+_INPUT_MP3 = _TESTS_DIR / "test_short.mp3"
 _RMS_BUCKET_RESOLUTION_DB = 2  # 2-dB resolution — robust to small ffmpeg drift.
-
-# Step types whose default config has a required field without a default.
-# `StepRegistry.create_step(step_type, None)` would fall back to
-# `get_default_config()` which constructs the dataclass — that fails when a
-# field has no default. Only `volume_limiter` is affected today.
-_CONFIG_OVERRIDES: dict[str, StepConfig] = {
-    "volume_limiter": VolumeLimiterStepConfig(volume_db=6.0),
-}
 
 
 def _wav_snapshot(wav_path: Path) -> tuple[int, int]:
@@ -77,9 +76,8 @@ def _wav_snapshot(wav_path: Path) -> tuple[int, int]:
 @pytest.fixture(scope="module")
 def _input_wav(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Mono 16 kHz 16-bit WAV transcoded from tests/test_short.mp3."""
-    src = Path("tests/test_short.mp3")
-    if not src.exists():
-        pytest.fail("tests/test_short.mp3 required for step smoke test.")
+    if not _INPUT_MP3.exists():
+        pytest.fail(f"{_INPUT_MP3} required for step smoke test.")
     ffmpeg = shutil.which("ffmpeg")
     if ffmpeg is None:
         pytest.fail("ffmpeg required for step smoke test.")
@@ -91,7 +89,7 @@ def _input_wav(tmp_path_factory: pytest.TempPathFactory) -> Path:
             "-loglevel",
             "error",
             "-i",
-            str(src),
+            str(_INPUT_MP3),
             "-ac",
             "1",
             "-ar",
@@ -108,26 +106,23 @@ def _input_wav(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return wav_path
 
 
-@pytest.fixture(scope="module")
-def _preprocess_config() -> PreprocessConfig:
-    return PreprocessConfig(target_sample_rate=16_000, target_channels=1)
-
-
 @pytest.mark.parametrize("step_type", StepRegistry.get_registered_types())
 def test_step_executes_and_matches_snapshot(
     step_type: str,
     _input_wav: Path,
-    _preprocess_config: PreprocessConfig,
     tmp_path: Path,
 ) -> None:
-    config = _CONFIG_OVERRIDES.get(step_type)
-    step = StepRegistry.create_step(step_type, config)
+    if os.environ.get("UPDATE_SNAPSHOTS") == "1" and os.environ.get("PYTEST_XDIST_WORKER"):
+        pytest.fail("UPDATE_SNAPSHOTS=1 races under pytest-xdist; rerun with -p no:xdist")
+
+    preprocess_config = PreprocessConfig(target_sample_rate=16_000, target_channels=1)
+    step = StepRegistry.create_step(step_type, None)
     output = tmp_path / f"{step_type}.wav"
 
     step.execute(
         input_path=_input_wav,
         output_path=output,
-        global_config=_preprocess_config,
+        global_config=preprocess_config,
         step_index=0,
     )
 
@@ -136,12 +131,13 @@ def test_step_executes_and_matches_snapshot(
 
     sample_count, rms_bucket = _wav_snapshot(output)
     assert sample_count > 0, f"{step_type}: WAV has zero samples"
+    actual: list[int] = [sample_count, rms_bucket]
 
     if os.environ.get("UPDATE_SNAPSHOTS") == "1":
         current: dict[str, list[int]] = {}
         if _SNAPSHOT_PATH.exists():
             current = json.loads(_SNAPSHOT_PATH.read_text())
-        current[step_type] = [sample_count, rms_bucket]
+        current[step_type] = actual
         _SNAPSHOT_PATH.parent.mkdir(parents=True, exist_ok=True)
         _SNAPSHOT_PATH.write_text(json.dumps(dict(sorted(current.items())), indent=2) + "\n")
         return
@@ -150,7 +146,7 @@ def test_step_executes_and_matches_snapshot(
         pytest.fail(
             f"Snapshot file {_SNAPSHOT_PATH} missing. "
             "Bootstrap with `UPDATE_SNAPSHOTS=1 pytest "
-            "tests/integration/test_every_step_smoke.py`."
+            "tests/integration/test_every_step_smoke.py -p no:xdist`."
         )
     snapshots = json.loads(_SNAPSHOT_PATH.read_text())
     expected = snapshots.get(step_type)
@@ -158,8 +154,6 @@ def test_step_executes_and_matches_snapshot(
         pytest.fail(
             f"No snapshot recorded for step_type={step_type!r}. "
             "Bootstrap with `UPDATE_SNAPSHOTS=1 pytest "
-            "tests/integration/test_every_step_smoke.py`."
+            "tests/integration/test_every_step_smoke.py -p no:xdist`."
         )
-    assert [sample_count, rms_bucket] == expected, (
-        f"{step_type}: snapshot drift — got [{sample_count}, {rms_bucket}], expected {expected}"
-    )
+    assert actual == expected, f"{step_type}: snapshot drift — got {actual}, expected {expected}"
