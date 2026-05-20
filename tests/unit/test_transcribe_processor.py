@@ -9,9 +9,15 @@ import pytest
 from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
 from backend.run_config import RunConfig
+from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
 from backend.services.interfaces import TranscriptionResult
 from backend.transcribe import TranscriptionMetrics
+
+
+def _make_run_log(temp_folder: Path) -> JsonlRunLog:
+    """Construct a JsonlRunLog inside the test's temp folder."""
+    return JsonlRunLog(temp_folder / "runs.jsonl")
 
 
 def _create_test_processor(
@@ -23,7 +29,13 @@ def _create_test_processor(
     variant=None,
     disable_file_moving: bool = False,
 ) -> TranscriptionProcessor:
-    """Helper function to create a processor with services for testing."""
+    """Helper function to create a processor with services for testing.
+
+    ``temp_db`` is retained as a parameter for test-API compatibility but is
+    no longer wired into the processor — Stage G.b removed the DuckDB write
+    path; the JSONL run log lives next to the temp folder instead.
+    """
+    del temp_db  # unused since Stage G.b
     # Create run configuration
     run_config = RunConfig.from_env_and_variant(temp_folder, variant)
     run_config.model_preset = preset
@@ -36,14 +48,13 @@ def _create_test_processor(
         language=language,
         output_format=output_format,
     )
-    # Use the provided temp_db instead of creating a new one to avoid conflicts
-    state_store = ServiceFactory.create_state_store(db_path=temp_db.db_path)
+    run_log = _make_run_log(temp_folder)
     file_mover = ServiceFactory.create_file_mover()
     output_writer = ServiceFactory.create_output_writer()
 
     return TranscriptionProcessor(
         transcription_service=transcription_service,
-        state_store=state_store,
+        run_log=run_log,
         file_mover=file_mover,
         output_writer=output_writer,
         run_config=run_config,
@@ -239,7 +250,7 @@ def test_process_file_success(
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -250,10 +261,10 @@ def test_process_file_success(
     assert result.metrics is not None
     mock_transcription_service.transcribe.assert_called_once()
 
-    # Verify status updated
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "completed"
+    # Stage G.b: file status now lives on the returned FileProcessingStats
+    # (rolled into JSONL files[] by RunSummarizer at end-of-run).
+    assert result.file_path == str(audio_file)
+    assert result.error_message is None
 
     # Verify file moved to processed folder
     assert not audio_file.exists()
@@ -288,7 +299,7 @@ def test_process_file_failure(
         run_config = RunConfig.from_env_and_variant(temp_folder, None)
         processor = TranscriptionProcessor(
             transcription_service=mock_transcription_service,
-            state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+            run_log=_make_run_log(temp_folder),
             file_mover=ServiceFactory.create_file_mover(),
             output_writer=ServiceFactory.create_output_writer(),
             run_config=run_config,
@@ -303,11 +314,10 @@ def test_process_file_failure(
     assert result.status == "failed"
     assert result.metrics is None
 
-    # Verify status updated to failed
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "RuntimeError" in status["error_message"]
+    # Stage G.b: status + error message now live on the returned
+    # FileProcessingStats (rolled into JSONL files[] by RunSummarizer).
+    assert result.error_message is not None
+    assert "RuntimeError" in result.error_message
 
     # Verify file moved to failed folder
     assert not audio_file.exists()
@@ -342,11 +352,9 @@ def test_process_file_not_found(
     assert result.status == "failed"
     assert result.error_message is not None
 
-    # Verify status updated to failed
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "not found" in status["error_message"].lower()
+    # Stage G.b: status + error message now live on the returned
+    # FileProcessingStats (rolled into JSONL files[] by RunSummarizer).
+    assert "not found" in result.error_message.lower()
 
 
 def test_process_all_files(
@@ -391,7 +399,7 @@ def test_process_all_files(
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -447,7 +455,7 @@ def test_process_folder(
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -526,7 +534,7 @@ def test_process_file_move_failure_keeps_pending_status(
         run_config = RunConfig.from_env_and_variant(temp_folder, None)
         processor = TranscriptionProcessor(
             transcription_service=mock_transcription_service,
-            state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+            run_log=_make_run_log(temp_folder),
             file_mover=mock_file_mover,
             output_writer=ServiceFactory.create_output_writer(),
             run_config=run_config,
@@ -545,11 +553,11 @@ def test_process_file_move_failure_keeps_pending_status(
     assert result.status == "failed"
     assert result.error_message
 
-    # Verify status is 'failed', NOT 'completed'
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "Permission denied" in status["error_message"]
+    # Stage G.b: status + error message now live on the returned
+    # FileProcessingStats (rolled into JSONL files[] by RunSummarizer).
+    # The bug being regression-tested here is that the success-status update
+    # happens BEFORE the move; on move failure the status must remain "failed".
+    assert "Permission denied" in result.error_message
 
     # Verify file is still in original location (not moved)
     assert audio_file.exists()
@@ -614,7 +622,7 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
     run_config.output_format = "both"
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -691,7 +699,7 @@ def test_process_file_root_level_file_with_output_base_dir(
     run_config.output_format = "both"
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,

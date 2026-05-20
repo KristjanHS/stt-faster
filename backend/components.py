@@ -1,16 +1,16 @@
 """Separated components extracted from the TranscriptionProcessor god object."""
 
 import logging
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from backend.database import RunRecord
-from backend.exceptions import DatabaseError
+from backend.database import FileMetricRecord, RunRecord
 from backend.preprocess.config import PreprocessConfig
+from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
     FileMover,
     OutputWriter,
-    StateStore,
     TranscriptionRequest,
     TranscriptionService,
 )
@@ -28,6 +28,220 @@ SUPPORTED_AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".flac", ".ogg", ".wma", "
 # Folder names for processed and failed files
 PROCESSED_FOLDER_NAME = "processed"
 FAILED_FOLDER_NAME = "failed"
+
+
+# ---------------------------------------------------------------------------
+# JSONL record construction (Stage G live write path)
+# ---------------------------------------------------------------------------
+#
+# Mirror of ``scripts/migrate_db_to_jsonl.py``'s ``_build_run_record`` and
+# ``_file_record_from_row`` so the live write path emits the same nested
+# shape as the one-shot DB → JSONL export. Plan: docs/plans/2026-05-20-stage-G-db-to-jsonl.md §4.1.
+
+_PARAM_KEYS = (
+    "beam_size",
+    "best_of",
+    "patience",
+    "task",
+    "chunk_length",
+    "word_timestamps",
+    "temperature",
+    "temperature_increment_on_fallback",
+    "compression_ratio_threshold",
+    "logprob_threshold",
+    "no_speech_threshold",
+    "length_penalty",
+    "repetition_penalty",
+    "no_repeat_ngram_size",
+    "suppress_tokens",
+    "condition_on_previous_text",
+    "initial_prompt",
+)
+_VAD_KEY_MAP = {
+    "filter": "vad_filter",
+    "threshold": "vad_threshold",
+    "min_speech_ms": "vad_min_speech_duration_ms",
+    "max_speech_s": "vad_max_speech_duration_s",
+    "min_silence_ms": "vad_min_silence_duration_ms",
+    "speech_pad_ms": "vad_speech_pad_ms",
+}
+
+
+def _iso_utc(value: Any) -> str | None:
+    """Render a timestamp as ISO-8601 UTC with ``Z`` suffix.
+
+    Mirror of ``scripts/migrate_db_to_jsonl.py:_iso_utc`` — byte-identical
+    output is a load-bearing property (live records and migrated records
+    must be diffable).
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            dt = value.replace(tzinfo=timezone.utc)
+        else:
+            dt = value.astimezone(timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
+    if isinstance(value, str):
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        else:
+            dt = dt.astimezone(timezone.utc)
+        return dt.isoformat().replace("+00:00", "Z")
+    return str(value)
+
+
+def _file_record_to_dict(fr: FileMetricRecord) -> dict[str, Any]:
+    """Map a ``FileMetricRecord`` into the per-file nested JSON shape.
+
+    Mirrors ``scripts/migrate_db_to_jsonl.py:_file_record_from_row``. Source
+    field names match by construction (DuckDB column names == dataclass
+    field names). ``segment_count`` is intentionally ``None`` — the source
+    schema doesn't track it (reserved for future runs).
+    """
+    preprocess: dict[str, Any] = {
+        "enabled": fr.preprocess_enabled,
+        "profile": fr.preprocess_profile,
+        "target_sample_rate": fr.target_sample_rate,
+        "target_channels": fr.target_channels,
+        "snr_estimation_method": fr.snr_estimation_method,
+        "snr_before": fr.preprocess_snr_before,
+        "snr_after": fr.preprocess_snr_after,
+        "volume_adjustment_db": fr.volume_adjustment_db,
+        "resampler": fr.resampler,
+        "sample_format": fr.sample_format,
+        "loudnorm": {
+            "preset": fr.loudnorm_preset,
+            "target_i": fr.loudnorm_target_i,
+            "target_tp": fr.loudnorm_target_tp,
+            "target_lra": fr.loudnorm_target_lra,
+            "backend": fr.loudnorm_backend,
+        },
+        "denoise": {
+            "method": fr.denoise_method,
+            "library": fr.denoise_library,
+            "rnnoise_model": fr.rnnoise_model,
+            "rnnoise_mix": fr.rnnoise_mix,
+        },
+        "input": {
+            "channels": fr.input_channels,
+            "sample_rate": fr.input_sample_rate,
+            "format": fr.input_format,
+        },
+    }
+
+    model: dict[str, Any] = {
+        "id": fr.model_id,
+        "device": fr.device,
+        "compute_type": fr.compute_type,
+    }
+
+    params: dict[str, Any] = {key: getattr(fr, key) for key in _PARAM_KEYS}
+    params["vad"] = {json_key: getattr(fr, src_key) for json_key, src_key in _VAD_KEY_MAP.items()}
+
+    return {
+        "path": fr.audio_path,
+        "status": fr.status,
+        "audio_duration_s": fr.audio_duration,
+        "preprocess_time_s": fr.preprocess_duration,
+        "transcribe_time_s": fr.transcribe_duration,
+        "total_processing_time_s": fr.total_processing_time,
+        "speed_ratio": fr.speed_ratio,
+        # segment_count is not tracked in FileMetricRecord; reserved for future runs.
+        "segment_count": None,
+        "requested_language": fr.requested_language,
+        "applied_language": fr.applied_language,
+        "detected_language": fr.detected_language,
+        "language_probability": fr.language_probability,
+        "error_message": fr.error_message,
+        "preprocess": preprocess,
+        "model": model,
+        "params": params,
+        "output_format": fr.output_format,
+        "float_precision": fr.float_precision,
+    }
+
+
+def _build_jsonl_record(
+    run_record: RunRecord,
+    file_records: list[FileMetricRecord],
+) -> dict[str, Any]:
+    """Build the nested JSONL record for one run.
+
+    Mirrors ``scripts/migrate_db_to_jsonl.py:_build_run_record`` so live
+    writes and historical exports agree byte-for-byte. Top-level scalars
+    stay flat; everything else lives under ``preprocess`` / ``model`` /
+    ``params`` (with ``params.vad`` sub-object) / ``totals`` / ``files[]``.
+
+    All non-JSON-native types (``datetime``, ``pathlib.Path``) are converted
+    here so :meth:`JsonlRunLog.append` can encode without a ``default=``
+    fallback (plan §8 D-4).
+    """
+    rr = run_record
+
+    model: dict[str, Any] = {
+        "id": rr.model_id,
+        "device": rr.device,
+        "compute_type": rr.compute_type,
+    }
+
+    preprocess: dict[str, Any] = {
+        "enabled": rr.preprocess_enabled,
+        "profile": rr.preprocess_profile,
+        "target_sample_rate": rr.target_sample_rate,
+        "target_channels": rr.target_channels,
+        "snr_estimation_method": rr.snr_estimation_method,
+        "volume_adjustment_db": rr.volume_adjustment_db,
+        "resampler": rr.resampler,
+        "sample_format": rr.sample_format,
+        "loudnorm": {
+            "preset": rr.loudnorm_preset,
+            "target_i": rr.loudnorm_target_i,
+            "target_tp": rr.loudnorm_target_tp,
+            "target_lra": rr.loudnorm_target_lra,
+            "backend": rr.loudnorm_backend,
+        },
+        "denoise": {
+            "method": rr.denoise_method,
+            "library": rr.denoise_library,
+            "rnnoise_model": rr.rnnoise_model,
+            "rnnoise_mix": rr.rnnoise_mix,
+        },
+    }
+
+    params: dict[str, Any] = {key: getattr(rr, key) for key in _PARAM_KEYS}
+    params["vad"] = {json_key: getattr(rr, src_key) for json_key, src_key in _VAD_KEY_MAP.items()}
+
+    totals: dict[str, Any] = {
+        "files_found": rr.files_found,
+        "succeeded": rr.succeeded,
+        "failed": rr.failed,
+        "processing_time_s": rr.total_processing_time,
+        "preprocess_time_s": rr.total_preprocess_time,
+        "transcribe_time_s": rr.total_transcribe_time,
+        "audio_duration_s": rr.total_audio_duration,
+        "speed_ratio": rr.speed_ratio,
+    }
+
+    input_folder = rr.input_folder
+    if isinstance(input_folder, Path):
+        input_folder = str(input_folder)
+
+    return {
+        "recorded_at": _iso_utc(rr.recorded_at),
+        "input_folder": input_folder,
+        "preset": rr.preset,
+        "language": rr.language,
+        "preprocess": preprocess,
+        "model": model,
+        "params": params,
+        "totals": totals,
+        "files": [_file_record_to_dict(fr) for fr in file_records],
+    }
 
 
 class FileMoverPolicy:
@@ -90,7 +304,6 @@ class FileProcessor:
     def __init__(
         self,
         transcription_service: TranscriptionService,
-        state_store: StateStore,
         output_writer: OutputWriter,
         file_mover_policy: FileMoverPolicy,
         processor_ref: "TranscriptionProcessor",
@@ -99,13 +312,15 @@ class FileProcessor:
 
         Args:
             transcription_service: Service for transcribing audio files
-            state_store: Service for managing transcription state
             output_writer: Service for writing transcription output
             file_mover_policy: Policy for moving processed files
             processor_ref: Reference to the parent TranscriptionProcessor for config access
+
+        Note: file status is captured in the returned ``FileProcessingStats`` and
+        carried through to the JSONL ``files[]`` array by :class:`RunSummarizer`.
+        There is no per-file status store (Stage G removed the DuckDB seam).
         """
         self._transcription_service = transcription_service
-        self._state_store = state_store
         self._output_writer = output_writer
         self._file_mover_policy = file_mover_policy
         self._processor_ref = processor_ref
@@ -152,7 +367,6 @@ class FileProcessor:
         if not file_path_obj.exists():
             error_msg = f"File not found: {file_path}"
             LOGGER.error(error_msg)
-            self._state_store.update_status(file_path, "failed", error_msg)
             return FileProcessingStats(file_path=file_path, status="failed", error_message=error_msg)
 
         LOGGER.debug("Processing file: %s", file_path)
@@ -240,17 +454,15 @@ class FileProcessor:
                             LOGGER.debug("Moved output to: %s", dest_output)
                 # When _output_base_dir is set (multi-variant mode), outputs stay in that location
 
-            # Log success in database (for history/statistics)
-            # Note: File location is source of truth, not database status
-            self._state_store.update_status(file_path, "completed")
-
+            # File status is captured in the returned FileProcessingStats and
+            # rolled into the JSONL files[] array by RunSummarizer.
+            # Note: File location is source of truth, not the status string.
             LOGGER.debug("Successfully processed: %s", file_path)
             return FileProcessingStats(file_path=file_path, status="completed", metrics=metrics)
 
         except Exception as error:
             error_msg = f"{type(error).__name__}: {error}"
             LOGGER.error("Failed to process %s: %s", file_path, error_msg, exc_info=True)
-            self._state_store.update_status(file_path, "failed", error_msg)
 
             # Move failed file to failed folder (unless disabled)
             if not self._disable_file_moving:
@@ -261,13 +473,13 @@ class FileProcessor:
 class RunSummarizer:
     """Handles aggregation and persistence of run metrics."""
 
-    def __init__(self, state_store: StateStore):
+    def __init__(self, run_log: JsonlRunLog):
         """Initialize the run summarizer.
 
         Args:
-            state_store: Service for managing transcription state
+            run_log: Append-only JSONL run log (one record per batch).
         """
-        self._state_store = state_store
+        self._run_log = run_log
 
     def summarize_run(
         self,
@@ -505,110 +717,129 @@ class RunSummarizer:
         preset: str,
         language: str | None,
     ) -> int | None:
-        """Persist run record and individual file metrics to the database."""
+        """Persist the run as a single JSONL record (Stage G write path).
+
+        Builds the nested record described in
+        ``docs/plans/2026-05-20-stage-G-db-to-jsonl.md`` §4.1 from
+        ``run_record`` + the in-memory list of :class:`FileMetricRecord`
+        derived from ``file_stats``. The nested shape mirrors
+        ``scripts/migrate_db_to_jsonl.py``'s ``_build_run_record`` and
+        ``_file_record_from_row`` so live-write output matches the migration
+        export byte-for-byte.
+
+        Returns the assigned run id, or ``None`` if the JSONL append fails
+        (run already finished — failing to persist shouldn't crash the batch).
+        """
         import json
-        from datetime import datetime, timezone
 
-        from backend.database import FileMetricRecord
+        # 1. Build the per-file FileMetricRecord list in-memory. The migration
+        #    script reads these same fields back out of DuckDB; mirroring the
+        #    construction here keeps the shape consistent.
+        # NOTE: run_id is unknown until JsonlRunLog.append assigns one. We
+        #       build records with a sentinel and post-fix below.
+        file_records: list[FileMetricRecord] = []
+        for entry in file_stats:
+            if not entry.metrics:
+                file_record = FileMetricRecord(
+                    run_id=0,  # filled after append
+                    recorded_at=datetime.now(timezone.utc),
+                    audio_path=entry.file_path,
+                    preset=preset,
+                    status=entry.status,
+                    error_message=entry.error_message,
+                    total_processing_time=0.0,
+                    transcribe_duration=0.0,
+                    preprocess_duration=0.0,
+                    preprocess_enabled=config_snapshot.enabled,
+                    preprocess_profile=config_snapshot.profile,
+                    target_sample_rate=config_snapshot.target_sample_rate,
+                )
+            else:
+                m = entry.metrics
+                file_record = FileMetricRecord(
+                    run_id=0,  # filled after append
+                    recorded_at=datetime.now(timezone.utc),
+                    audio_path=entry.file_path,
+                    preset=preset,
+                    status=entry.status,
+                    requested_language=language,
+                    applied_language=m.applied_language,
+                    detected_language=m.detected_language,
+                    language_probability=m.language_probability,
+                    audio_duration=m.audio_duration,
+                    total_processing_time=m.total_processing_time,
+                    transcribe_duration=m.transcribe_duration,
+                    preprocess_duration=m.preprocess_duration,
+                    speed_ratio=m.speed_ratio,
+                    preprocess_enabled=m.preprocess_enabled,
+                    preprocess_profile=m.preprocess_profile,
+                    target_sample_rate=m.target_sample_rate,
+                    target_channels=m.target_channels,
+                    preprocess_snr_before=m.preprocess_snr_before,
+                    preprocess_snr_after=m.preprocess_snr_after,
+                    preprocess_steps=m.preprocess_steps,
+                    rnnoise_model=m.rnnoise_model,
+                    rnnoise_mix=m.rnnoise_mix,
+                    input_channels=m.input_channels,
+                    input_sample_rate=m.input_sample_rate,
+                    input_format=m.input_format,
+                    volume_adjustment_db=m.volume_adjustment_db,
+                    resampler=m.resampler,
+                    sample_format=m.sample_format,
+                    loudnorm_preset=m.loudnorm_preset,
+                    loudnorm_target_i=m.loudnorm_target_i,
+                    loudnorm_target_tp=m.loudnorm_target_tp,
+                    loudnorm_target_lra=m.loudnorm_target_lra,
+                    loudnorm_backend=m.loudnorm_backend,
+                    denoise_method=m.denoise_method,
+                    denoise_library=m.denoise_library,
+                    snr_estimation_method=m.snr_estimation_method,
+                    beam_size=m.beam_size,
+                    patience=m.patience,
+                    word_timestamps=m.word_timestamps,
+                    task=m.task,
+                    chunk_length=m.chunk_length,
+                    vad_filter=m.vad_filter,
+                    vad_threshold=m.vad_threshold,
+                    vad_min_speech_duration_ms=m.vad_min_speech_duration_ms,
+                    vad_max_speech_duration_s=m.vad_max_speech_duration_s,
+                    vad_min_silence_duration_ms=m.vad_min_silence_duration_ms,
+                    vad_speech_pad_ms=m.vad_speech_pad_ms,
+                    temperature=json.dumps(m.temperature) if m.temperature is not None else None,
+                    temperature_increment_on_fallback=m.temperature_increment_on_fallback,
+                    best_of=m.best_of,
+                    compression_ratio_threshold=m.compression_ratio_threshold,
+                    logprob_threshold=m.logprob_threshold,
+                    no_speech_threshold=m.no_speech_threshold,
+                    length_penalty=m.length_penalty,
+                    repetition_penalty=m.repetition_penalty,
+                    no_repeat_ngram_size=m.no_repeat_ngram_size,
+                    suppress_tokens=m.suppress_tokens,
+                    condition_on_previous_text=m.condition_on_previous_text,
+                    initial_prompt=m.initial_prompt,
+                    model_id=m.model_id,
+                    device=m.device,
+                    compute_type=m.compute_type,
+                    output_format=self._output_format,
+                    float_precision=m.float_precision,
+                )
 
+            file_records.append(file_record)
+
+        # 2. Build the nested JSONL record (plan §4.1 / §8 D-4).
+        #    Non-JSON-native types (datetime, Path) are converted here so the
+        #    JsonlRunLog encoder never has to guess.
+        record = _build_jsonl_record(run_record, file_records)
+
+        # 3. Append to the JSONL log. Late-stage failure should not crash an
+        #    already-complete batch — log and return None.
         try:
-            # 1. Record Run and get ID
-            run_id = self._state_store.record_run(run_record)
-
-            # 2. Record File Metrics
-            for entry in file_stats:
-                if not entry.metrics:
-                    # Record failed files with basic info if needed
-                    file_record = FileMetricRecord(
-                        run_id=run_id,
-                        recorded_at=datetime.now(timezone.utc),
-                        audio_path=entry.file_path,
-                        preset=preset,
-                        status=entry.status,
-                        error_message=entry.error_message,
-                        total_processing_time=0.0,
-                        transcribe_duration=0.0,
-                        preprocess_duration=0.0,
-                        preprocess_enabled=config_snapshot.enabled,
-                        preprocess_profile=config_snapshot.profile,
-                        target_sample_rate=config_snapshot.target_sample_rate,
-                    )
-                else:
-                    m = entry.metrics
-                    file_record = FileMetricRecord(
-                        run_id=run_id,
-                        recorded_at=datetime.now(timezone.utc),
-                        audio_path=entry.file_path,
-                        preset=preset,
-                        status=entry.status,
-                        requested_language=language,
-                        applied_language=m.applied_language,
-                        detected_language=m.detected_language,
-                        language_probability=m.language_probability,
-                        audio_duration=m.audio_duration,
-                        total_processing_time=m.total_processing_time,
-                        transcribe_duration=m.transcribe_duration,
-                        preprocess_duration=m.preprocess_duration,
-                        speed_ratio=m.speed_ratio,
-                        preprocess_enabled=m.preprocess_enabled,
-                        preprocess_profile=m.preprocess_profile,
-                        target_sample_rate=m.target_sample_rate,
-                        target_channels=m.target_channels,
-                        preprocess_snr_before=m.preprocess_snr_before,
-                        preprocess_snr_after=m.preprocess_snr_after,
-                        preprocess_steps=m.preprocess_steps,
-                        rnnoise_model=m.rnnoise_model,
-                        rnnoise_mix=m.rnnoise_mix,
-                        input_channels=m.input_channels,
-                        input_sample_rate=m.input_sample_rate,
-                        input_format=m.input_format,
-                        volume_adjustment_db=m.volume_adjustment_db,
-                        resampler=m.resampler,
-                        sample_format=m.sample_format,
-                        loudnorm_preset=m.loudnorm_preset,
-                        loudnorm_target_i=m.loudnorm_target_i,
-                        loudnorm_target_tp=m.loudnorm_target_tp,
-                        loudnorm_target_lra=m.loudnorm_target_lra,
-                        loudnorm_backend=m.loudnorm_backend,
-                        denoise_method=m.denoise_method,
-                        denoise_library=m.denoise_library,
-                        snr_estimation_method=m.snr_estimation_method,
-                        beam_size=m.beam_size,
-                        patience=m.patience,
-                        word_timestamps=m.word_timestamps,
-                        task=m.task,
-                        chunk_length=m.chunk_length,
-                        vad_filter=m.vad_filter,
-                        vad_threshold=m.vad_threshold,
-                        vad_min_speech_duration_ms=m.vad_min_speech_duration_ms,
-                        vad_max_speech_duration_s=m.vad_max_speech_duration_s,
-                        vad_min_silence_duration_ms=m.vad_min_silence_duration_ms,
-                        vad_speech_pad_ms=m.vad_speech_pad_ms,
-                        temperature=json.dumps(m.temperature) if m.temperature is not None else None,
-                        temperature_increment_on_fallback=m.temperature_increment_on_fallback,
-                        best_of=m.best_of,
-                        compression_ratio_threshold=m.compression_ratio_threshold,
-                        logprob_threshold=m.logprob_threshold,
-                        no_speech_threshold=m.no_speech_threshold,
-                        length_penalty=m.length_penalty,
-                        repetition_penalty=m.repetition_penalty,
-                        no_repeat_ngram_size=m.no_repeat_ngram_size,
-                        suppress_tokens=m.suppress_tokens,
-                        condition_on_previous_text=m.condition_on_previous_text,
-                        initial_prompt=m.initial_prompt,
-                        model_id=m.model_id,
-                        device=m.device,
-                        compute_type=m.compute_type,
-                        output_format=self._output_format,
-                        float_precision=m.float_precision,
-                    )
-
-                self._state_store.record_file_metric(file_record)
-
-            return run_id
-
-        except DatabaseError as exc:
-            LOGGER.error("Failed to record run metadata: %s", exc, exc_info=True)
+            return self._run_log.append(record)
+        except OSError as exc:
+            LOGGER.error("Failed to append run record to JSONL log: %s", exc, exc_info=True)
+            return None
+        except Exception as exc:  # pragma: no cover - defensive
+            LOGGER.error("Unexpected error appending run record to JSONL log: %s", exc, exc_info=True)
             return None
 
 

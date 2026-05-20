@@ -276,13 +276,13 @@ def _process_single_variant(
             language=args.language,
             output_format=args.output_format,
         )
-        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
         output_writer = ServiceFactory.create_output_writer()
 
         processor = TranscriptionProcessor(
             transcription_service=transcription_service,
-            state_store=state_store,
+            run_log=run_log,
             file_mover=file_mover,
             output_writer=output_writer,
             run_config=run_config,
@@ -336,13 +336,13 @@ def _run_single_variant(
             language=args.language,
             output_format=args.output_format,
         )
-        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
         output_writer = ServiceFactory.create_output_writer()
 
         processor = TranscriptionProcessor(
             transcription_service=transcription_service,
-            state_store=state_store,
+            run_log=run_log,
             file_mover=file_mover,
             output_writer=output_writer,
             run_config=run_config,
@@ -485,19 +485,20 @@ def cmd_process(args: argparse.Namespace) -> int:
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    # When db_path is None, downstream ServiceFactory.create_state_store falls
-    # back to get_default_db_path() (~/.local/share/stt-faster/transcribe_state.duckdb).
-    # The test-run check below only adjusts log verbosity — it does NOT
-    # redirect to a separate test database; tests pass an explicit db_path.
+    # Stage G.b: the write path now goes through ``ServiceFactory.create_run_log()``
+    # which falls back to ``get_default_run_log_path()``
+    # (``~/.local/share/stt-faster/runs.jsonl``). ``--db-path`` is still accepted
+    # for now — it is consumed by the DB readers (``stt-faster db show``/``db recent``)
+    # which Stage G.c rewrites against the JSONL log. Tests for the write path
+    # set ``XDG_DATA_HOME`` to isolate the runs.jsonl file.
     is_test = _is_test_run()
     if args.db_path is None and not is_test:
-        # Ensure db_path remains None to use production database
         LOGGER.info(
-            "Using production database for non-test run (input folder: %s)",
+            "Using production run log for non-test run (input folder: %s)",
             input_folder,
         )
     elif is_test:
-        LOGGER.debug("Test run detected - using test database if db_path not specified")
+        LOGGER.debug("Test run detected")
 
     # Parse and validate variants
     variant_numbers, error = _parse_variant_numbers(args)

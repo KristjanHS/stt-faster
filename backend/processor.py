@@ -7,10 +7,10 @@ from typing import TYPE_CHECKING, Any, Union
 
 from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, RunSummarizer
 from backend.run_config import RunConfig
+from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
     FileMover,
     OutputWriter,
-    StateStore,
     TranscriptionService,
 )
 from backend.transcribe import DEFAULT_OUTPUT_FORMAT
@@ -28,7 +28,7 @@ class TranscriptionProcessor:
     def __init__(
         self,
         transcription_service: TranscriptionService,
-        state_store: StateStore,
+        run_log: JsonlRunLog,
         file_mover: FileMover,
         output_writer: OutputWriter,
         run_config: RunConfig | None = None,
@@ -44,7 +44,7 @@ class TranscriptionProcessor:
 
         Args:
             transcription_service: Service for transcribing audio files
-            state_store: Service for managing transcription state
+            run_log: Append-only JSONL run log (one record per batch).
             file_mover: Service for moving files
             output_writer: Service for writing transcription output
             run_config: Complete run configuration with all settings (new API)
@@ -87,12 +87,11 @@ class TranscriptionProcessor:
         self._file_mover_policy = FileMoverPolicy(self.input_folder, file_mover)
         self._file_processor = FileProcessor(
             transcription_service=transcription_service,
-            state_store=state_store,
             output_writer=output_writer,
             file_mover_policy=self._file_mover_policy,
             processor_ref=self,
         )
-        self._run_summarizer = RunSummarizer(state_store)
+        self._run_summarizer = RunSummarizer(run_log)
 
         # For backward compatibility
         self._move = file_mover.move
