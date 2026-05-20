@@ -89,8 +89,6 @@ def test_scripts_are_thin_wrappers():
         excluded_scripts = {
             "compare_transcription_variants.py",
             "generate_variant_report.py",
-            "check_parameter_completeness.py",  # Database checking utility script
-            "migrate_db_to_jsonl.py",  # One-shot DuckDB→JSONL migration, deleted in Stage G.e
         }
         if script_file.name in excluded_scripts:
             # Allow up to 2000 lines for comparison/utility scripts

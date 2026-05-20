@@ -6,7 +6,6 @@ from pathlib import Path
 
 import pytest
 
-from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
@@ -21,7 +20,6 @@ def _make_run_log(temp_folder: Path) -> JsonlRunLog:
 
 
 def _create_test_processor(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     preset: str = "et-large",
     language: str | None = None,
@@ -29,13 +27,7 @@ def _create_test_processor(
     variant=None,
     disable_file_moving: bool = False,
 ) -> TranscriptionProcessor:
-    """Helper function to create a processor with services for testing.
-
-    ``temp_db`` is retained as a parameter for test-API compatibility but is
-    no longer wired into the processor — Stage G.b removed the DuckDB write
-    path; the JSONL run log lives next to the temp folder instead.
-    """
-    del temp_db  # unused since Stage G.b
+    """Helper function to create a processor with services for testing."""
     # Create run configuration
     run_config = RunConfig.from_env_and_variant(temp_folder, variant)
     run_config.model_preset = preset
@@ -62,20 +54,20 @@ def _create_test_processor(
     )
 
 
-def test_processor_custom_preset(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_processor_custom_preset(temp_folder: Path) -> None:
     """Test processor with custom preset."""
-    processor = _create_test_processor(temp_db, temp_folder, preset="turbo")
+    processor = _create_test_processor(temp_folder, preset="turbo")
     assert processor.preset == "turbo"
 
 
-def test_scan_folder_empty(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_scan_folder_empty(temp_folder: Path) -> None:
     """Test scanning an empty folder."""
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.scan_folder()
     assert len(files) == 0
 
 
-def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_scan_folder_with_audio_files(temp_folder: Path) -> None:
     """Test scanning a folder with audio files."""
     # Create some test audio files
     (temp_folder / "audio1.wav").touch()
@@ -83,7 +75,7 @@ def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folde
     (temp_folder / "audio3.m4a").touch()
     (temp_folder / "not_audio.txt").touch()
 
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.scan_folder()
 
     assert len(files) == 3
@@ -93,7 +85,7 @@ def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folde
     assert not any("not_audio.txt" in f for f in files)
 
 
-def test_scan_folder_ignores_subdirectories(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_scan_folder_ignores_subdirectories(temp_folder: Path) -> None:
     """Test that scanning ignores files in subdirectories."""
     # Create files in root
     (temp_folder / "audio1.wav").touch()
@@ -103,41 +95,25 @@ def test_scan_folder_ignores_subdirectories(temp_db: TranscriptionDatabase, temp
     subfolder.mkdir()
     (subfolder / "audio2.wav").touch()
 
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.scan_folder()
 
     assert len(files) == 1
     assert "audio1.wav" in files[0]
 
 
-def test_get_files_to_process(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_get_files_to_process(temp_folder: Path) -> None:
     """Test getting list of files to process from folder."""
     # Create test audio files
     (temp_folder / "audio1.wav").touch()
     (temp_folder / "audio2.wav").touch()
 
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.get_files_to_process()
 
     assert len(files) == 2
     assert any("audio1.wav" in f for f in files)
     assert any("audio2.wav" in f for f in files)
-
-
-def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
-    """Test that get_files_to_process returns all files regardless of database state."""
-    audio_file = temp_folder / "audio1.wav"
-    audio_file.touch()
-
-    # Mark file as completed in database
-    temp_db.add_file(str(audio_file), "completed")
-
-    processor = _create_test_processor(temp_db, temp_folder)
-    files = processor.get_files_to_process()
-
-    # File should still be returned - file location is source of truth
-    assert len(files) == 1
-    assert str(audio_file) in files
 
 
 class RecordingTranscribe:
@@ -207,7 +183,6 @@ class RecordingMover:
 
 
 def test_process_file_success(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test successfully processing a file."""
@@ -216,7 +191,6 @@ def test_process_file_success(
     audio_file.touch()
 
     # Register file in database
-    temp_db.add_file(str(audio_file), "pending")
 
     # Create mock transcription service
     from unittest.mock import Mock
@@ -272,7 +246,6 @@ def test_process_file_success(
 
 
 def test_process_file_failure(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -286,7 +259,6 @@ def test_process_file_failure(
     audio_file.touch()
 
     # Register file in database
-    temp_db.add_file(str(audio_file), "pending")
 
     # Create mock transcription service that fails
     from unittest.mock import Mock
@@ -325,7 +297,6 @@ def test_process_file_failure(
 
 
 def test_process_file_not_found(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -337,11 +308,10 @@ def test_process_file_not_found(
     audio_file = temp_folder / "nonexistent.wav"
 
     # Register file in database (but don't create it)
-    temp_db.add_file(str(audio_file), "pending")
 
     # Capture logs at ERROR level to verify expected error logging
     with caplog.at_level(logging.ERROR, logger="backend.processor"):
-        processor = _create_test_processor(temp_db, temp_folder)
+        processor = _create_test_processor(temp_folder)
         result = processor.process_file(str(audio_file))
 
     # Verify expected error was logged (this is intentional for this test)
@@ -358,7 +328,6 @@ def test_process_file_not_found(
 
 
 def test_process_all_files(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test processing all files in provided list."""
@@ -414,7 +383,6 @@ def test_process_all_files(
 
 
 def test_process_folder(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test full folder processing workflow."""
@@ -489,7 +457,6 @@ def test_process_folder(
 
 
 def test_process_file_move_failure_keeps_pending_status(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -506,7 +473,6 @@ def test_process_file_move_failure_keeps_pending_status(
     audio_file.touch()
 
     # Register file
-    temp_db.add_file(str(audio_file), "pending")
 
     # Create mock transcription service
     from unittest.mock import Mock
@@ -575,7 +541,6 @@ def test_process_file_move_failure_keeps_pending_status(
 
 
 def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test that files in subdirectories preserve directory structure when _output_base_dir is set.
@@ -594,8 +559,6 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
     audio2.touch()
 
     # Register files
-    temp_db.add_file(str(audio1), "pending")
-    temp_db.add_file(str(audio2), "pending")
 
     # Create output base directory (simulating multi-variant mode)
     output_base = temp_folder / "outputs"
@@ -665,15 +628,12 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
 
 
 def test_process_file_root_level_file_with_output_base_dir(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test that files at root level work correctly with _output_base_dir (no subdirectory created)."""
     # Create file at root level
     audio_file = temp_folder / "audio.wav"
     audio_file.touch()
-
-    temp_db.add_file(str(audio_file), "pending")
 
     output_base = temp_folder / "outputs"
     output_base.mkdir()

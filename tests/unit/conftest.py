@@ -6,7 +6,6 @@ from typing import Iterator
 
 import pytest
 
-from backend.database import TranscriptionDatabase
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.io import AudioInfo
 from backend.preprocess.metrics import StepMetrics
@@ -18,25 +17,6 @@ def _disable_network_for_unit_tests() -> None:
     from pytest_socket import disable_socket
 
     disable_socket(allow_unix_socket=True)
-
-
-@pytest.fixture
-def temp_db() -> Iterator[TranscriptionDatabase]:
-    """Create a temporary database for testing."""
-    with tempfile.NamedTemporaryFile(suffix=".duckdb", delete=False) as tmp:
-        db_path = tmp.name
-
-    # DuckDB requires the file to be a valid DB or not exist.
-    # tempfile creates an empty file which DuckDB might treat as invalid/corrupt.
-    # Delete it so TranscriptionDatabase creates a fresh one.
-    Path(db_path).unlink(missing_ok=True)
-
-    db = TranscriptionDatabase(db_path)
-    yield db
-    db.close()
-
-    # Cleanup
-    Path(db_path).unlink(missing_ok=True)
 
 
 @pytest.fixture
