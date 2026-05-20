@@ -453,9 +453,10 @@ def test_process_folder(
     )
 
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
+    run_log = _make_run_log(temp_folder)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        run_log=_make_run_log(temp_folder),
+        run_log=run_log,
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -475,6 +476,16 @@ def test_process_folder(
     assert stats["total_preprocess_time"] == 0.2  # 0.1 + 0.1
     assert stats["total_transcribe_time"] == 1.0  # 0.5 + 0.5
     assert stats["average_speed_ratio"] == 120.0  # (120.0 + 120.0) / 2
+
+    # I-3 review fix: read back the JSONL record to prove the append path
+    # actually wrote a structurally-correct entry, not just that the call
+    # didn't raise. stats["run_id"] alone could pass against an empty dict.
+    persisted = run_log.tail(1)
+    assert len(persisted) == 1
+    persisted_record = persisted[0]
+    assert persisted_record["id"] == stats["run_id"]
+    assert len(persisted_record["files"]) == 2
+    assert {f["status"] for f in persisted_record["files"]} == {"completed"}
 
 
 def test_process_file_move_failure_keeps_pending_status(

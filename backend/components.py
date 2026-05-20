@@ -506,20 +506,6 @@ class RunSummarizer:
             Dictionary with run statistics
         """
         self._output_format = output_format  # Store for use in _persist_run_data
-        """Build and persist run metadata and file metrics.
-
-        Args:
-            results: Processing results with file stats
-            config_snapshot: Configuration snapshot
-            total_processing_time: Total time for the run
-            input_folder: Input folder path
-            preset: Model preset used
-            language: Language setting
-            output_format: Output format used
-
-        Returns:
-            Dictionary with run statistics
-        """
         file_stats: list[FileProcessingStats] = results.get("file_stats", [])
         metrics_list = [entry.metrics for entry in file_stats if entry.metrics]
 

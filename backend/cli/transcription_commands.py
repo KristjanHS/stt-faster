@@ -485,12 +485,13 @@ def cmd_process(args: argparse.Namespace) -> int:
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    # Stage G.b: the write path now goes through ``ServiceFactory.create_run_log()``
-    # which falls back to ``get_default_run_log_path()``
-    # (``~/.local/share/stt-faster/runs.jsonl``). ``--db-path`` is still accepted
-    # for now — it is consumed by the DB readers (``stt-faster db show``/``db recent``)
-    # which Stage G.c rewrites against the JSONL log. Tests for the write path
-    # set ``XDG_DATA_HOME`` to isolate the runs.jsonl file.
+    # Stage G.b: write path goes through ``ServiceFactory.create_run_log()`` →
+    # ``get_default_run_log_path()`` (``~/.local/share/stt-faster/runs.jsonl``).
+    # ``--db-path`` is currently a no-op for the write path — it is not threaded
+    # into ``create_run_log()`` (the semantics differ: ``.duckdb`` file vs JSONL
+    # file). The arg is also still consumed by the DB readers (``stt-faster db
+    # show``/``db recent``) until Stage G.c rewrites them against the JSONL log.
+    # For test isolation, set ``XDG_DATA_HOME`` to redirect the JSONL path.
     is_test = _is_test_run()
     if args.db_path is None and not is_test:
         LOGGER.info(
