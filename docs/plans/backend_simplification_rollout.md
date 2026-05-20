@@ -205,9 +205,9 @@ This plan lands a long ordered step list. Per `~/.claude/skills/mybrain/SKILL.md
 
 Mark stages here as they ship. Do NOT pre-mark; do NOT update from a planning session. Only update when a PR merges.
 
-- [ ] Stage A — pure deletes & lint-level cleanups
-- [ ] Stage B — script coordination + re-export prune + CLI logging fix
-- [ ] Stage C — Step/executor flatten
-- [ ] Stage D — database split + transactional dedup
-- [ ] Stage E — function-level extractions + `VariantRunContext`
-- [ ] Stage F — lint-level cleanups
+- [x] Stage A — pure deletes & lint-level cleanups (commits `da5f272`, `8e8bb78`)
+- [x] Stage B — script coordination + re-export prune + CLI logging fix (commits `a79522c`, `b8df65f`)
+- [x] Stage C — Step/executor flatten (Stage C.1 commits `ca20a1f`, `50f4ddf`, `5eb7efe`; Stage C.2 commits `4cdead7`, `b18dcae`)
+- [x] Stage D — database split + transactional dedup (Stage D.1 commits `24d746f`, `da6a7ce`, `52c6e86`, `47a62ff`; Stage D.2 in atomic split commit)
+- [x] Stage E — function-level extractions + `VariantRunContext` (Stage E.1 commits `603725c`, `5789dbc`, `30c64f2`; Stage E.2 commits `f69fc5f`, `b84aee4`, `c96141a`)
+- [x] Stage F — lint-level cleanups (Stage F.1 commits `678c933`, `db84464`, `9a5eaaf`, `ef06821`; Stage F.2 commits `95c4e4e`, `0c8f9a0`, `4348937`, `b4bf8fd`, `58141ad`)
