@@ -117,3 +117,27 @@ def setup_logging() -> None:
 
 # --- End Logging Configuration ---
 # No automatic setup at import time - entrypoints must call setup_logging() explicitly
+
+
+def get_default_run_log_path() -> Path:
+    """Return XDG-compliant default path for the JSONL run log.
+
+    Mirrors ``backend.database.schema.get_default_db_path`` shape:
+
+    - Uses ``$XDG_DATA_HOME`` if set, else ``~/.local/share``.
+    - Under that, the app directory ``stt-faster``.
+    - Filename ``runs.jsonl``.
+
+    The parent directory is created on demand (``parents=True, exist_ok=True``)
+    so callers can rely on the path being writable.
+    """
+    xdg_data_home = os.environ.get("XDG_DATA_HOME")
+    if xdg_data_home:
+        data_dir = Path(xdg_data_home)
+    else:
+        data_dir = Path.home() / ".local" / "share"
+
+    app_data_dir = data_dir / "stt-faster"
+    app_data_dir.mkdir(parents=True, exist_ok=True)
+
+    return app_data_dir / "runs.jsonl"
