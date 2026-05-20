@@ -63,11 +63,11 @@ Failed inputs land under:         <audio_folder>\failed\
 
 NOTES:
 ------
-- Processing is safe to run multiple times. A DuckDB state file
-  (transcribe_state.duckdb) tracks progress so already-processed files
-  are skipped.
-- To reprocess a file, move it back to the main folder or delete the
-  state file to start fresh.
+- Processing is safe to run multiple times. Already-processed files are
+  identified by their location (under processed/ or failed/) and skipped.
+  Run history is appended to ~/.local/share/stt-faster/runs.jsonl inside
+  WSL.
+- To reprocess a file, move it back to the main folder.
 - First run downloads the model (~1.5-3 GB) to ~/.cache/hf inside WSL.
   Later runs are fast.
 

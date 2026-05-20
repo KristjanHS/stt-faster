@@ -45,8 +45,8 @@ To change which variant a file uses, edit the `set "VARIANTS=..."` line at the t
 → WSL needs access to the Windows folder via `/mnt/c/Users/...`. The batch files auto-convert `C:\`, `D:\`, `E:\`.
 
 **Files stuck in pending**
-→ Check errors: `.venv/bin/python scripts/transcribe_manager.py status --verbose`
-→ Or delete `transcribe_state.duckdb` to start fresh.
+→ Look in `<audio_folder>/failed/` for files that errored; check `logs/` for stack traces.
+→ Inspect recent run history: `.venv/bin/python -m backend.cli.main db recent --limit 10`.
 
 ## Customisation
 
