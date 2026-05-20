@@ -32,10 +32,9 @@ else
     exit 1
 fi
 
-# Delegate staging/stash isolation to the pre-commit framework itself — `pre-commit run`
-# (no `--all-files`) already restricts hooks to the staged set and stashes unstaged work
-# for the duration of the run. Full-repo sweep = `make pre-commit`.
-if ! "$PRE_COMMIT_CMD" run 2>&1; then
+# Run every hook against the full repo so drift in unstaged files is caught at commit
+# time. The framework still stashes unstaged work for the duration of the run.
+if ! "$PRE_COMMIT_CMD" run --all-files 2>&1; then
     log ERROR "❌ Pre-commit checks failed. Please fix the issues and try again."
     log INFO "💡 You can run individual hooks with: pre-commit run <hook-id>"
     log INFO "💡 Or run on specific files: pre-commit run --files <file1> <file2>"
