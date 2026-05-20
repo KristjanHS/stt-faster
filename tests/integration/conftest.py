@@ -65,12 +65,6 @@ def real_audio_test_folder(tmp_path: Path) -> Path:
     return test_folder
 
 
-@pytest.fixture
-def cli_test_db(tmp_path: Path) -> Path:
-    """Create a temporary database path for CLI testing."""
-    return tmp_path / "test_cli.duckdb"
-
-
 @pytest.fixture(scope="session")
 def real_audio_sample() -> Path:
     """Ensure the canonical real audio sample is present for integrations."""

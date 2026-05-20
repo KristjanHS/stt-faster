@@ -26,7 +26,7 @@ class TestRealTranscription:
     They are marked with @pytest.mark.slow to allow selective execution.
     """
 
-    def test_transcribe_real_mp3_file(self, e2e_test_folder: Path, e2e_test_db: Path, tmp_path: Path) -> None:
+    def test_transcribe_real_mp3_file(self, e2e_test_folder: Path, tmp_path: Path) -> None:
         """E2E: Transcribe test.mp3 file using Estonian model.
 
         Note: test.mp3 is Estonian audio, so we use the et-large preset.
@@ -36,8 +36,8 @@ class TestRealTranscription:
         if not test_mp3.exists():
             pytest.fail("test.mp3 not found in test folder; add tests/test.mp3 for E2E transcription")
 
-        # Stage G.b: isolate the JSONL run log to tmp_path. The subprocess
-        # inherits XDG_DATA_HOME so ``get_default_run_log_path`` resolves to
+        # Isolate the JSONL run log to tmp_path. The subprocess inherits
+        # XDG_DATA_HOME so ``get_default_run_log_path`` resolves to
         # ``<tmp_path>/stt-faster/runs.jsonl`` instead of the user's real log.
         xdg_data_home = tmp_path / "xdg_data"
         xdg_data_home.mkdir()
@@ -47,8 +47,6 @@ class TestRealTranscription:
             [
                 sys.executable,
                 "scripts/transcribe_manager.py",
-                "--db-path",
-                str(e2e_test_db),
                 "process",
                 str(e2e_test_folder),
                 "--preset",

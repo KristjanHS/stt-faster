@@ -24,13 +24,3 @@ def e2e_test_folder(tmp_path: Path) -> Path:
         shutil.copy(source_mp3, dest_mp3)
 
     return tmp_path
-
-
-@pytest.fixture
-def e2e_test_db(tmp_path: Path) -> Path:
-    """Create a temporary database path for E2E tests.
-
-    Returns:
-        Path to temporary database file
-    """
-    return tmp_path / "test_transcriptions.duckdb"

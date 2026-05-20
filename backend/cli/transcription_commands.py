@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import shutil
 import subprocess  # nosec B404
-import sys
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -34,27 +32,6 @@ LOGGER = logging.getLogger(__name__)
 
 # Create Typer app for unified CLI
 app = typer.Typer(name="transcribe", help="Transcription processing commands")
-
-
-_TEST_RUN_SENTINELS: tuple[str, ...] = ("pytest", "unittest", "junit")
-
-
-def _is_test_run() -> bool:
-    """Return True when this process is running under a test runner.
-
-    PYTEST_CURRENT_TEST is set by pytest for each test item; the argv
-    sentinel check covers unittest/junit + bare `pytest` invocations that
-    have not yet entered a test item. The sentinel is matched against
-    each argv token's basename so it does not false-positive on path
-    arguments like `--db-path /tmp/pytest_results/db.duckdb`.
-    """
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return True
-    for arg in sys.argv:
-        basename = os.path.basename(arg).lower()
-        if any(s in basename for s in _TEST_RUN_SENTINELS):
-            return True
-    return False
 
 
 def _get_git_commit_hash() -> str | None:
@@ -485,22 +462,6 @@ def cmd_process(args: argparse.Namespace) -> int:
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    # Stage G.b: write path goes through ``ServiceFactory.create_run_log()`` →
-    # ``get_default_run_log_path()`` (``~/.local/share/stt-faster/runs.jsonl``).
-    # ``--db-path`` is currently a no-op for the write path — it is not threaded
-    # into ``create_run_log()`` (the semantics differ: ``.duckdb`` file vs JSONL
-    # file). The arg is also still consumed by the DB readers (``stt-faster db
-    # show``/``db recent``) until Stage G.c rewrites them against the JSONL log.
-    # For test isolation, set ``XDG_DATA_HOME`` to redirect the JSONL path.
-    is_test = _is_test_run()
-    if args.db_path is None and not is_test:
-        LOGGER.info(
-            "Using production run log for non-test run (input folder: %s)",
-            input_folder,
-        )
-    elif is_test:
-        LOGGER.debug("Test run detected")
-
     # Parse and validate variants
     variant_numbers, error = _parse_variant_numbers(args)
     if error:
@@ -530,7 +491,6 @@ def process(
     ] = "both",
     variant: Annotated[int | None, typer.Option("--variant", "-v", help="Variant number")] = None,
     variants: Annotated[str | None, typer.Option("--variants", help="Comma-separated list of variant numbers")] = None,
-    db_path: Annotated[str | None, typer.Option("--db-path", help="Path to database file")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose output")] = False,
 ) -> None:
     """Process audio files in the specified folder."""
@@ -543,7 +503,6 @@ def process(
     args.output_format = output_format
     args.variant = variant
     args.variants = variants
-    args.db_path = db_path
     args.verbose = verbose
 
     exit_code = cmd_process(args)
