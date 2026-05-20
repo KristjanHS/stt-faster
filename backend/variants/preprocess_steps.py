@@ -86,6 +86,54 @@ def _execute_step_with_registry(
     return output_path, metrics
 
 
+def _run_single_filter(
+    input_path: Path,
+    output_path: Path,
+    target_sample_rate: int,
+    target_channels: int,
+    filter_chain: list[tuple[str, dict[str, Any]]],
+    step_name: str,
+    metric_name: str,
+) -> StepMetrics:
+    """Execute a single ffmpeg filter chain and return StepMetrics.
+
+    Shared body for wrappers whose only ffmpeg work is `input -> filter(s) -> output -> run`
+    with no parsed-stderr feedback loop or second pass. Each entry in ``filter_chain`` is
+    ``(filter_name, filter_kwargs)`` and is applied in order. Output is always
+    ``pcm_s16le`` at the requested sample rate and channel count.
+
+    Errors are wrapped in :class:`StepExecutionError` tagged with ``step_name``; the
+    returned ``StepMetrics.name`` is ``metric_name`` and ``backend`` is ``"ffmpeg"``.
+    """
+    import ffmpeg  # type: ignore[import-untyped]
+
+    start = time.time()
+    try:
+        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+        for filter_name, filter_kwargs in filter_chain:
+            stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
+                stream,  # type: ignore[reportUnknownArgumentType]
+                filter_name,
+                **filter_kwargs,  # type: ignore[reportUnknownArgumentType]
+            )
+        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
+            stream,  # type: ignore[reportUnknownArgumentType]
+            str(output_path),
+            ac=target_channels,
+            ar=target_sample_rate,
+            acodec="pcm_s16le",
+        )
+        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
+    except ffmpeg.Error as exc:  # type: ignore[misc]
+        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
+        raise StepExecutionError(step_name, f"ffmpeg failed: {stderr}") from exc
+    except Exception as exc:
+        raise StepExecutionError(step_name, f"ffmpeg error: {exc}") from exc
+
+    duration = time.time() - start
+    return StepMetrics(name=metric_name, backend="ffmpeg", duration=duration)
+
+
 def loudnorm_only(
     input_path: Path,
     output_path: Path,
@@ -94,35 +142,19 @@ def loudnorm_only(
     loudnorm_preset: str = "default",
 ) -> StepMetrics:
     """Lightweight ffmpeg step that only does resampling and loudness normalization (no highpass, no RNNoise)."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        # Get loudnorm params based on preset
-        loudnorm_params = resolve_loudnorm_params(loudnorm_preset)
-
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "loudnorm",
-            **loudnorm_params,  # type: ignore[reportUnknownArgumentType]
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=1,  # Force mono for Whisper/faster-whisper
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("loudnorm_only", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("loudnorm_only", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(name=f"loudnorm_only_{loudnorm_preset}", backend="ffmpeg", duration=duration)
+    # NOTE: ``target_channels`` is intentionally ignored — this step forces mono (ac=1)
+    # for Whisper/faster-whisper regardless of caller-provided channel count.
+    del target_channels  # kept in signature for caller-API symmetry with other wrappers
+    loudnorm_params = resolve_loudnorm_params(loudnorm_preset)
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=1,  # Force mono for Whisper/faster-whisper
+        filter_chain=[("loudnorm", dict(loudnorm_params))],
+        step_name="loudnorm_only",
+        metric_name=f"loudnorm_only_{loudnorm_preset}",
+    )
 
 
 def volume_with_limiter(
@@ -295,31 +327,15 @@ def dynaudnorm_only(
     target_channels: int,
 ) -> StepMetrics:
     """Apply dynamic audio normalization."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "dynaudnorm",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("dynaudnorm_only", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("dynaudnorm_only", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(name="dynaudnorm_only", backend="ffmpeg", duration=duration)
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[("dynaudnorm", {})],
+        step_name="dynaudnorm_only",
+        metric_name="dynaudnorm_only",
+    )
 
 
 def highlow_aform_loudnorm(
@@ -423,42 +439,24 @@ def aresampl_loudnorm_fixed(
     target_lra: float,
 ) -> StepMetrics:
     """Apply aresample with fixed loudness normalization parameters."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "aresample",
-            osr=target_sample_rate,
-        )
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "loudnorm",
-            i=f"{target_i:.1f}",
-            tp=f"{target_tp:.1f}",
-            lra=f"{target_lra:.1f}",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("aresampl_loudnorm_fixed", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("aresampl_loudnorm_fixed", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(
-        name=f"aresampl_loudnorm_fixed_{target_i}dB_{target_tp}dB_{target_lra}dB",
-        backend="ffmpeg",
-        duration=duration,
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[
+            ("aresample", {"osr": target_sample_rate}),
+            (
+                "loudnorm",
+                {
+                    "i": f"{target_i:.1f}",
+                    "tp": f"{target_tp:.1f}",
+                    "lra": f"{target_lra:.1f}",
+                },
+            ),
+        ],
+        step_name="aresampl_loudnorm_fixed",
+        metric_name=f"aresampl_loudnorm_fixed_{target_i}dB_{target_tp}dB_{target_lra}dB",
     )
 
 
@@ -472,43 +470,24 @@ def aresampl_loudnorm_fixed2(
     target_lra: float,
 ) -> StepMetrics:
     """Apply aresample with fixed loudness normalization parameters (variant 2)."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "aresample",
-            osr=target_sample_rate,
-            precision="24",
-        )
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "loudnorm",
-            i=f"{target_i:.1f}",
-            tp=f"{target_tp:.1f}",
-            lra=f"{target_lra:.1f}",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[name-defined]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("aresampl_loudnorm_fixed2", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("aresampl_loudnorm_fixed2", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(
-        name=f"aresampl_loudnorm_fixed2_{target_i}dB_{target_tp}dB_{target_lra}dB",
-        backend="ffmpeg",
-        duration=duration,
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[
+            ("aresample", {"osr": target_sample_rate, "precision": "24"}),
+            (
+                "loudnorm",
+                {
+                    "i": f"{target_i:.1f}",
+                    "tp": f"{target_tp:.1f}",
+                    "lra": f"{target_lra:.1f}",
+                },
+            ),
+        ],
+        step_name="aresampl_loudnorm_fixed2",
+        metric_name=f"aresampl_loudnorm_fixed2_{target_i}dB_{target_tp}dB_{target_lra}dB",
     )
 
 
@@ -519,33 +498,15 @@ def loudnorm_2pass_linear(
     target_channels: int,
 ) -> StepMetrics:
     """Apply two-pass linear loudness normalization."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "loudnorm",
-            linear="true",
-            dual_mono="true",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("loudnorm_2pass_linear", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(name="loudnorm_2pass_linear", backend="ffmpeg", duration=duration)
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[("loudnorm", {"linear": "true", "dual_mono": "true"})],
+        step_name="loudnorm_2pass_linear",
+        metric_name="loudnorm_2pass_linear",
+    )
 
 
 def limiter_only(
@@ -555,31 +516,15 @@ def limiter_only(
     target_channels: int,
 ) -> StepMetrics:
     """Apply audio limiter only."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "alimiter",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("limiter_only", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("limiter_only", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(name="limiter_only", backend="ffmpeg", duration=duration)
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[("alimiter", {})],
+        step_name="limiter_only",
+        metric_name="limiter_only",
+    )
 
 
 def sox_peak_normalize(
@@ -590,33 +535,16 @@ def sox_peak_normalize(
     target_db: float,
 ) -> StepMetrics:
     """Apply SoX-style peak normalization."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        # Use volume filter to normalize to target dB
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "volume",
-            volume=f"{target_db:.1f}dB",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("sox_peak_normalize", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("sox_peak_normalize", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(name=f"sox_peak_normalize_{target_db}dB", backend="ffmpeg", duration=duration)
+    # Use volume filter to normalize to target dB
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[("volume", {"volume": f"{target_db:.1f}dB"})],
+        step_name="sox_peak_normalize",
+        metric_name=f"sox_peak_normalize_{target_db}dB",
+    )
 
 
 def compressor_with_limiter(
