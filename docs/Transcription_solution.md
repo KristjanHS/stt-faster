@@ -8,7 +8,7 @@ The system provides automated batch transcription of audio files with:
 - **Multiple model presets** (Estonian fine-tuned, multilingual, fast/slow variants)
 - **Variant system** (16 pre-configured combinations of preprocessing and transcription parameters)
 - **Automatic file management** (processed/failed folder organization)
-- **Database tracking** (SQLite-based history and metrics)
+- **Run log** (JSONL append-only history and metrics)
 - **Flexible output formats** (TXT, JSON, or both)
 
 ## Models
@@ -71,11 +71,11 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 # Process folder with default settings (Estonian model)
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio
 
-# Check processing status
-.venv/bin/python scripts/transcribe_manager.py status
+# Show recent run history (reads from ~/.local/share/stt-faster/runs.jsonl)
+.venv/bin/python -m backend.cli.main db recent --limit 10
 
-# Verbose status with file details
-.venv/bin/python scripts/transcribe_manager.py status --verbose
+# Show a single run's details
+.venv/bin/python -m backend.cli.main db show <run_id>
 ```
 
 ### Advanced Options
@@ -104,11 +104,10 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 - `--language`: Force language code (e.g., `en`, `et`, `ru`). Auto-detect if not specified
 - `--output-format`: Output format (`txt`, `json`, `both`) - default: `txt`
 - `--variant`: Variant number (1-16) - default: uses standard configuration
-- `--db-path`: Custom database path (default: XDG data home)
 
-**`status` command:**
-- `--verbose`: Show detailed file list with status markers
-- `--db-path`: Custom database path
+**Run history (`stt-faster db ...`):**
+- `db recent --limit N`: Show the most recent N runs in compact format
+- `db show <run_id>`: Show full detail for a single run
 
 ## Architecture
 
@@ -117,7 +116,7 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 1. **`TranscriptionProcessor`** (`backend/processor.py`)
    - Manages file lifecycle (scan, process, move to processed/failed)
    - Handles variant-aware transcription when variant is specified
-   - Records metrics and run statistics to database
+   - Appends per-run metrics and statistics to the JSONL run log
 
 2. **Variant System** (`backend/variants/`)
    - **`registry.py`**: Defines 16 built-in variants (1-11 use declarative steps, 12-16 use custom functions)
@@ -130,10 +129,10 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
    - Supports custom preprocessing runners and transcription configs
    - Handles model loading, caching, and transcription execution
 
-4. **Database** (`backend/database/`)
-   - DuckDB-based tracking of processed files
-   - Records run metadata and file-level metrics
-   - Provides status summaries and history
+4. **Run Log** (`backend/run_log.py`)
+   - Append-only JSONL log at `~/.local/share/stt-faster/runs.jsonl`
+   - One JSON record per run with nested `preprocess`/`model`/`params`/`totals`/`files` groups
+   - Read via `stt-faster db recent` / `stt-faster db show`
 
 ### File Flow
 
@@ -199,7 +198,7 @@ Generates both `.txt` and `.json` files for the same audio file.
 ✅ Estonian/English models load correctly  
 ✅ Model caching works  
 ✅ Files move to correct folders  
-✅ Database tracking accurate  
+✅ Run log tracking accurate  
 ✅ Windows batch files functional  
 ✅ Variant system integrated (16 variants: 1-11 declarative, 12-16 custom)  
 ✅ All unit tests pass (103 tests)  
