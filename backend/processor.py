@@ -5,7 +5,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
-from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, RunSummarizer
+from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, summarize_run
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
@@ -91,7 +91,7 @@ class TranscriptionProcessor:
             file_mover_policy=self._file_mover_policy,
             processor_ref=self,
         )
-        self._run_summarizer = RunSummarizer(run_log)
+        self._run_log = run_log
 
         # For backward compatibility
         self._move = file_mover.move
@@ -208,7 +208,8 @@ class TranscriptionProcessor:
         results = self.process_all_files(files_to_process)
         results["files_found"] = len(files_to_process)
         total_processing_time = time.time() - run_start
-        results["run_statistics"] = self._run_summarizer.summarize_run(
+        results["run_statistics"] = summarize_run(
+            run_log=self._run_log,
             results=results,
             config_snapshot=config_snapshot,
             total_processing_time=total_processing_time,

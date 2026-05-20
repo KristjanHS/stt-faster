@@ -236,7 +236,7 @@ def test_process_file_success(
     mock_transcription_service.transcribe.assert_called_once()
 
     # Stage G.b: file status now lives on the returned FileProcessingStats
-    # (rolled into JSONL files[] by RunSummarizer at end-of-run).
+    # (rolled into JSONL files[] by summarize_run at end-of-run).
     assert result.file_path == str(audio_file)
     assert result.error_message is None
 
@@ -287,7 +287,7 @@ def test_process_file_failure(
     assert result.metrics is None
 
     # Stage G.b: status + error message now live on the returned
-    # FileProcessingStats (rolled into JSONL files[] by RunSummarizer).
+    # FileProcessingStats (rolled into JSONL files[] by summarize_run).
     assert result.error_message is not None
     assert "RuntimeError" in result.error_message
 
@@ -323,7 +323,7 @@ def test_process_file_not_found(
     assert result.error_message is not None
 
     # Stage G.b: status + error message now live on the returned
-    # FileProcessingStats (rolled into JSONL files[] by RunSummarizer).
+    # FileProcessingStats (rolled into JSONL files[] by summarize_run).
     assert "not found" in result.error_message.lower()
 
 
@@ -531,7 +531,7 @@ def test_process_file_move_failure_keeps_pending_status(
     assert result.error_message
 
     # Stage G.b: status + error message now live on the returned
-    # FileProcessingStats (rolled into JSONL files[] by RunSummarizer).
+    # FileProcessingStats (rolled into JSONL files[] by summarize_run).
     # The bug being regression-tested here is that the success-status update
     # happens BEFORE the move; on move failure the status must remain "failed".
     assert "Permission denied" in result.error_message
