@@ -1,11 +1,11 @@
 """Separated components extracted from the TranscriptionProcessor god object."""
 
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
 
-from backend.database import FileMetricRecord, RunRecord
 from backend.preprocess.config import PreprocessConfig
 from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
@@ -31,12 +31,171 @@ FAILED_FOLDER_NAME = "failed"
 
 
 # ---------------------------------------------------------------------------
-# JSONL record construction (Stage G live write path)
+# Intermediate record types for JSONL construction (Stage G live write path)
 # ---------------------------------------------------------------------------
 #
-# Mirror of ``scripts/migrate_db_to_jsonl.py``'s ``_build_run_record`` and
-# ``_file_record_from_row`` so the live write path emits the same nested
-# shape as the one-shot DB → JSONL export. Plan: docs/plans/2026-05-20-stage-G-db-to-jsonl.md §4.1.
+# Inlined from the deleted ``backend/database/schema.py`` (Stage G.d). These
+# dataclasses are no longer persisted as DuckDB rows; they're the in-memory
+# shape ``RunSummarizer`` builds before serializing to JSONL via
+# :func:`_build_jsonl_record`. Plan: docs/plans/2026-05-20-stage-G-db-to-jsonl.md §4.1.
+
+
+@dataclass(slots=True)
+class RunRecord:
+    """Aggregated configuration and outcomes for a transcription batch."""
+
+    recorded_at: str | datetime
+    input_folder: str | None
+
+    preset: str
+    language: str | None
+
+    preprocess_enabled: bool
+    preprocess_profile: str | None
+    target_sample_rate: int | None
+    target_channels: int | None
+    loudnorm_preset: str | None = None
+    volume_adjustment_db: float | None = None
+    resampler: str | None = None
+    sample_format: str | None = None
+    loudnorm_target_i: float | None = None
+    loudnorm_target_tp: float | None = None
+    loudnorm_target_lra: float | None = None
+    loudnorm_backend: str | None = None
+    denoise_method: str | None = None
+    denoise_library: str | None = None
+    rnnoise_model: str | None = None
+    rnnoise_mix: float | None = None
+    snr_estimation_method: str | None = None
+
+    model_id: str | None = None
+    device: str | None = None
+    compute_type: str | None = None
+
+    # For baseline/minimal variants some parameters stay ``None`` because
+    # faster-whisper used its internal defaults that we don't know.
+    beam_size: int | None = None
+    patience: float | None = None
+    word_timestamps: bool | None = None
+    task: str | None = None
+    chunk_length: int | None = None
+    vad_filter: bool | None = None
+    vad_threshold: float | None = None
+    vad_min_speech_duration_ms: int | None = None
+    vad_max_speech_duration_s: float | None = None
+    vad_min_silence_duration_ms: int | None = None
+    vad_speech_pad_ms: int | None = None
+    temperature: str | None = None  # JSON-encoded for list[float] support
+    temperature_increment_on_fallback: float | None = None
+    best_of: int | None = None
+    compression_ratio_threshold: float | None = None
+    logprob_threshold: float | None = None
+    no_speech_threshold: float | None = None
+    length_penalty: float | None = None
+    repetition_penalty: float | None = None
+    no_repeat_ngram_size: int | None = None
+    suppress_tokens: str | None = None
+    condition_on_previous_text: bool | None = None
+    initial_prompt: str | None = None
+
+    files_found: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    total_processing_time: float | None = None
+    total_preprocess_time: float | None = None
+    total_transcribe_time: float | None = None
+    total_audio_duration: float | None = None
+    speed_ratio: float | None = None
+
+
+@dataclass(slots=True)
+class FileMetricRecord:
+    """Per-file metrics aggregated into the JSONL record's ``files[]`` array."""
+
+    run_id: int
+    recorded_at: str | datetime
+
+    audio_path: str
+    preset: str
+    status: str
+
+    requested_language: str | None = None
+    applied_language: str | None = None
+    detected_language: str | None = None
+    language_probability: float | None = None
+
+    audio_duration: float | None = None
+    total_processing_time: float = 0.0
+    transcribe_duration: float = 0.0
+    preprocess_duration: float = 0.0
+    speed_ratio: float | None = None
+
+    preprocess_enabled: bool = False
+    preprocess_profile: str | None = None
+    target_sample_rate: int | None = None
+    target_channels: int | None = None
+    preprocess_snr_before: float | None = None
+    preprocess_snr_after: float | None = None
+    preprocess_steps: list[dict[str, Any]] | None = None
+    rnnoise_model: str | None = None
+    rnnoise_mix: float | None = None
+
+    input_channels: int | None = None
+    input_sample_rate: int | None = None
+    input_format: str | None = None
+
+    volume_adjustment_db: float | None = None
+    resampler: str | None = None
+    sample_format: str | None = None
+
+    loudnorm_preset: str | None = None
+    loudnorm_target_i: float | None = None
+    loudnorm_target_tp: float | None = None
+    loudnorm_target_lra: float | None = None
+    loudnorm_backend: str | None = None
+
+    denoise_method: str | None = None
+    denoise_library: str | None = None
+
+    snr_estimation_method: str | None = None
+
+    beam_size: int | None = None
+    patience: float | None = None
+    word_timestamps: bool | None = None
+    task: str | None = None
+    chunk_length: int | None = None
+    vad_filter: bool | None = None
+    vad_threshold: float | None = None
+    vad_min_speech_duration_ms: int | None = None
+    vad_max_speech_duration_s: float | None = None
+    vad_min_silence_duration_ms: int | None = None
+    vad_speech_pad_ms: int | None = None
+    temperature: str | None = None
+    temperature_increment_on_fallback: float | None = None
+    best_of: int | None = None
+    compression_ratio_threshold: float | None = None
+    logprob_threshold: float | None = None
+    no_speech_threshold: float | None = None
+    length_penalty: float | None = None
+    repetition_penalty: float | None = None
+    no_repeat_ngram_size: int | None = None
+    suppress_tokens: str | None = None
+    condition_on_previous_text: bool | None = None
+    initial_prompt: str | None = None
+
+    model_id: str | None = None
+    device: str | None = None
+    compute_type: str | None = None
+
+    output_format: str | None = None
+    float_precision: int | None = None
+
+    error_message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# JSONL record construction (Stage G live write path)
+# ---------------------------------------------------------------------------
 
 _PARAM_KEYS = (
     "beam_size",
@@ -68,12 +227,7 @@ _VAD_KEY_MAP = {
 
 
 def _iso_utc(value: Any) -> str | None:
-    """Render a timestamp as ISO-8601 UTC with ``Z`` suffix.
-
-    Mirror of ``scripts/migrate_db_to_jsonl.py:_iso_utc`` — byte-identical
-    output is a load-bearing property (live records and migrated records
-    must be diffable).
-    """
+    """Render a timestamp as ISO-8601 UTC with ``Z`` suffix."""
     if value is None:
         return None
     if isinstance(value, datetime):
@@ -98,10 +252,8 @@ def _iso_utc(value: Any) -> str | None:
 def _file_record_to_dict(fr: FileMetricRecord) -> dict[str, Any]:
     """Map a ``FileMetricRecord`` into the per-file nested JSON shape.
 
-    Mirrors ``scripts/migrate_db_to_jsonl.py:_file_record_from_row``. Source
-    field names match by construction (DuckDB column names == dataclass
-    field names). ``segment_count`` is intentionally ``None`` — the source
-    schema doesn't track it (reserved for future runs).
+    ``segment_count`` is intentionally ``None`` — :class:`FileMetricRecord`
+    doesn't carry it (reserved for future runs).
     """
     preprocess: dict[str, Any] = {
         "enabled": fr.preprocess_enabled,
@@ -172,14 +324,11 @@ def _build_jsonl_record(
 ) -> dict[str, Any]:
     """Build the nested JSONL record for one run.
 
-    Mirrors ``scripts/migrate_db_to_jsonl.py:_build_run_record`` so live
-    writes and historical exports agree byte-for-byte. Top-level scalars
-    stay flat; everything else lives under ``preprocess`` / ``model`` /
-    ``params`` (with ``params.vad`` sub-object) / ``totals`` / ``files[]``.
-
-    All non-JSON-native types (``datetime``, ``pathlib.Path``) are converted
-    here so :meth:`JsonlRunLog.append` can encode without a ``default=``
-    fallback (plan §8 D-4).
+    Top-level scalars stay flat; everything else lives under ``preprocess``
+    / ``model`` / ``params`` (with ``params.vad`` sub-object) / ``totals`` /
+    ``files[]``. All non-JSON-native types (``datetime``, ``pathlib.Path``)
+    are converted here so :meth:`JsonlRunLog.append` can encode without a
+    ``default=`` fallback.
     """
     rr = run_record
 
@@ -703,24 +852,16 @@ class RunSummarizer:
         preset: str,
         language: str | None,
     ) -> int | None:
-        """Persist the run as a single JSONL record (Stage G write path).
+        """Persist the run as a single JSONL record.
 
-        Builds the nested record described in
-        ``docs/plans/2026-05-20-stage-G-db-to-jsonl.md`` §4.1 from
-        ``run_record`` + the in-memory list of :class:`FileMetricRecord`
-        derived from ``file_stats``. The nested shape mirrors
-        ``scripts/migrate_db_to_jsonl.py``'s ``_build_run_record`` and
-        ``_file_record_from_row`` so live-write output matches the migration
-        export byte-for-byte.
+        Builds the nested record from ``run_record`` + the in-memory list of
+        :class:`FileMetricRecord` derived from ``file_stats``.
 
         Returns the assigned run id, or ``None`` if the JSONL append fails
         (run already finished — failing to persist shouldn't crash the batch).
         """
         import json
 
-        # 1. Build the per-file FileMetricRecord list in-memory. The migration
-        #    script reads these same fields back out of DuckDB; mirroring the
-        #    construction here keeps the shape consistent.
         # NOTE: run_id is unknown until JsonlRunLog.append assigns one. We
         #       build records with a sentinel and post-fix below.
         file_records: list[FileMetricRecord] = []
@@ -812,13 +953,10 @@ class RunSummarizer:
 
             file_records.append(file_record)
 
-        # 2. Build the nested JSONL record (plan §4.1 / §8 D-4).
-        #    Non-JSON-native types (datetime, Path) are converted here so the
-        #    JsonlRunLog encoder never has to guess.
         record = _build_jsonl_record(run_record, file_records)
 
-        # 3. Append to the JSONL log. Late-stage failure should not crash an
-        #    already-complete batch — log and return None.
+        # Late-stage failure should not crash an already-complete batch —
+        # log and return None.
         try:
             return self._run_log.append(record)
         except OSError as exc:

@@ -3,15 +3,12 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from backend.database import TranscriptionDatabase
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
 from backend.run_log import JsonlRunLog
-from backend.services.duckdb_state_store import DuckDBStateStore
 from backend.services.interfaces import (
     FileMover,
     OutputWriter,
-    StateStore,
     TranscriptionService,
 )
 from backend.services.json_output_writer import JsonOutputWriter
@@ -59,17 +56,6 @@ class ServiceFactory:
             preprocess_runner=preprocess_runner,
             transcription_config=transcription_config,
         )
-
-    @staticmethod
-    def create_state_store(db_path: str | Path | None = None) -> StateStore:
-        """Create state store with default database.
-
-        Note (Stage G.b): the live write path no longer uses ``StateStore``.
-        This factory + ``DuckDBStateStore`` remain wired for reader scripts
-        and will be deleted in Stage G.d.
-        """
-        db = TranscriptionDatabase(db_path)
-        return DuckDBStateStore(db)
 
     @staticmethod
     def create_run_log(path: str | Path | None = None) -> JsonlRunLog:

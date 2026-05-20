@@ -149,7 +149,6 @@ def _configure_logging(verbose: bool) -> None:
         level = logging.INFO
         # Reduce noise from internal modules in non-verbose mode
         logging.getLogger("backend.processor").setLevel(logging.WARNING)
-        logging.getLogger("backend.database").setLevel(logging.WARNING)
         logging.getLogger("backend.model_loader").setLevel(logging.WARNING)
         logging.getLogger("faster_whisper").setLevel(logging.WARNING)
         # Keep important progress loggers at INFO

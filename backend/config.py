@@ -122,8 +122,6 @@ def setup_logging() -> None:
 def get_default_run_log_path() -> Path:
     """Return XDG-compliant default path for the JSONL run log.
 
-    Mirrors ``backend.database.schema.get_default_db_path`` shape:
-
     - Uses ``$XDG_DATA_HOME`` if set, else ``~/.local/share``.
     - Under that, the app directory ``stt-faster``.
     - Filename ``runs.jsonl``.
