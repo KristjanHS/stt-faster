@@ -599,34 +599,15 @@ def dynaudnorm_conservative(
     target_channels: int,
 ) -> StepMetrics:
     """Apply conservative dynamic audio normalization."""
-    import ffmpeg  # type: ignore[import-untyped]
-
-    start = time.time()
-    try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-        stream = ffmpeg.filter(  # type: ignore[reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            "dynaudnorm",
-            f="150",
-            g="15",
-            p="0.95",
-        )
-        stream = ffmpeg.output(  # type: ignore[reportUnknownVariableType, reportUnknownMemberType]
-            stream,  # type: ignore[reportUnknownArgumentType]
-            str(output_path),
-            ac=target_channels,
-            ar=target_sample_rate,
-            acodec="pcm_s16le",
-        )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stdout=True, capture_stderr=True)  # type: ignore[reportUnknownMemberType, reportUnknownArgumentType]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
-        stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
-        raise StepExecutionError("dynaudnorm_conservative", f"ffmpeg failed: {stderr}") from exc
-    except Exception as exc:
-        raise StepExecutionError("dynaudnorm_conservative", f"ffmpeg error: {exc}") from exc
-
-    duration = time.time() - start
-    return StepMetrics(name="dynaudnorm_conservative", backend="ffmpeg", duration=duration)
+    return _run_single_filter(
+        input_path=input_path,
+        output_path=output_path,
+        target_sample_rate=target_sample_rate,
+        target_channels=target_channels,
+        filter_chain=[("dynaudnorm", {"f": "150", "g": "15", "p": "0.95"})],
+        step_name="dynaudnorm_conservative",
+        metric_name="dynaudnorm_conservative",
+    )
 
 
 def resolve_loudnorm_params(preset: str) -> dict[str, Any]:
