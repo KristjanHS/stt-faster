@@ -54,9 +54,9 @@ REM the runtime path. If torch shows up here, a transitive dep has changed.
 pip list 2>nul | findstr /I /R /C:"^torch " >nul
 if not errorlevel 1 (
     echo.
-    echo !!! WARNING: torch was installed by a transitive dependency.
-    echo !!! Expected: torch absent (ctranslate2 is the runtime, not torch).
-    echo !!! Setup will continue, but check pyproject.toml for new dep drift.
+    echo *** WARNING: torch was installed by a transitive dependency.
+    echo *** Expected: torch absent (ctranslate2 is the runtime, not torch).
+    echo *** Setup will continue, but check pyproject.toml for new dep drift.
     echo.
 )
 
