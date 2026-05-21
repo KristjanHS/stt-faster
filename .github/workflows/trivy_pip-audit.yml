@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "requirements.txt"
+      - "requirements-gpu.txt"
       - "uv.lock"
       - "pyproject.toml"
       - "Dockerfile"
@@ -21,7 +22,7 @@ concurrency:
 
 jobs:
   pip-audit:
-    name: pip-audit (deps)
+    name: pip-audit (CPU deps)
     if: ${{ github.actor != 'nektos/act' }}
     runs-on: ubuntu-latest
     steps:
@@ -32,6 +33,17 @@ jobs:
       #  run: uv venv --seed
       - name: pip-audit via Makefile
         run: make pip-audit
+
+  pip-audit-gpu:
+    name: pip-audit (GPU deps)
+    if: ${{ github.actor != 'nektos/act' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python + uv (cached)
+        uses: ./.github/actions/setup-uv
+      - name: pip-audit-gpu via Makefile
+        run: make pip-audit-gpu
 
   trivy-fs:
     name: Trivy FS (vuln+config+secrets)

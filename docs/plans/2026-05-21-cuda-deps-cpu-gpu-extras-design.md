@@ -318,6 +318,34 @@ Subsequent to §8a, the GPU extra was bumped to `cu130` with `torch>=2.11.0,<3.0
   selector all swing as a single edit. CPU extra remains `>=2.8.0,<3.0.0`
   (no reason to gate cpu users on cu130's torch floor).
 
+## 8c. Corrections during D3 implementation (2026-05-21)
+
+D3 landed with two intentional deviations from the design as originally
+written. Recording them here so anyone returning to §5 doesn't write the
+pre-shipped form into a new file:
+
+1. **Dockerfiles use `--extra ${STT_VARIANT}` directly, not the
+   `.stt-variant.local`-via-`run_uv.sh` indirection.** §5.6 prescribed
+   `RUN echo "$STT_VARIANT" > .stt-variant.local && ./run_uv.sh`. Both
+   `Dockerfile` and `docker/app.Dockerfile` instead declare
+   `ARG STT_VARIANT=cpu` and pass `--extra "${STT_VARIANT}"` to every
+   `uv sync` call. The two forms are functionally equivalent because
+   `run_uv.sh` is itself just a thin wrapper around
+   `uv sync --extra "$VARIANT"`. The direct form is cleaner inside a
+   Docker layer: no temp variant file shipped into the image, no
+   `run_uv.sh` copy step, `--locked` stays explicit. If a third
+   Dockerfile is ever added, follow the shipped form.
+2. **CPU-isolation canary uses `importlib.metadata.distribution`, not
+   `import nvidia_cublas`.** §5.8 specified asserting that
+   `nvidia_cublas` "must not be importable". On cu13 wheels there is
+   no importable `nvidia.cublas` Python module — the wheel ships only
+   native `.so` files under `nvidia/cu13/lib/`. A `find_spec`-based
+   check would silently always pass and be useless as a regression
+   canary. `tests/unit/test_no_transitive_cuda.py` instead probes
+   `importlib.metadata.distribution("nvidia-cublas")`, which uses the
+   wheel's installed dist-info — the only signal that survives the
+   cu12 → cu13 wheel-layout change.
+
 ## 9. Out of scope (with explicit hooks for later)
 
 - **AMD ROCm**: add a `rocm` extra and `pytorch-rocm` index entry. No design change.
