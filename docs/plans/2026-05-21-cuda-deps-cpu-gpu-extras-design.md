@@ -80,22 +80,27 @@ path (documented).
 
 ### 5.1 `pyproject.toml`
 
+> **Baseline updated 2026-05-21**: post the community-1 migration (commit `3e0af69`),
+> the snippet below was rewritten against `pyannote.audio==4.0.4` + `torch/torchaudio>=2.8.0,<3.0.0`.
+> The pre-migration values (`pyannote.audio==3.4.0` + `torch/torchaudio>=2.4.0,<2.7.0`)
+> are no longer the starting state.
+
 ```toml
 [project]
 dependencies = [
     # ... existing entries (ctranslate2, faster-whisper, etc) ...
-    "pyannote.audio==3.4.0",
+    "pyannote.audio==4.0.4",
     # torch + torchaudio moved to extras — see [project.optional-dependencies]
 ]
 
 [project.optional-dependencies]
 cpu = [
-    "torch>=2.4.0,<2.7.0",
-    "torchaudio>=2.4.0,<2.7.0",
+    "torch>=2.8.0,<3.0.0",
+    "torchaudio>=2.8.0,<3.0.0",
 ]
 cu126 = [
-    "torch>=2.4.0,<2.7.0",
-    "torchaudio>=2.4.0,<2.7.0",
+    "torch>=2.8.0,<3.0.0",
+    "torchaudio>=2.8.0,<3.0.0",
 ]
 
 [tool.uv]
