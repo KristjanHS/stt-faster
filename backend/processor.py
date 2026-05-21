@@ -225,6 +225,8 @@ class TranscriptionProcessor:
             preset=self.preset,
             language=self.language,
             output_format=self.output_format,
+            diarize=self.diarize,
+            num_speakers=self.num_speakers,
         )
 
         return results

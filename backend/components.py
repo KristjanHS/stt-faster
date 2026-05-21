@@ -99,6 +99,9 @@ class RunRecord:
     condition_on_previous_text: bool | None = None
     initial_prompt: str | None = None
 
+    diarize: bool | None = None
+    num_speakers: int | None = None
+
     files_found: int = 0
     succeeded: int = 0
     failed: int = 0
@@ -365,6 +368,8 @@ def _build_jsonl_record(
 
     params: dict[str, Any] = {key: getattr(rr, key) for key in _PARAM_KEYS}
     params["vad"] = {json_key: getattr(rr, src_key) for json_key, src_key in _VAD_KEY_MAP.items()}
+    params["diarize"] = rr.diarize
+    params["num_speakers"] = rr.num_speakers
 
     totals: dict[str, Any] = {
         "files_found": rr.files_found,
@@ -672,6 +677,8 @@ def summarize_run(
     preset: str,
     language: str | None,
     output_format: str,
+    diarize: bool,
+    num_speakers: int,
 ) -> dict[str, Any]:
     """Build and persist run metadata and file metrics.
 
@@ -713,6 +720,8 @@ def summarize_run(
         total_audio_duration=total_audio_duration,
         average_speed_ratio=average_speed_ratio,
         metrics_list=metrics_list,
+        diarize=diarize,
+        num_speakers=num_speakers,
     )
 
     # Persist the run and file metrics
@@ -749,6 +758,8 @@ def _create_run_record(
     total_audio_duration: float | None,
     average_speed_ratio: float | None,
     metrics_list: list[TranscriptionMetrics],
+    diarize: bool,
+    num_speakers: int,
 ) -> RunRecord:
     """Create a RunRecord from the processing results."""
     # Determine representative configuration from the first file if available
@@ -774,6 +785,8 @@ def _create_run_record(
         preprocess_enabled=config_snapshot.enabled,
         **{k: v for k, v in run_config.items() if k != "temperature"},  # Exclude temperature, add it separately
         temperature=temperature_str,
+        diarize=diarize,
+        num_speakers=num_speakers,
         files_found=results.get("files_found", 0),
         succeeded=results.get("succeeded", 0),
         failed=results.get("failed", 0),

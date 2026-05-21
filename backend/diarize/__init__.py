@@ -1,11 +1,9 @@
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
-from backend.diarize.pipeline import SpeakerTurn, anchor_speaker_zero, annotate, overlap_assign
+from backend.diarize.pipeline import SpeakerTurn, annotate
 
 __all__ = [
     "DiarizationConfigError",
     "DiarizationRuntimeError",
     "SpeakerTurn",
-    "anchor_speaker_zero",
     "annotate",
-    "overlap_assign",
 ]
