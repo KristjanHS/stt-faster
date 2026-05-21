@@ -200,7 +200,7 @@ integration:
 # Export a pip-compatible requirements.txt from uv.lock, except torch and editable project.
 # With pip, torch installation must be done separately, eg:
 #    pip install torch==1.8.0 --index-url https://download.pytorch.org/whl/cpu
-#    pip install torch==1.7.1 --index-url https://download.pytorch.org/whl/cu128
+#    pip install torch==1.7.1 --index-url https://download.pytorch.org/whl/cu130
 export-reqs:
 	@echo ">> Exporting requirements.txt from uv.lock (incl dev/test groups)"
 	uv export --no-hashes --group test --locked --no-emit-project --no-emit-package torch --format requirements-txt > requirements.txt
