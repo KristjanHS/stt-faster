@@ -18,7 +18,7 @@ import pytest
 
 from backend.transcribe import format_segments_as_text, transcribe
 
-FIXTURE_PATH = Path("tests/fixtures/audio/two_speakers_10s.wav")
+FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "audio" / "two_speakers_10s.wav"
 TXT_LINE_RE = re.compile(
     r"^\[\d{2}:\d{2}:\d{2}\.\d{2} --> \d{2}:\d{2}:\d{2}\.\d{2}\] SPEAKER_\d{2}: ",
 )
