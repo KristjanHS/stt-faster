@@ -328,9 +328,9 @@ class TestProductionCloudNative:
 class TestProductionRuntime:
     """Test production container runtime behavior."""
 
-    def test_status_command_works(self, production_image: str) -> None:
-        """Verify status command runs successfully without external dependencies."""
-        result = run_docker("run", "--rm", production_image, "status")
+    def test_entrypoint_help_works(self, production_image: str) -> None:
+        """Verify the container entrypoint runs successfully without external dependencies."""
+        result = run_docker("run", "--rm", production_image, "--help")
         assert result.returncode == 0
 
 
@@ -338,26 +338,6 @@ class TestProductionRuntime:
 @pytest.mark.network
 class TestProductionTranscription:
     """Test actual transcription functionality (requires network for model download)."""
-
-    def test_transcribe_status_command(self, production_image: str, hf_token: str | None) -> None:
-        """Verify status command works."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmppath = Path(tmpdir)
-            # Create the database directory structure
-            (tmppath / ".local" / "share" / "stt-faster").mkdir(parents=True)
-
-            result = run_docker_with_env(
-                image=production_image,
-                command_args=["status"],
-                volumes=[
-                    (tmpdir, "/workspace"),
-                    (f"{tmpdir}/.cache", "/home/appuser/.cache/hf"),
-                    (f"{tmpdir}/.local/share/stt-faster", "/home/appuser/.local/share/stt-faster"),
-                ],
-                env_vars={"HF_TOKEN": hf_token} if hf_token else None,
-            )
-            # Should work even with empty database
-            assert result.returncode == 0
 
     @pytest.mark.slow
     def test_transcribe_with_test_audio(self, production_image: str, hf_token: str | None) -> None:

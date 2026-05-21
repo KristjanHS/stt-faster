@@ -61,7 +61,7 @@ UTILITIES:
                                        HTML comparison report.
   report_only.bat                    - Regenerates the variant HTML report
                                        from existing outputs (no transcription).
-  check_status.bat                   - Prints the transcription queue status.
+  check_status.bat                   - Shows recent transcription run history.
 
 To use a different variant, edit the `set "VARIANTS=..."` line at the top of
 the batch file. Space-separated values run multiple variants in one go,
