@@ -19,9 +19,9 @@ echo.
 if /i "!STT_RUNTIME!"=="wsl" (
     wsl -e bash -c "cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py status"
 ) else (
-    pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python scripts\transcribe_manager.py status
-    popd
+    docker run --rm ^
+      -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
+      stt-faster:latest status
 )
 
 echo.

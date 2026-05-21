@@ -2,20 +2,22 @@
 AUDIO TRANSCRIPTION - HOW TO USE
 ========================================
 
-FIRST-TIME SETUP (any Windows machine):
-1. Install Python 3.12 from https://www.python.org/downloads/
-   (the "py" launcher must be on PATH).
+FIRST-TIME SETUP (Windows machine without WSL):
+1. Install Docker Desktop from
+   https://docs.docker.com/desktop/install/windows-install/ and start it.
 2. git clone https://github.com/<your-fork>/stt-faster C:\projects\stt-faster
 3. cd C:\projects\stt-faster
-4. setup.bat        (creates .venv, installs deps, optionally prefetches models)
+4. setup.bat        (builds the stt-faster:latest image; 5-15 min first run)
 5. Done. The bats in scripts\windows\ work as-is.
+
+WSL users can skip steps 1 and 4 — the bats detect WSL automatically.
 
 The bats auto-detect WSL: if WSL2 is installed AND the repo is present at
 /home/kristjans/projects/stt-faster inside WSL, they run there (preserving
-the current dev-machine workflow). Otherwise they use the native Windows
-.venv populated by setup.bat. The runtime banner at the top of each run
-prints the choice:
-  [stt-faster] runtime: wsl     (or 'native')
+the current dev-machine workflow). Otherwise they fall back to a Docker
+container built from the production Dockerfile (CPU-only). The runtime
+banner at the top of each run prints the choice:
+  [stt-faster] runtime: wsl     (or 'docker')
 
 ========================================
 
@@ -100,32 +102,32 @@ Failed inputs land under:         <audio_folder>\failed\
 ========================================
 
 NOTES:
-- Native Windows runs CPU-only by default. CUDA + cuDNN are not installed
-  by setup.bat; if missing on the box, the model loader prints a
-  highly-visible GPU-fallback banner and proceeds on CPU.
+- The Docker fallback is CPU-only by design. For GPU acceleration use WSL
+  (the bats prefer it automatically when available).
 - Run history (`runs.jsonl`) is per-runtime: WSL writes to
-  ~/.local/share/stt-faster/runs.jsonl inside WSL, native writes to
-  %USERPROFILE%\.local\share\stt-faster\runs.jsonl. Both runtimes on the
-  same box keep separate histories.
+  ~/.local/share/stt-faster/runs.jsonl inside WSL; Docker mounts
+  %USERPROFILE%\.local\share\stt-faster\ into the container and writes
+  there. Both runtimes on the same box keep separate histories.
 - The hardcoded WSL repo path that controls auto-detect lives in
   scripts\windows\_runtime.bat (STT_WSL_REPO=...). Edit it if you move the
   WSL repo.
 - First run downloads the model (~1.5-3 GB). Models cache at
-  ~/.cache/hf inside WSL or %USERPROFILE%\.cache\hf on native Windows.
+  ~/.cache/hf inside WSL or %USERPROFILE%\.cache\hf on Windows (mounted
+  into the Docker container).
 
 ========================================
 
 TROUBLESHOOTING:
-1. Banner says `runtime: native` but you expected `wsl`:
+1. Banner says `runtime: docker` but you expected `wsl`:
    - Check `where wsl` returns a path and that
      `wsl -e test -x /home/kristjans/projects/stt-faster/.venv/bin/python`
      exits 0. Both probes must pass for the WSL branch to fire.
-2. Banner says `runtime: wsl` but you wanted native (e.g. testing the
-   Windows venv):
+2. Banner says `runtime: wsl` but you wanted to test the Docker path:
    - Temporarily rename the WSL .venv, or override STT_WSL_REPO in
      scripts\windows\_runtime.bat to a path that doesn't exist.
-3. Native run fails with "cannot find python":
-   - Re-run setup.bat from the repo root.
+3. "ERROR: no runtime available":
+   - Neither WSL nor Docker is usable. Install Docker Desktop, start it,
+     and re-run setup.bat from the repo root to build the image.
 4. Diagnostic status (any runtime):
    - Run check_status.bat.
 

@@ -32,9 +32,7 @@ echo Getting builtin variants...
 if /i "!STT_RUNTIME!"=="wsl" (
     wsl -e bash -c "cd !STT_WSL_REPO! && .venv/bin/python -c \"!VARIANT_PY!\"" > "!TEMP_VARIANTS_FILE!" 2>&1
 ) else (
-    pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python -c "!VARIANT_PY!" > "!TEMP_VARIANTS_FILE!" 2>&1
-    popd
+    docker run --rm --entrypoint python stt-faster:latest -c "!VARIANT_PY!" > "!TEMP_VARIANTS_FILE!" 2>&1
 )
 set "PYTHON_ERROR=!errorlevel!"
 
@@ -82,11 +80,11 @@ echo.
 if /i "!STT_RUNTIME!"=="wsl" (
     wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --language et --output-format both --no-diarize --variants '!VARIANTS!'"
 ) else (
-    set "HF_HOME=%USERPROFILE%\.cache\hf"
-    set "HF_HUB_CACHE=%USERPROFILE%\.cache\hf\hub"
-    pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python scripts\transcribe_manager.py process "!STT_AUDIO_DIR_RESOLVED!" --language et --output-format both --no-diarize --variants "!VARIANTS!"
-    popd
+    docker run --rm ^
+      -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
+      -v "%USERPROFILE%\.cache\hf:/home/appuser/.cache/hf" ^
+      -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
+      stt-faster:latest process /workspace --language et --output-format both --no-diarize --variants "!VARIANTS!"
 )
 set "TRANSCRIBE_ERROR=!errorlevel!"
 
@@ -115,9 +113,11 @@ echo.
 if /i "!STT_RUNTIME!"=="wsl" (
     wsl -e bash -c "cd !STT_WSL_REPO! && .venv/bin/python scripts/generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61"
 ) else (
-    pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python scripts\generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61
-    popd
+    docker run --rm ^
+      -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
+      -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
+      --entrypoint python ^
+      stt-faster:latest /app/scripts/generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61
 )
 set "REPORT_ERROR=!errorlevel!"
 

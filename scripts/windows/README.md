@@ -2,16 +2,16 @@
 
 One-click audio transcription for Windows users. Each `.bat` runs `scripts/transcribe_manager.py` with a preset, language, and one or more variant numbers baked into the file.
 
-The bats auto-detect WSL: if WSL2 is installed and the repo lives at `/home/kristjans/projects/stt-faster` inside WSL, they run there (preserving the current dev-machine workflow). Otherwise they fall back to the native Windows `.venv` populated by `setup.bat`. The runtime banner at the top of each run prints the choice.
+The bats auto-detect WSL: if WSL2 is installed and the repo lives at `/home/kristjans/projects/stt-faster` inside WSL, they run there (preserving the current dev-machine workflow). Otherwise they fall back to a Docker container built from the production `Dockerfile` (CPU-only). The runtime banner at the top of each run prints the choice.
 
-## First-time setup (any Windows machine)
+## First-time setup (any Windows machine without WSL)
 
-1. Install Python 3.12 (the `py` launcher must be on PATH).
+1. Install Docker Desktop from https://docs.docker.com/desktop/install/windows-install/ and start it.
 2. `git clone <repo> C:\projects\stt-faster`
 3. `cd C:\projects\stt-faster`
-4. `setup.bat` — creates `.venv`, installs deps, optionally prefetches the Estonian and English Whisper models (~3 GB).
+4. `setup.bat` — builds the `stt-faster:latest` image (~5-15 min on first run). Models download lazily on the first transcription run (~3 GB into `%USERPROFILE%\.cache\hf`).
 
-After setup, every bat in `scripts\windows\` works without further configuration.
+After setup, every bat in `scripts\windows\` works without further configuration. WSL users can skip steps 1 and 4; the bats detect WSL automatically.
 
 ## Files
 
@@ -53,35 +53,36 @@ Results land next to the audio file:
 ## Requirements
 
 - Windows 10/11.
-- Either: WSL2 with the repo at `/home/kristjans/projects/stt-faster` and a `.venv` (current dev-machine setup), **or** a native Windows `.venv` populated by `setup.bat`.
-- Python 3.12 (for the native fallback).
-- Optional: CUDA + cuDNN for GPU acceleration. Without them, the model loader prints a highly-visible fallback banner and proceeds on CPU.
+- Either: WSL2 with the repo at `/home/kristjans/projects/stt-faster` and a `.venv` (current dev-machine setup), **or** Docker Desktop with the `stt-faster:latest` image built by `setup.bat`.
+- Optional: CUDA + cuDNN on the WSL side for GPU acceleration. The Docker fallback is CPU-only by design.
 
 ## Troubleshooting
 
-**Banner says `runtime: native` but you expected `wsl`**
+**Banner says `runtime: docker` but you expected `wsl`**
 → The WSL probe failed. Check `where wsl` returns a path and `wsl -e test -x /home/kristjans/projects/stt-faster/.venv/bin/python` exits 0. Edit `STT_WSL_REPO=` in `_runtime.bat` if the WSL repo lives elsewhere.
 
-**Native run fails with "cannot find python"**
-→ Re-run `setup.bat` from the repo root.
+**ERROR: no runtime available**
+→ Neither WSL nor Docker is usable. Install Docker Desktop, start it, and run `setup.bat` from the repo root to build the image.
 
 **Processing is slow**
-→ First run downloads the model. Native Windows runs CPU-only unless CUDA + cuDNN are installed.
+→ First run downloads the model. The Docker fallback is CPU-only; for GPU acceleration use WSL (the bats prefer it automatically when available).
 
 **Files stuck in pending**
 → Look in `<audio_folder>/failed/` for files that errored; check `logs/` for stack traces.
-→ Inspect recent run history: `.venv/bin/python -m backend.cli.main db recent --limit 10`.
+→ Inspect recent run history: `.venv/bin/python -m backend.cli.main db recent --limit 10` (WSL) or `docker run --rm -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" --entrypoint python stt-faster:latest -m backend.cli.main db recent --limit 10` (Docker).
 
 ## How the runtime dispatch works
 
 Every bat calls `_runtime.bat` first. The helper:
 
-1. Probes WSL: `where wsl` AND `wsl -e test -x <STT_WSL_REPO>/.venv/bin/python`. Both pass → `STT_RUNTIME=wsl`; otherwise → `STT_RUNTIME=native`.
-2. Resolves the audio dir: `STT_AUDIO_DIR` env var → caller's `STT_CALLER_DIR` (set to `%~dp0` by the bat) → `%CD%`. Trailing backslash trimmed.
-3. Translates the resolved Windows path to `/mnt/<drive>/...` form for WSL invocations.
-4. Prints a banner: `[stt-faster] runtime: <wsl|native>`, audio dir, and (when WSL) the WSL repo path.
+1. Probes WSL: `where wsl` AND `wsl -e test -x <STT_WSL_REPO>/.venv/bin/python`. Both pass → `STT_RUNTIME=wsl`.
+2. If still unset, probes Docker: `where docker` AND `docker image inspect stt-faster:latest`. Both pass → `STT_RUNTIME=docker`.
+3. If neither probe matches, prints an error pointing at `setup.bat` and exits non-zero.
+4. Resolves the audio dir: `STT_AUDIO_DIR` env var → caller's `STT_CALLER_DIR` (set to `%~dp0` by the bat) → `%CD%`. Trailing backslash trimmed.
+5. Translates the resolved Windows path to `/mnt/<drive>/...` form for WSL invocations.
+6. Prints a banner: `[stt-faster] runtime: <wsl|docker>`, audio dir, and (when WSL) the WSL repo path.
 
-The calling bat then branches on `STT_RUNTIME` and dispatches the same Python invocation to either WSL or the native `.venv`.
+The calling bat then branches on `STT_RUNTIME` and dispatches the same Python invocation to either WSL (`wsl -e bash -c "..."`) or the Docker image (`docker run --rm -v ... stt-faster:latest ...`).
 
 ## Model presets
 
