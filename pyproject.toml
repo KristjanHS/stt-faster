@@ -42,7 +42,7 @@ dependencies = [
     # (`pipeline({"waveform": ..., "sample_rate": ...})`) that bypasses torchcodec
     # at runtime. We decode audio in-process with PyAV (av==16.0.1, already vendored)
     # which bundles its own FFmpeg — no system FFmpeg-6 dependency on Win + WSL + Docker.
-    # Design: docs/plans/2026-05-21-pyannote-community-1-migration-design.md §2.
+    # Design: docs/plans/archived/2026-05-21-pyannote-community-1-migration-design.md §2.
     # Requires HF_TOKEN at runtime; see docs/diarization_setup.md.
     "pyannote.audio==4.0.4",
     # torch + torchaudio moved to [project.optional-dependencies] (cpu / cu126 extras)
