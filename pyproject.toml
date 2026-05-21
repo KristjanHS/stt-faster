@@ -6,7 +6,8 @@ authors = [{ name=""}]
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    # GPU-verified stack (pinned to versions validated with CUDA)
+    # Base deps — shared across the cpu / cu130 extras. The CUDA-coupled
+    # torch/torchaudio pins live in [project.optional-dependencies] below.
     "ctranslate2==4.6.2",
     "faster-whisper==1.2.1",
     "onnxruntime==1.23.2",
