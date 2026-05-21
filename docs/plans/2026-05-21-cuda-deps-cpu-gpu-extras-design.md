@@ -1,0 +1,281 @@
+# CUDA dependencies — CPU/GPU split via uv extras
+
+**Status**: Design — ready for implementation
+**Date**: 2026-05-21
+**Owner**: Kristjan
+**Supersedes**: none
+**Related**: `2026-05-21-portable-windows-setup-design.md` (shares `_runtime.bat` infrastructure),
+`docs/diarization_setup.md` (HF_TOKEN setup that pairs with this)
+
+## 1. Problem
+
+After the pyannote.audio diarization subsystem (commits `90912d6` → `0515257`) shipped,
+every Linux install — including CPU-only Docker prod images and CI runners — pulls
+~3–5 GB of CUDA libraries transitively:
+
+`nvidia-cublas`, `nvidia-cuda-cupti`, `nvidia-cuda-nvrtc`, `nvidia-cuda-runtime`,
+`nvidia-cudnn-cu13`, `nvidia-cufft`, `nvidia-cufile`, `nvidia-curand`,
+`nvidia-cusolver`, `nvidia-cusparse`, `nvidia-cusparselt-cu13`, `nvidia-nccl-cu13`,
+`nvidia-nvjitlink`, `nvidia-nvshmem-cu13`, `nvidia-nvtx`, `cuda-bindings`,
+`cuda-pathfinder`, `cuda-toolkit`, `triton`.
+
+None of these are required for the diarization solution to run — `pyannote_runner.py`
+treats CUDA as optional (`torch.cuda.is_available()` check, line 38) and the project
+already has a documented GPU→CPU fallback pattern.
+
+Root cause: `pyproject.toml` declares a `pytorch-cpu` index with `explicit = true`,
+but has no `[tool.uv.sources]` binding for `torch` / `torchaudio`. With `explicit =
+true` and no source binding, the index is dead — torch resolves from PyPI default,
+which lists all the CUDA libs as required deps on `sys_platform == 'linux'`. The
+`--no-emit-package torch` flag in `make export-reqs` only hides the `torch` line in
+the exported `requirements.txt`; transitive CUDA deps remain.
+
+## 2. Goals
+
+- **Default `uv sync` produces a CPU-only install** with no `nvidia-*` / `cuda-*` /
+  `triton` packages.
+- **GPU users opt in once per machine**; subsequent syncs auto-pick GPU without
+  retyping flags.
+- **Single `uv.lock`** — no parallel lockfiles to drift.
+- **Docker images** built CPU by default; GPU image via a single build-arg.
+- **CI** stays CPU; remains green; install gets faster (no ~3 GB CUDA download).
+- Mechanism is **extensible** to additional GPU targets (cu121, ROCm, MPS) without
+  redesign.
+
+## 3. Non-goals
+
+- AMD ROCm, Apple MPS, Intel XPU — extensible but not built.
+- Multiple CUDA versions (cu121, cu124 alongside cu128) — extensible but not built.
+- Auto-detect GPU hardware at install time (rejected during ideation — silent
+  miscalibration risk outweighs UX win).
+- Runtime variant switching inside a single venv — switching requires re-sync.
+- GPU runners in CI.
+
+## 4. Approach (chosen)
+
+**uv conflicting extras + persistent local variant file.**
+
+Both `cpu` and `cu128` extras are defined and mutually exclusive via
+`[tool.uv.conflicts]`. `[tool.uv.sources]` binds `torch` and `torchaudio` to the
+appropriate index per extra. `torch` and `torchaudio` move **out of base
+dependencies** into both extras — this is the only way to prevent transitive
+torch resolution (via pyannote.audio) from pulling CUDA wheels when no extra is
+active.
+
+A gitignored `.stt-variant.local` file at repo root holds the per-machine choice
+(`cpu` or `cu128`). The existing wrapper infrastructure (`run_uv.sh`,
+`_runtime.bat`, Make targets) reads this file via a small helper and always passes
+the corresponding `--extra` flag to `uv sync`. Bare `uv sync` becomes a power-user
+path (documented).
+
+### 4.1 Rejected alternatives
+
+| Approach | Why rejected |
+|---|---|
+| Two parallel venvs (`.venv` + `.venv-gpu`), two lockfiles | Maintenance overhead (two lockfiles to bump in sync for security updates); duplicates disk on machines that build both. uv extras give the same isolation without the duplication. |
+| Auto-detect via `nvidia-smi` / `wmic` probe | Silent miscalibration: can't test CPU path on a GPU box, CI runner GPU passthrough misclassifies, Docker base-image variation drifts. Failures are quiet (wrong wheel). |
+| Env-var-only (`STT_VARIANT=gpu uv sync`) | Doesn't persist across shell sessions without `.bashrc` edits; harder to discover from `git status`. |
+
+## 5. Design
+
+### 5.1 `pyproject.toml`
+
+```toml
+[project]
+dependencies = [
+    # ... existing entries (ctranslate2, faster-whisper, etc) ...
+    "pyannote.audio==3.4.0",
+    # torch + torchaudio moved to extras — see [project.optional-dependencies]
+]
+
+[project.optional-dependencies]
+cpu = [
+    "torch>=2.4.0,<2.7.0",
+    "torchaudio>=2.4.0,<2.7.0",
+]
+cu128 = [
+    "torch>=2.4.0,<2.7.0",
+    "torchaudio>=2.4.0,<2.7.0",
+]
+
+[tool.uv]
+conflicts = [
+    [ { extra = "cpu" }, { extra = "cu128" } ],
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-cpu",   extra = "cpu"   },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
+torchaudio = [
+    { index = "pytorch-cpu",   extra = "cpu"   },
+    { index = "pytorch-cu128", extra = "cu128" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url  = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url  = "https://download.pytorch.org/whl/cu128"
+explicit = true
+```
+
+The `torchaudio<2.7` upper bound remains as documented today (pyannote 3.4 imports
+`torchaudio.AudioMetaData`, removed in 2.7).
+
+### 5.2 Variant file: `.stt-variant.local`
+
+- Location: repo root.
+- Format: single line — either `cpu` or `cu128`.
+- Gitignored. Owned by the user (per machine), not by the repo.
+- Absent → treated as `cpu`.
+
+### 5.3 Resolver helper: `scripts/select_variant.sh` and `scripts/select_variant.bat`
+
+Reads `.stt-variant.local` if present, validates against `{cpu, cu128}`, emits the
+value on stdout, exits non-zero with a clear message on unknown value:
+
+```
+unknown variant 'cuda' in .stt-variant.local — expected 'cpu' or 'cu128'
+```
+
+### 5.4 Wrapper integration
+
+**`run_uv.sh`** — currently runs `uv sync`. New behaviour:
+
+```sh
+VARIANT="$(scripts/select_variant.sh)"
+echo "[stt-faster] variant=${VARIANT} (set via 'make use-cpu' / 'make use-gpu' to switch)"
+uv sync --extra "$VARIANT" "$@"
+```
+
+**`_runtime.bat`** (Stage-1 portable Windows runtime probe) — same pattern via the
+`.bat` resolver. Lands as part of the Stage-2 "rewire 10 bats" work already queued.
+
+### 5.5 Makefile targets
+
+```make
+sync:        ; ./run_uv.sh
+use-cpu:     ; echo cpu   > .stt-variant.local && $(MAKE) sync
+use-gpu:     ; echo cu128 > .stt-variant.local && $(MAKE) sync
+show-variant:; @cat .stt-variant.local 2>/dev/null || echo "(default: cpu)"
+```
+
+### 5.6 Docker
+
+```dockerfile
+ARG STT_VARIANT=cpu
+RUN echo "$STT_VARIANT" > .stt-variant.local && ./run_uv.sh
+```
+
+Prod image builds CPU-only by default. A GPU image is produced via
+`docker build --build-arg STT_VARIANT=cu128`. No runtime detection — the choice is
+baked into the image.
+
+### 5.7 `make export-reqs` split
+
+```make
+export-reqs: export-reqs-cpu export-reqs-cu128
+
+export-reqs-cpu:
+    uv export --no-hashes --group test --locked --no-emit-project \
+              --extra cpu --format requirements-txt > requirements.txt
+
+export-reqs-cu128:
+    uv export --no-hashes --group test --locked --no-emit-project \
+              --extra cu128 --format requirements-txt > requirements-gpu.txt
+```
+
+- `--no-emit-package torch` is **dropped** — the CPU export needs no special
+  exclusion (CPU wheels have no nvidia transitive deps).
+- `requirements.txt` is the canonical CPU export (matches default install).
+- `requirements-gpu.txt` is the GPU sidecar, generated alongside.
+
+### 5.8 CI
+
+`.github/workflows/*.yml` `uv sync` invocations pass `--extra cpu` explicitly. CI
+does not rely on `.stt-variant.local`. A new lightweight assertion test verifies
+the CPU runner cannot import `nvidia_cublas` — catches accidental regressions to
+PyPI-default torch.
+
+### 5.9 `pip-audit`
+
+`make pip-audit` continues to audit `requirements.txt` (CPU). An additional
+`pip-audit-gpu` target audits `requirements-gpu.txt`. Both wired into the
+pre-push hook chain.
+
+### 5.10 `pytest` `gpu` marker
+
+The existing `gpu` marker keeps its meaning ("requires GPU hardware"). Tests with
+the marker are filtered out by default. A collection-time skip with a clear
+reason is added when `torch.cuda.is_available()` is False, so importing GPU
+tests on a CPU venv produces a readable skip rather than a cryptic import error.
+
+### 5.11 `model_loader` GPU→CPU fallback
+
+Unchanged. The extras decide *what's installed*; the runtime fallback handles the
+orthogonal case where CUDA is installed but unavailable at runtime (no `--gpus`
+flag in docker, driver mismatch, etc).
+
+## 6. Rollout
+
+| Stage | Scope | Verification |
+|---|---|---|
+| **D1: deps mechanism** | pyproject.toml extras + sources + conflicts; regen `uv.lock`; `.gitignore` adds `.stt-variant.local`; `scripts/select_variant.{sh,bat}` | `uv sync --extra cpu` lockfile inspection: zero `nvidia-*` / `cuda-*` / `triton`. `uv sync --extra cu128` lockfile inspection: contains them. Disk-footprint check (CPU venv should be <2 GB, GPU venv 5–7 GB). |
+| **D2: wrappers** | `run_uv.sh`, `_runtime.bat`, Makefile targets (`use-cpu`/`use-gpu`/`show-variant`/`sync`) | `make use-cpu && make sync` on a clean venv → CPU install. `make use-gpu && make sync` on the GPU box → CUDA install. |
+| **D3: CI + Docker** | `.github/workflows/*.yml` add `--extra cpu`; Dockerfile gains `ARG STT_VARIANT=cpu`; `make export-reqs` splits CPU/GPU; new `pip-audit-gpu` target | Green CI on a sample PR. Docker build with default arg succeeds; image size drops by ~3–5 GB versus current. |
+| **D4: docs + cleanup** | Update `pyproject.toml:9` comment ("GPU-verified stack"), `README.md` install section, `docs/Transcription_solution.md` GPU note, `docs/diarization_setup.md`. Remove the dead `# for GPU: torch = { index = "pytorch-cu128"}` comment now that it's real. | `grep -r 'pytorch-cu128\|GPU-verified\|install torch separately' docs/ README.md pyproject.toml Makefile` returns only intentional references. |
+
+Each stage is a single PR. D1 is the high-risk stage and lands first on a
+throwaway-tested branch.
+
+## 7. Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|---|:---:|:---:|---|
+| uv `conflicts` + per-extra `sources` resolution misbehaves with transitive torch (via pyannote) | Med | High | D1 throwaway-branch validation: regen `uv.lock`, diff resolved torch source per extra, confirm CPU branch has no `nvidia-*`. Fallback: platform-marker pattern (`sys_platform`-gated indices). |
+| `torchaudio>=2.4,<2.7` CPU wheel not on pytorch-cpu index for some Python 3.12 patch version | Low | Med | Browse `https://download.pytorch.org/whl/cpu/torchaudio/` during D1. If gap exists, pin a known-good version pair instead of a range. |
+| pyannote / speechbrain / torch-audiomentations import CUDA symbols at import time on CPU | Low | High | D1 e2e run on CPU venv. Already mitigated by `pyannote_runner.py`'s lazy-import pattern. |
+| CI silently regresses to PyPI default (forgot to pass `--extra cpu`) | Med | Med | New unit assertion: `nvidia_cublas` must not be importable on the CPU CI runner. |
+| User edits `.stt-variant.local` to a typo (e.g. `cuda`) and gets confusing errors | Med | Low | `select_variant.{sh,bat}` validates and emits a clear error. |
+| GPU box gets `.stt-variant.local` committed accidentally | Low | Low | `.gitignore` entry; `make use-gpu` writes to the gitignored path only. |
+
+## 8. Decisions log
+
+1. **Selection mechanism**: uv extras + `[tool.uv.conflicts]`. *Rejected:* separate
+   venvs, env-var-only, hardware auto-detect.
+2. **Default behavior**: wrapper layer passes `--extra cpu` when no
+   `.stt-variant.local` is set. Bare `uv sync` is a power-user path, documented.
+3. **Lockfile model**: single `uv.lock` with both resolutions (uv's native
+   conflicts behaviour). *Rejected:* parallel lockfiles per variant.
+4. **Persistence**: gitignored `.stt-variant.local`, per-machine. One-time
+   `make use-gpu` on the GPU host. *Rejected:* env-var-only (doesn't persist
+   across shells without profile edits), auto-detection (silent miscalibration).
+5. **GPU target**: `cu128` only for now. Extras structure leaves room for more
+   without redesign.
+6. **Requirements export**: two files — `requirements.txt` (CPU, canonical) +
+   `requirements-gpu.txt` (GPU sidecar). Both audited by `pip-audit`.
+7. **`torch` and `torchaudio` move out of base deps** into both `cpu` and `cu128`
+   extras. *Rationale:* the only way to keep base `uv sync` from pulling
+   transitive CUDA via pyannote.
+8. **Bare `uv sync` (no extra) is undefined behaviour** for casual use. Users hit
+   it only via wrappers (which always set an extra). Direct users get a CUDA-y
+   resolution from PyPI default, same as today — and we document that in the
+   contributor guide.
+
+## 9. Out of scope (with explicit hooks for later)
+
+- **AMD ROCm**: add a `rocm` extra and `pytorch-rocm` index entry. No design change.
+- **Apple MPS**: torch already exposes MPS via the standard CPU wheel on macOS;
+  no extra needed. Just verify the CPU extra resolves correctly on darwin.
+- **Multiple CUDA targets** (`cu121`, `cu124`): add more extras to the conflicts
+  list and corresponding `[tool.uv.sources]` entries. Lockfile grows; mechanism
+  unchanged.
+- **Auto-detect at install**: if reconsidered later, layer it on top — the helper
+  script becomes `select_variant_or_probe.sh` and writes to `.stt-variant.local`.
+- **GPU CI runners**: add a workflow that syncs with `--extra cu128` on a GPU
+  runner, runs the `gpu`-marked tests. No design change.
