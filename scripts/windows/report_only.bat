@@ -21,9 +21,11 @@ echo.
 if /i "!STT_RUNTIME!"=="wsl" (
     wsl -e bash -c "cd !STT_WSL_REPO! && .venv/bin/python scripts/generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61"
 ) else (
-    pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python scripts\generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61
-    popd
+    docker run --rm ^
+      -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
+      -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
+      --entrypoint python ^
+      stt-faster:latest /app/scripts/generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61
 )
 set "REPORT_ERROR=!errorlevel!"
 
