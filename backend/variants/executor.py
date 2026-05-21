@@ -311,6 +311,10 @@ def _transcribe_with_config(
     preprocess_config: PreprocessConfig,
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult],
     transcription_config: Any,  # TranscriptionConfig
+    *,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
 ) -> dict[str, Any]:
     """Transcribe using full transcription config."""
     from backend.transcribe import transcribe  # noqa: PLC0415
@@ -325,6 +329,9 @@ def _transcribe_with_config(
         preprocess_config_provider=lambda: preprocess_config,
         preprocess_runner=preprocess_runner,
         transcription_config_provider=_config_provider,
+        diarize=diarize,
+        num_speakers=num_speakers,
+        diarize_runner=diarize_runner,
     )
 
 
@@ -543,6 +550,9 @@ def _run_transcription(
     metrics_collector: Callable[[TranscriptionMetrics], None] | None,
     can_track_skips: bool,
     log_label: str,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
 ) -> dict[str, Any]:
     """Shared scaffolding for the baseline/minimal executor paths.
 
@@ -609,6 +619,18 @@ def _run_transcription(
         no_speech_threshold=no_speech_threshold,
         logprob_threshold=logprob_threshold,
     )
+
+    if diarize:
+        from backend.diarize import annotate as diarize_annotate  # noqa: PLC0415
+
+        annotate_kwargs: dict[str, Any] = {"num_speakers": num_speakers}
+        if diarize_runner is not None:
+            annotate_kwargs["runner"] = diarize_runner
+        segment_payloads = diarize_annotate(
+            segment_payloads,
+            str(preprocess_result.output_path),
+            **annotate_kwargs,
+        )
 
     transcribe_time = time.time() - transcribe_start
 
@@ -691,6 +713,10 @@ def transcribe_with_baseline_params(
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult],
     transcription_config: Any,  # TranscriptionConfig (required now)
     metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
+    *,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
 ) -> dict[str, Any]:
     """Transcribe with baseline parameters, using faster-whisper library defaults.
 
@@ -750,6 +776,9 @@ def transcribe_with_baseline_params(
         # invent a skip count.
         can_track_skips=False,
         log_label="baseline",
+        diarize=diarize,
+        num_speakers=num_speakers,
+        diarize_runner=diarize_runner,
     )
 
 
@@ -787,6 +816,10 @@ def transcribe_with_minimal_params(
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult],
     transcription_config: Any,  # TranscriptionConfig (required now)
     metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
+    *,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
 ) -> dict[str, Any]:
     """Transcribe with minimal parameters, omitting those that differ between defaults.
 
@@ -870,4 +903,7 @@ def transcribe_with_minimal_params(
         metrics_collector=metrics_collector,
         can_track_skips=can_track_skips,
         log_label="minimal",
+        diarize=diarize,
+        num_speakers=num_speakers,
+        diarize_runner=diarize_runner,
     )

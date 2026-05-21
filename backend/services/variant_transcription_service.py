@@ -36,7 +36,6 @@ class VariantTranscriptionService:
         self.preset = preset
         self.language = language
         self.output_format = output_format
-        # C3: stored for future use by C4 (transcribe.py integration).
         self._diarize = diarize
         self._num_speakers = num_speakers
 
@@ -87,6 +86,8 @@ class VariantTranscriptionService:
                 preprocess_runner=self.preprocess_runner,
                 transcription_config=self.transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
         elif is_minimal:
             # For minimal config, use the internal function that omits parameters
@@ -100,6 +101,8 @@ class VariantTranscriptionService:
                 preprocess_runner=self.preprocess_runner,
                 transcription_config=self.transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
         else:
             # Use standard transcription
@@ -113,6 +116,8 @@ class VariantTranscriptionService:
                 preprocess_runner=self.preprocess_runner,
                 transcription_config_provider=lambda: self.transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
 
         # Write output in the specified format

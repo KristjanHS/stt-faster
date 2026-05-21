@@ -394,6 +394,18 @@ def _parse_suppress_tokens(raw: str | None) -> list[int] | None:
         return [-1]
 
 
+def _fmt_time(seconds: float) -> str:
+    """Format seconds as hh:mm:ss.ff (hundredths of a second)."""
+    total_centis = int(round(seconds * 100))
+    cs = total_centis % 100
+    total_seconds = total_centis // 100
+    s = total_seconds % 60
+    total_minutes = total_seconds // 60
+    m = total_minutes % 60
+    h = total_minutes // 60
+    return f"{h:02d}:{m:02d}:{s:02d}.{cs:02d}"
+
+
 def _apply_language_default(language: str | None, preset: str) -> str | None:
     """Apply the Estonian-preset language default.
 
@@ -605,6 +617,9 @@ def transcribe(
     preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult] = preprocess_audio,
     model_picker: Callable[[str], Any] | None = None,
     metrics_collector: Callable[[TranscriptionMetrics], None] | None = None,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
 ) -> Dict[str, Any]:
     LOGGER.info("Starting transcription of: %s", os.path.basename(path))
     preset_config = get_preset(preset)
@@ -681,6 +696,18 @@ def transcribe(
             total_audio_duration=total_audio_duration,
             transcribe_start=transcribe_start,
         )
+
+        if diarize:
+            from backend.diarize import annotate as diarize_annotate  # noqa: PLC0415
+
+            annotate_kwargs: dict[str, Any] = {"num_speakers": num_speakers}
+            if diarize_runner is not None:
+                annotate_kwargs["runner"] = diarize_runner
+            segment_payloads = diarize_annotate(
+                segment_payloads,
+                str(preprocess_result.output_path),
+                **annotate_kwargs,
+            )
 
         transcribe_time = time.time() - transcribe_start
 
@@ -790,8 +817,9 @@ def transcribe_to_text(
 
     with opener(text_path, "w", encoding="utf-8") as text_file:
         for segment in segments:
-            text_file.write(segment["text"])
-            text_file.write("\n")
+            ts = f"[{_fmt_time(segment['start'])} --> {_fmt_time(segment['end'])}]"
+            speaker = f" {segment['speaker']}:" if "speaker" in segment else ""
+            text_file.write(f"{ts}{speaker} {segment['text'].lstrip()}\n")
 
 
 def transcribe_and_save(

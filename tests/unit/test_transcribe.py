@@ -21,6 +21,7 @@ from backend.transcribe import (
     segment_to_payload,
     transcribe,
     transcribe_to_json,
+    transcribe_to_text,
 )
 
 
@@ -482,3 +483,117 @@ class TestTranscribeToJson:
 
         assert calls == [("test.wav", "turbo", None)]
         assert json.loads(json_path.read_text()) == payload
+
+
+class TestTranscribeToText:
+    """Tests for transcribe_to_text TXT format (range timestamps + optional speaker)."""
+
+    def test_transcribe_to_text_with_speakers(self, tmp_path: Path) -> None:
+        """Speaker-present segments emit `[start --> end] SPEAKER_NN: text` lines."""
+        payload = {
+            "segments": [
+                {"start": 0.4, "end": 3.05, "text": " Hello", "speaker": "SPEAKER_00"},
+                {"start": 3.1, "end": 5.7, "text": "World", "speaker": "SPEAKER_01"},
+            ],
+        }
+
+        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+            return payload
+
+        text_path = tmp_path / "out.txt"
+        transcribe_to_text("a.wav", str(text_path), preset="et-large", transcribe_fn=fake_transcribe)
+
+        assert text_path.read_text(encoding="utf-8") == (
+            "[00:00:00.40 --> 00:00:03.05] SPEAKER_00: Hello\n[00:00:03.10 --> 00:00:05.70] SPEAKER_01: World\n"
+        )
+
+    def test_transcribe_to_text_without_speakers(self, tmp_path: Path) -> None:
+        """Speaker-absent segments emit `[start --> end] text` lines (single space, no prefix)."""
+        payload = {
+            "segments": [
+                {"start": 0.4, "end": 3.05, "text": " Hello"},
+                {"start": 3.1, "end": 5.7, "text": "World"},
+            ],
+        }
+
+        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+            return payload
+
+        text_path = tmp_path / "out.txt"
+        transcribe_to_text("a.wav", str(text_path), preset="et-large", transcribe_fn=fake_transcribe)
+
+        assert text_path.read_text(encoding="utf-8") == (
+            "[00:00:00.40 --> 00:00:03.05] Hello\n[00:00:03.10 --> 00:00:05.70] World\n"
+        )
+
+    def test_transcribe_to_text_handles_hour_boundary(self, tmp_path: Path) -> None:
+        """Hours past 00 render in `hh:` slot (regression guard for mm overflow)."""
+        payload = {"segments": [{"start": 3661.5, "end": 3662.0, "text": "x"}]}
+
+        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+            return payload
+
+        text_path = tmp_path / "out.txt"
+        transcribe_to_text("a.wav", str(text_path), preset="et-large", transcribe_fn=fake_transcribe)
+
+        line = text_path.read_text(encoding="utf-8")
+        assert line.startswith("[01:01:01.50 --> 01:01:02.00]")
+
+
+class TestTranscribeDiarize:
+    """Tests for the diarize plumbing on transcribe()."""
+
+    def test_transcribe_calls_annotate_when_diarize_true(self, tmp_path: Path) -> None:
+        """Passing diarize=True invokes the diarize runner exactly once."""
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
+        model = RecordingModel(
+            [FakeSegment(0, 0.0, 5.0, "hello")],
+            info,
+        )
+
+        runner_calls: list[tuple[str, dict[str, Any]]] = []
+
+        def fake_runner(audio_path: str, **kwargs: Any) -> list[Any]:
+            runner_calls.append((audio_path, kwargs))
+            return []  # zero turns → annotate returns segments unchanged
+
+        transcribe(
+            "/path/to/audio.wav",
+            preset="et-large",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path, duration=5.0),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+            diarize=True,
+            num_speakers=3,
+            diarize_runner=fake_runner,
+        )
+
+        assert len(runner_calls) == 1
+        audio_path, runner_kwargs = runner_calls[0]
+        assert audio_path == str(processed_path)
+        assert runner_kwargs.get("num_speakers") == 3
+
+    def test_transcribe_skips_annotate_when_diarize_false(self, tmp_path: Path) -> None:
+        """Default diarize=False leaves the runner unused."""
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
+        model = RecordingModel(
+            [FakeSegment(0, 0.0, 5.0, "hello")],
+            info,
+        )
+
+        def sentinel_runner(*args: Any, **kwargs: Any) -> list[Any]:  # noqa: ARG001
+            raise AssertionError("diarize runner should not be called when diarize=False")
+
+        transcribe(
+            "/path/to/audio.wav",
+            preset="et-large",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path, duration=5.0),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+            diarize=False,
+            diarize_runner=sentinel_runner,
+        )
