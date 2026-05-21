@@ -1,6 +1,6 @@
 # Diarization Setup
 
-stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-3.1`) to attribute each transcribed segment to a speaker. This is the default for the 1:1-meeting Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`.
+stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-community-1`) to attribute each transcribed segment to a speaker. This is the default for the 1:1-meeting Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`.
 
 The model is HuggingFace-gated, so first-time setup is a one-time HF account + token + license-accept dance. After that the model is cached at `~/.cache/hf/` (WSL/Linux) or `%USERPROFILE%\.cache\hf\` (Windows) and reused across runs.
 
@@ -30,7 +30,9 @@ Defaults: `--diarize` on, `--num-speakers 2`. Override either at the CLI (`--no-
 
 ### 2. Accept the pyannote model license
 
-Open <https://huggingface.co/pyannote/speaker-diarization-3.1> while signed in and accept the gated-model terms. **This must be done with the same HF account whose token you'll use below** — accepting on a different account does nothing.
+Open <https://huggingface.co/pyannote/speaker-diarization-community-1> while signed in and accept the gated-model terms. **This must be done with the same HF account whose token you'll use below** — accepting on a different account does nothing.
+
+> **Upgrading from a previous stt-faster build that used `speaker-diarization-3.1`?** The license acceptance is **per model** — your existing 3.1 acceptance does **not** carry over. Accept community-1's terms separately or you'll get a `403` on first run (see [Troubleshooting](#troubleshooting)).
 
 The same applies to the upstream segmentation model that pyannote pulls in transitively: <https://huggingface.co/pyannote/segmentation-3.0>. Accept that one too.
 
@@ -72,7 +74,8 @@ On success the script ends with `Prefetch complete.` On failure you'll see a `Di
 
 ## Runtime constraints
 
-- **`torchaudio<2.7`** is a hard pin — pyannote 3.4.0 calls into `torchaudio.functional.resample` with a signature that breaks in 2.7+. Don't loosen this constraint in `pyproject.toml` without first running the integration test (`make integration` or `pytest tests/integration/test_diarize_e2e.py`).
+- **`torchaudio>=2.8.0`** is required by `pyannote.audio==4.0.4`. The torch / torchaudio versions are pinned in the `cpu` / `cu126` extras of `pyproject.toml`; don't loosen them without first running the integration test (`make integration` or `pytest tests/integration/test_diarize_e2e.py`).
+- Audio is **decoded in-process with PyAV** (`av==16.0.1`, bundles its own FFmpeg) and handed to pyannote via its tensor-input API. This sidesteps `torchcodec`'s requirement for FFmpeg-6 shared libraries on the host, so the pipeline is portable across Win + WSL + Docker without any system-FFmpeg version dance. A `torchcodec` import warning may fire once at process start — it's filtered, but if you see it through a stray logger config: it's safe to ignore on the tensor-input path.
 - pyannote runs sequentially **after** whisper. Both models are released and CUDA caches are flushed between loads (`del model` + `gc.collect()` + `torch.cuda.empty_cache()`), so peak VRAM stays bounded by the larger of the two — not the sum.
 - GPU is preferred but the existing GPU→CPU fallback in `backend/model_loader.py` handles boxes without CUDA; you'll see the same `[stt-faster] GPU unavailable, falling back to CPU` banner that whisper uses.
 
@@ -93,9 +96,11 @@ The token reached HuggingFace but was rejected. Either:
 
 ### `DiarizationConfigError: HuggingFace returned 403 ... Accept the model license`
 
-The token is valid but the HF account behind it hasn't accepted the gated-model terms for `pyannote/speaker-diarization-3.1`. Re-do [step 2](#2-accept-the-pyannote-model-license), making sure you're signed in as the same account that owns the token.
+The token is valid but the HF account behind it hasn't accepted the gated-model terms for `pyannote/speaker-diarization-community-1`. Re-do [step 2](#2-accept-the-pyannote-model-license), making sure you're signed in as the same account that owns the token.
 
-Also check `pyannote/segmentation-3.0` — pyannote 3.1 depends on it and the 403 can come from either model.
+> If you previously ran stt-faster with `speaker-diarization-3.1` accepted, that acceptance does **not** carry over to community-1. The 403 here means "accept community-1 specifically", not "your token is bad".
+
+Also check `pyannote/segmentation-3.0` — pyannote pulls it transitively and the 403 can come from either model.
 
 ### `DiarizationRuntimeError: pyannote inference failed for <file>`
 
@@ -106,7 +111,7 @@ pyannote loaded but crashed on a specific file. This is per-file, not batch-leve
 
 ### GPU OOM (CUDA out of memory)
 
-pyannote 3.1 needs roughly 2 GB VRAM on top of whisper at peak. If your card is tight (≤4 GB):
+community-1 needs roughly 2 GB VRAM on top of whisper at peak (similar footprint to 3.1). If your card is tight (≤4 GB):
 
 - Use a smaller whisper preset (`distil`, `et-32`) — frees more headroom for pyannote.
 - Force CPU on the diarize stage by unsetting CUDA: `CUDA_VISIBLE_DEVICES= .venv/bin/python scripts/transcribe_manager.py process ...` runs both whisper and pyannote on CPU.
@@ -123,10 +128,10 @@ If you're seeing this on audio that clearly contains speech, check:
 
 ### Diarization is slow on long files
 
-pyannote 3.1 is ~real-time on GPU and ~3-5× real-time on CPU. For batch runs of long files (1 hour+) on CPU-only machines, expect the diarize stage alone to take 10-20 minutes per file. Use `--no-diarize` if speaker labels aren't needed; the TXT output still gets timestamps.
+community-1 is ~real-time on GPU and ~3-5× real-time on CPU. For batch runs of long files (1 hour+) on CPU-only machines, expect the diarize stage alone to take 10-20 minutes per file. Use `--no-diarize` if speaker labels aren't needed; the TXT output still gets timestamps.
 
 ## See also
 
 - [docs/Transcription_solution.md](Transcription_solution.md) — full output format reference (TXT line shape, JSON schema with `speaker`).
 - [scripts/windows/HOW_TO_USE.txt](../scripts/windows/HOW_TO_USE.txt) — Windows launcher reference.
-- pyannote model card: <https://huggingface.co/pyannote/speaker-diarization-3.1>.
+- pyannote model card: <https://huggingface.co/pyannote/speaker-diarization-community-1>.

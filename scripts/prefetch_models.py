@@ -24,7 +24,7 @@ LOGGER = logging.getLogger("stt-faster.prefetch")
 
 ESTONIAN_MODEL = "TalTechNLP/whisper-large-v3-turbo-et-verbatim"
 ENGLISH_MODEL = "Systran/faster-distil-whisper-large-v3"
-PYANNOTE_MODEL = "pyannote/speaker-diarization-3.1"
+PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 
 
 def prefetch_all() -> None:
@@ -44,10 +44,11 @@ def prefetch_all() -> None:
 def prefetch_pyannote(repo_id: str) -> str:
     # Revision pin is required by Bandit B615 and must be a literal SHA in the
     # snapshot_download() call (Bandit only accepts literal 40-char hex strings,
-    # not module constants or function parameters). Resolved from HF API 2026-05-21.
+    # not module constants or function parameters). Resolved from HF API 2026-05-21
+    # for pyannote/speaker-diarization-community-1.
     # Cross-ref: backend/diarize/pyannote_runner.py uses Pipeline.from_pretrained
-    # without a revision pin — relies on pyannote.audio==3.4.0 lock to resolve the
-    # same SHA. Keep this literal in sync if the model card updates a default revision.
+    # without a revision pin — relies on the pyannote.audio lock to resolve a
+    # compatible snapshot. Keep this literal in sync if the model card updates.
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import HfHubHTTPError
 
@@ -63,7 +64,7 @@ def prefetch_pyannote(repo_id: str) -> str:
         return snapshot_download(
             repo_id=repo_id,
             token=token,
-            revision="84fd25912480287da0247647c3d2b4853cb3ee5d",  # pragma: allowlist secret
+            revision="3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",  # pragma: allowlist secret
         )
     except HfHubHTTPError as exc:
         status = getattr(exc.response, "status_code", None) if exc.response is not None else None
