@@ -33,12 +33,12 @@ if !VARIANT_COUNT!==1 (echo Variant:  !VARIANTS_COMMA!) else (echo Variants: !VA
 echo.
 
 if /i "!STT_RUNTIME!"=="wsl" (
-    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --preset et-32 --language et --output-format both --variants '!VARIANTS_COMMA!'"
+    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --preset et-32 --language et --output-format txt --diarize --num-speakers 2 --variants '!VARIANTS_COMMA!'"
 ) else (
     set "HF_HOME=%USERPROFILE%\.cache\hf"
     set "HF_HUB_CACHE=%USERPROFILE%\.cache\hf\hub"
     pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python scripts\transcribe_manager.py process "!STT_AUDIO_DIR_RESOLVED!" --preset et-32 --language et --output-format both --variants "!VARIANTS_COMMA!"
+    .venv\Scripts\python scripts\transcribe_manager.py process "!STT_AUDIO_DIR_RESOLVED!" --preset et-32 --language et --output-format txt --diarize --num-speakers 2 --variants "!VARIANTS_COMMA!"
     popd
 )
 

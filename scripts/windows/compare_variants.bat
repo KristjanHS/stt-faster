@@ -80,12 +80,12 @@ echo NOTE: You will see real-time progress for each variant as it processes.
 echo.
 
 if /i "!STT_RUNTIME!"=="wsl" (
-    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --language et --output-format both --variants '!VARIANTS!'"
+    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --language et --output-format both --no-diarize --variants '!VARIANTS!'"
 ) else (
     set "HF_HOME=%USERPROFILE%\.cache\hf"
     set "HF_HUB_CACHE=%USERPROFILE%\.cache\hf\hub"
     pushd "!STT_REPO_WIN!"
-    .venv\Scripts\python scripts\transcribe_manager.py process "!STT_AUDIO_DIR_RESOLVED!" --language et --output-format both --variants "!VARIANTS!"
+    .venv\Scripts\python scripts\transcribe_manager.py process "!STT_AUDIO_DIR_RESOLVED!" --language et --output-format both --no-diarize --variants "!VARIANTS!"
     popd
 )
 set "TRANSCRIBE_ERROR=!errorlevel!"
