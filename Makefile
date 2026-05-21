@@ -2,7 +2,7 @@
 # Meta
 .PHONY: help
 # Setup
-.PHONY: setup-hooks setup-uv sync use-cpu use-gpu show-variant export-reqs install-act setup-act new-project-bootstrap new-project-cleanup new-project-post new-project-git-setup
+.PHONY: setup-hooks setup-uv sync use-cpu use-gpu show-variant export-reqs export-reqs-cpu export-reqs-cu130 install-act setup-act new-project-bootstrap new-project-cleanup new-project-post new-project-git-setup
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
@@ -16,7 +16,7 @@
 # Docker
 .PHONY: docker-back docker-unit
 # Security / CI linters
-.PHONY: pip-audit semgrep actionlint bandit ci-bandit detect-secrets ci-detect-secrets
+.PHONY: pip-audit pip-audit-gpu semgrep actionlint bandit ci-bandit detect-secrets ci-detect-secrets
 # CI helpers and Git
 .PHONY: uv-sync-test pre-push
 
@@ -43,7 +43,9 @@ help:
 	@echo "  new-project-bootstrap - Copy this repo to ~/projects/<SLUG> (requires SLUG=...)"
 	@echo "  new-project-cleanup   - In the copied repo: strip app code and rename to <SLUG> (requires SLUG=...)"
 	@echo "  new-project-post      - In the copied repo: install tooling + quick unit tests"
-	@echo "  export-reqs        - Export requirements.txt from uv.lock"
+	@echo "  export-reqs        - Export requirements.txt (CPU) + requirements-gpu.txt (cu130) from uv.lock"
+	@echo "  export-reqs-cpu    - Export only requirements.txt (CPU extra)"
+	@echo "  export-reqs-cu130  - Export only requirements-gpu.txt (cu130 extra)"
 	@echo "  install-act        - Install Act CLI for local CI runs"
 	@echo "  setup-act          - Install and verify Act + Docker setup"
 	@echo ""
@@ -79,7 +81,8 @@ help:
 	@echo "  docker-unit          - Run unit tests inside dev container"
 	@echo ""
 	@echo "  -- Security / CI linters --"
-	@echo "  pip-audit          - Export from uv.lock and audit prod/dev+test deps"
+	@echo "  pip-audit          - Export CPU requirements and audit (default)"
+	@echo "  pip-audit-gpu      - Export GPU (cu130) requirements and audit"
 	@echo "  semgrep      - Run Semgrep locally via uvx (no metrics)"
 	@echo "  actionlint         - Lint GitHub workflows using actionlint in Docker"
 	@echo "  bandit             - Run Bandit security scan locally (direct)"
@@ -197,20 +200,32 @@ integration:
 		exit 1; \
 	fi
 
-# Export a pip-compatible requirements.txt from uv.lock, except torch and editable project.
-# With pip, torch installation must be done separately, eg:
-#    pip install torch==1.8.0 --index-url https://download.pytorch.org/whl/cpu
-#    pip install torch==1.7.1 --index-url https://download.pytorch.org/whl/cu130
-export-reqs:
-	@echo ">> Exporting requirements.txt from uv.lock (incl dev/test groups)"
-	uv export --no-hashes --group test --locked --no-emit-project --no-emit-package torch --format requirements-txt > requirements.txt
+# Export pip-compatible requirements files from uv.lock, split per uv extra.
+# - requirements.txt    : CPU variant (canonical; matches default `uv sync`)
+# - requirements-gpu.txt: cu130 GPU variant (sidecar; audited via pip-audit-gpu)
+# See docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.7.
+export-reqs: export-reqs-cpu export-reqs-cu130
+
+export-reqs-cpu:
+	@echo ">> Exporting requirements.txt (CPU extra) from uv.lock"
+	uv export --no-hashes --group test --locked --no-emit-project \
+		--extra cpu --format requirements-txt > requirements.txt
+
+export-reqs-cu130:
+	@echo ">> Exporting requirements-gpu.txt (cu130 extra) from uv.lock"
+	uv export --no-hashes --group test --locked --no-emit-project \
+		--extra cu130 --format requirements-txt > requirements-gpu.txt
 
 # --- CI helper targets (used by workflows) -----------------------------------
 
 # audits the already existing venv
-pip-audit: export-reqs
-	@echo ">> Auditing dependencies (based on requirements.txt)"
+pip-audit: export-reqs-cpu
+	@echo ">> Auditing CPU dependencies (based on requirements.txt)"
 	uvx --from pip-audit pip-audit -r requirements.txt
+
+pip-audit-gpu: export-reqs-cu130
+	@echo ">> Auditing GPU dependencies (based on requirements-gpu.txt)"
+	uvx --from pip-audit pip-audit -r requirements-gpu.txt
 
 uv-sync-test:
 	uv sync --extra "$$(./scripts/select_variant.sh)" --group test --frozen
