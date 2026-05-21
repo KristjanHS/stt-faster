@@ -153,8 +153,9 @@ echo "[stt-faster] variant=${VARIANT} (set via 'make use-cpu' / 'make use-gpu' t
 uv sync --extra "$VARIANT" "$@"
 ```
 
-**`_runtime.bat`** (Stage-1 portable Windows runtime probe) — same pattern via the
-`.bat` resolver. Lands as part of the Stage-2 "rewire 10 bats" work already queued.
+**`_runtime.bat`** (portable Windows runtime probe — shipped in commits `ec5c929`
++ `ebb9015`) — same pattern via the `.bat` resolver. Adds a new pre-sync step;
+does not undo the existing bat-rewire work.
 
 ### 5.5 Makefile targets
 
