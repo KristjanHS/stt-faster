@@ -61,7 +61,7 @@ UTILITIES:
                                        HTML comparison report.
   report_only.bat                    - Regenerates the variant HTML report
                                        from existing outputs (no transcription).
-  check_status.bat                   - Shows recent transcription run history.
+  check_recent.bat                   - Shows recent transcription run history.
 
 To use a different variant, edit the `set "VARIANTS=..."` line at the top of
 the batch file. Space-separated values run multiple variants in one go,
@@ -128,7 +128,7 @@ TROUBLESHOOTING:
 3. "ERROR: no runtime available":
    - Neither WSL nor Docker is usable. Install Docker Desktop, start it,
      and re-run setup.bat from the repo root to build the image.
-4. Diagnostic status (any runtime):
-   - Run check_status.bat.
+4. Recent run history (any runtime):
+   - Run check_recent.bat.
 
 ========================================
