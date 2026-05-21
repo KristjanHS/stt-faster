@@ -2,7 +2,10 @@
 REM Regenerate the variant HTML report from existing outputs (no transcription).
 
 setlocal enabledelayedexpansion
-set "STT_CALLER_DIR=%~dp0"
+REM Clear any inherited STT_CALLER_DIR so _runtime.bat suppresses the
+REM `audio:` banner line — this bat regenerates a report from existing
+REM outputs and doesn't consume the audio dir.
+set "STT_CALLER_DIR="
 call "%~dp0_runtime.bat"
 if errorlevel 1 (
     pause

@@ -52,7 +52,9 @@ if !PYTHON_ERROR! neq 0 (
 )
 
 set "VARIANTS="
-for /f "delims=" %%i in (!TEMP_VARIANTS_FILE!) do set "VARIANTS=%%i"
+REM Quote the path: %TEMP% is typically C:\Users\<user>\AppData\Local\Temp;
+REM unquoted `for /f` silently fails when the username contains a space.
+for /f "delims=" %%i in ("!TEMP_VARIANTS_FILE!") do set "VARIANTS=%%i"
 del "!TEMP_VARIANTS_FILE!" >nul 2>&1
 
 if "!VARIANTS!"=="" (

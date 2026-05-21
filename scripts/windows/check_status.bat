@@ -2,6 +2,9 @@
 REM Print the transcription queue status (no audio dir needed).
 
 setlocal enabledelayedexpansion
+REM Clear any inherited STT_CALLER_DIR so _runtime.bat suppresses the
+REM `audio:` banner line — this bat is a runtime-only status query.
+set "STT_CALLER_DIR="
 call "%~dp0_runtime.bat"
 if errorlevel 1 (
     pause

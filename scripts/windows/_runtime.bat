@@ -49,8 +49,16 @@ set "STT_RUNTIME=native"
 where wsl >nul 2>nul && wsl -e test -x "%STT_WSL_REPO%/.venv/bin/python" >nul 2>nul && set "STT_RUNTIME=wsl"
 
 REM ---- Banner (mirrors the GPU-fallback banner philosophy) ----
+REM Skip the `audio:` line when the caller never asked us to resolve one
+REM (utility bats like check_status that don't process audio). The %CD%
+REM fallback above still keeps STT_AUDIO_DIR_RESOLVED non-empty for any
+REM downstream code that reads it; the banner just stops being misleading.
 echo [stt-faster] runtime: %STT_RUNTIME%
-echo [stt-faster] audio:   %STT_AUDIO_DIR_RESOLVED%
+if defined STT_AUDIO_DIR (
+    echo [stt-faster] audio:   %STT_AUDIO_DIR_RESOLVED%
+) else if defined STT_CALLER_DIR (
+    echo [stt-faster] audio:   %STT_AUDIO_DIR_RESOLVED%
+)
 if /i "%STT_RUNTIME%"=="wsl" echo [stt-faster] WSL repo: %STT_WSL_REPO%
 
 exit /b 0
