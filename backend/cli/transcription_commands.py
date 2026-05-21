@@ -244,6 +244,8 @@ def _process_single_variant(
         run_config.model_preset = args.preset
         run_config.language = args.language
         run_config.output_format = args.output_format
+        run_config.diarize = args.diarize
+        run_config.num_speakers = args.num_speakers
 
         # Create services using factory
         transcription_service = ServiceFactory.create_transcription_service(
@@ -251,6 +253,8 @@ def _process_single_variant(
             preset=args.preset,
             language=args.language,
             output_format=args.output_format,
+            diarize=args.diarize,
+            num_speakers=args.num_speakers,
         )
         run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
@@ -305,12 +309,16 @@ def _run_single_variant(
         run_config.model_preset = args.preset
         run_config.language = args.language
         run_config.output_format = args.output_format
+        run_config.diarize = args.diarize
+        run_config.num_speakers = args.num_speakers
 
         transcription_service = ServiceFactory.create_transcription_service(
             variant=variant,
             preset=args.preset,
             language=args.language,
             output_format=args.output_format,
+            diarize=args.diarize,
+            num_speakers=args.num_speakers,
         )
         run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
@@ -419,6 +427,8 @@ def _process_multi_variant(
         "preset": args.preset,
         "language": args.language,
         "output_format": args.output_format,
+        "diarize": args.diarize,
+        "num_speakers": args.num_speakers,
         "variants": all_variant_metadata,
         "summary": {
             "total_variants": len(variants),
@@ -491,6 +501,10 @@ def process(
     variant: Annotated[int | None, typer.Option("--variant", "-v", help="Variant number")] = None,
     variants: Annotated[str | None, typer.Option("--variants", help="Comma-separated list of variant numbers")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose output")] = False,
+    diarize: Annotated[
+        bool, typer.Option("--diarize/--no-diarize", help="Run pyannote speaker diarization (default: enabled)")
+    ] = True,
+    num_speakers: Annotated[int, typer.Option("--num-speakers", help="Number of speakers to diarize")] = 2,
 ) -> None:
     """Process audio files in the specified folder."""
 
@@ -503,6 +517,8 @@ def process(
     args.variant = variant
     args.variants = variants
     args.verbose = verbose
+    args.diarize = diarize
+    args.num_speakers = num_speakers
 
     exit_code = cmd_process(args)
     if exit_code != 0:

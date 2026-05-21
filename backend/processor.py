@@ -37,6 +37,8 @@ class TranscriptionProcessor:
         preset: str = "et-large",
         language: str | None = None,
         output_format: str | None = None,
+        diarize: bool | None = None,
+        num_speakers: int | None = None,
         variant: Union["Variant", None] = None,
         disable_file_moving: bool = False,
     ) -> None:
@@ -63,6 +65,10 @@ class TranscriptionProcessor:
             run_config.model_preset = preset
             run_config.language = language
             run_config.output_format = output_format or DEFAULT_OUTPUT_FORMAT
+            if diarize is not None:
+                run_config.diarize = diarize
+            if num_speakers is not None:
+                run_config.num_speakers = num_speakers
 
         self.run_config = run_config
         self.effective_config = run_config.get_effective_config()
@@ -72,6 +78,8 @@ class TranscriptionProcessor:
         self.preset = self.effective_config.model_preset
         self.language = self.effective_config.language
         self.output_format = self.effective_config.output_format
+        self.diarize = self.effective_config.diarize
+        self.num_speakers = self.effective_config.num_speakers
         self._disable_file_moving = disable_file_moving
 
         # For backward compatibility with existing code that expects these attributes
@@ -217,6 +225,8 @@ class TranscriptionProcessor:
             preset=self.preset,
             language=self.language,
             output_format=self.output_format,
+            diarize=self.diarize,
+            num_speakers=self.num_speakers,
         )
 
         return results

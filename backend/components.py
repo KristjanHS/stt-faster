@@ -556,6 +556,14 @@ class FileProcessor:
         return self._processor_ref.output_format
 
     @property
+    def diarize(self) -> bool:
+        return self._processor_ref.diarize
+
+    @property
+    def num_speakers(self) -> int:
+        return self._processor_ref.num_speakers
+
+    @property
     def _disable_file_moving(self) -> bool:
         return self._processor_ref._disable_file_moving  # pyright: ignore[reportPrivateUsage]
 
@@ -664,6 +672,8 @@ def summarize_run(
     preset: str,
     language: str | None,
     output_format: str,
+    diarize: bool = True,
+    num_speakers: int = 2,
 ) -> dict[str, Any]:
     """Build and persist run metadata and file metrics.
 
@@ -676,6 +686,8 @@ def summarize_run(
         preset: Model preset used
         language: Language setting
         output_format: Output format used
+        diarize: Whether diarization is enabled (C3 passthrough; consumed at C4).
+        num_speakers: Diarization speaker count (C3 passthrough; consumed at C4).
 
     Returns:
         Dictionary with run statistics
@@ -716,6 +728,8 @@ def summarize_run(
         preset=preset,
         language=language,
         output_format=output_format,
+        diarize=diarize,
+        num_speakers=num_speakers,
     )
 
     # Return stats for display/logging
@@ -984,15 +998,24 @@ def _persist_run_data(
     preset: str,
     language: str | None,
     output_format: str,
+    diarize: bool = True,
+    num_speakers: int = 2,
 ) -> int | None:
     """Persist the run as a single JSONL record.
 
     Builds the nested record from ``run_record`` + the in-memory list of
     :class:`FileMetricRecord` derived from ``file_stats``.
 
+    ``diarize`` / ``num_speakers`` are C3 passthrough values; they reach
+    here but are not yet folded into the JSONL record shape — that lands
+    at C4 along with the actual ``diarize.annotate()`` call site.
+
     Returns the assigned run id, or ``None`` if the JSONL append fails
     (run already finished — failing to persist shouldn't crash the batch).
     """
+    # C3: held in scope for C4; intentionally unused here.
+    del diarize, num_speakers
+
     file_records = [
         _build_file_metric_record(entry, config_snapshot, preset, language, output_format) for entry in file_stats
     ]

@@ -29,11 +29,16 @@ class VariantTranscriptionService:
         language: str | None,
         output_format: str,
         base_transcription_service: TranscriptionService | None = None,
+        diarize: bool = True,
+        num_speakers: int = 2,
     ):
         self.variant = variant
         self.preset = preset
         self.language = language
         self.output_format = output_format
+        # C3: stored for future use by C4 (transcribe.py integration).
+        self._diarize = diarize
+        self._num_speakers = num_speakers
 
         # Build preprocessing config
         self.preprocess_config = PreprocessConfig()  # Use defaults

@@ -95,6 +95,25 @@ def create_parser() -> argparse.ArgumentParser:
         choices=["txt", "json", "both"],
         help="Output format for transcripts (default: txt)",
     )
+    process_parser.add_argument(
+        "--diarize",
+        dest="diarize",
+        action="store_true",
+        default=True,
+        help="Run pyannote speaker diarization (default: enabled). Requires HF_TOKEN.",
+    )
+    process_parser.add_argument(
+        "--no-diarize",
+        dest="diarize",
+        action="store_false",
+        help="Disable diarization (omit speaker labels from output).",
+    )
+    process_parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=2,
+        help="Number of speakers to diarize (default: 2).",
+    )
     variant_group = process_parser.add_mutually_exclusive_group()
     variant_group.add_argument(
         "--variant",
