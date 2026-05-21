@@ -539,6 +539,27 @@ class TestTranscribeToText:
         line = text_path.read_text(encoding="utf-8")
         assert line.startswith("[01:01:01.50 --> 01:01:02.00]")
 
+    def test_transcribe_to_text_clamps_pathological_timestamps(self, tmp_path: Path) -> None:
+        """NaN / negative / inf segment times don't crash the writer."""
+        payload = {
+            "segments": [
+                {"start": -0.01, "end": 0.5, "text": "neg"},
+                {"start": float("nan"), "end": 1.0, "text": "nan"},
+                {"start": 2.0, "end": float("inf"), "text": "inf"},
+            ],
+        }
+
+        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+            return payload
+
+        text_path = tmp_path / "out.txt"
+        transcribe_to_text("a.wav", str(text_path), preset="et-large", transcribe_fn=fake_transcribe)
+
+        contents = text_path.read_text(encoding="utf-8")
+        assert "[00:00:00.00 --> 00:00:00.50] neg\n" in contents
+        assert "[??:??:??.??" in contents
+        assert " --> ??:??:??.??]" in contents
+
 
 class TestTranscribeDiarize:
     """Tests for the diarize plumbing on transcribe()."""

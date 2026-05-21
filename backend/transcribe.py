@@ -25,6 +25,7 @@ python transcribe.py
 
 import json
 import logging
+import math
 import os
 import re
 import time
@@ -395,7 +396,14 @@ def _parse_suppress_tokens(raw: str | None) -> list[int] | None:
 
 
 def _fmt_time(seconds: float) -> str:
-    """Format seconds as hh:mm:ss.ff (hundredths of a second)."""
+    """Format seconds as hh:mm:ss.ff (hundredths of a second).
+
+    NaN / inf / negatives can sneak in from upstream float arithmetic; clamp
+    rather than crash a batch on a malformed timestamp.
+    """
+    if not math.isfinite(seconds):
+        return "??:??:??.??"
+    seconds = max(0.0, seconds)
     total_centis = int(round(seconds * 100))
     cs = total_centis % 100
     total_seconds = total_centis // 100
@@ -404,6 +412,20 @@ def _fmt_time(seconds: float) -> str:
     m = total_minutes % 60
     h = total_minutes // 60
     return f"{h:02d}:{m:02d}:{s:02d}.{cs:02d}"
+
+
+def format_segments_as_text(segments: list[dict[str, Any]]) -> str:
+    """Render segments as `[hh:mm:ss.ff --> hh:mm:ss.ff] SPEAKER_NN: text` lines.
+
+    Single source of truth for the TXT line format — used by transcribe_to_text
+    and by the variant-aware output writers.
+    """
+    lines: list[str] = []
+    for segment in segments:
+        ts = f"[{_fmt_time(segment['start'])} --> {_fmt_time(segment['end'])}]"
+        speaker = f" {segment['speaker']}:" if "speaker" in segment else ""
+        lines.append(f"{ts}{speaker} {segment['text'].lstrip()}\n")
+    return "".join(lines)
 
 
 def _apply_language_default(language: str | None, preset: str) -> str | None:
@@ -816,10 +838,7 @@ def transcribe_to_text(
     segments = payload.get("segments", [])
 
     with opener(text_path, "w", encoding="utf-8") as text_file:
-        for segment in segments:
-            ts = f"[{_fmt_time(segment['start'])} --> {_fmt_time(segment['end'])}]"
-            speaker = f" {segment['speaker']}:" if "speaker" in segment else ""
-            text_file.write(f"{ts}{speaker} {segment['text'].lstrip()}\n")
+        text_file.write(format_segments_as_text(segments))
 
 
 def transcribe_and_save(

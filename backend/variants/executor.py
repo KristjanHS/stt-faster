@@ -267,11 +267,11 @@ def execute_variant(
             )
 
             # Save text file
+            from backend.transcribe import format_segments_as_text  # noqa: PLC0415
+
             segments = result.get("segments", [])
             with txt_path.open("w", encoding="utf-8") as text_file:
-                for segment in segments:
-                    text_file.write(segment["text"])
-                    text_file.write("\n")
+                text_file.write(format_segments_as_text(segments))
             output_files["txt"] = str(txt_path)
             LOGGER.debug("Saved text output: %s", txt_path.name)
 

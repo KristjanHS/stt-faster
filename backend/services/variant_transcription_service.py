@@ -7,7 +7,7 @@ from typing import Any
 
 from backend.preprocess.config import PreprocessConfig
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult, TranscriptionService
-from backend.transcribe import TranscriptionMetrics
+from backend.transcribe import TranscriptionMetrics, format_segments_as_text
 from backend.variants.executor import (
     create_variant_preprocess_runner,
     create_variant_transcribe_config,
@@ -135,12 +135,7 @@ class VariantTranscriptionService:
             txt_path.parent.mkdir(parents=True, exist_ok=True)
             segments: list[dict[str, Any]] = payload.get("segments", [])
             with open(txt_path, "w", encoding="utf-8") as f:
-                for segment in segments:
-                    if "text" in segment:
-                        text = segment["text"]
-                        if isinstance(text, str):
-                            f.write(text)
-                            f.write("\n")
+                f.write(format_segments_as_text(segments))
             created_files.append(txt_path)
 
         if output_format in ("json", "both"):
