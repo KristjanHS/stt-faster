@@ -48,7 +48,7 @@ dependencies = [
     "pyannote.audio==4.0.4",
     # torch + torchaudio moved to [project.optional-dependencies] (cpu / cu130 extras)
     # to keep base `uv sync` from pulling CUDA wheels transitively via pyannote.
-    # See docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
+    # See docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
 ]
 
 [project.optional-dependencies]
