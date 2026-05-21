@@ -1,10 +1,27 @@
 @echo off
+REM Regenerate the variant HTML report from existing outputs (no transcription).
+
+setlocal enabledelayedexpansion
+set "STT_CALLER_DIR=%~dp0"
+call "%~dp0_runtime.bat"
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+
 echo.
 echo ========================================
 echo Generating variant report...
 echo ========================================
 echo.
-wsl -e bash -c "cd /home/kristjans/projects/stt-faster && make variant-report"
+
+if /i "!STT_RUNTIME!"=="wsl" (
+    wsl -e bash -c "cd !STT_WSL_REPO! && .venv/bin/python scripts/generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61"
+) else (
+    pushd "!STT_REPO_WIN!"
+    .venv\Scripts\python scripts\generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61
+    popd
+)
 set "REPORT_ERROR=!errorlevel!"
 
 if !REPORT_ERROR! neq 0 (
@@ -22,4 +39,3 @@ if !REPORT_ERROR! neq 0 (
 )
 
 pause
-

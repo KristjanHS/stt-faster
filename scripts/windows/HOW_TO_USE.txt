@@ -2,30 +2,56 @@
 AUDIO TRANSCRIPTION - HOW TO USE
 ========================================
 
-QUICK START:
-1. Copy the batch file that matches your audio source into the folder
-   containing the audio files.
-2. Drop your audio files into the same folder
-   (e.g. C:\Users\PC\Downloads\transcribe\).
-3. Double-click the batch file.
-4. Find transcripts in the "processed" folder (single-variant runs) or
-   in the timestamped folder next to the audio (multi-variant runs).
+FIRST-TIME SETUP (any Windows machine):
+1. Install Python 3.12 from https://www.python.org/downloads/
+   (the "py" launcher must be on PATH).
+2. git clone https://github.com/<your-fork>/stt-faster C:\projects\stt-faster
+3. cd C:\projects\stt-faster
+4. setup.bat        (creates .venv, installs deps, optionally prefetches models)
+5. Done. The bats in scripts\windows\ work as-is.
+
+The bats auto-detect WSL: if WSL2 is installed AND the repo is present at
+/home/kristjans/projects/stt-faster inside WSL, they run there (preserving
+the current dev-machine workflow). Otherwise they use the native Windows
+.venv populated by setup.bat. The runtime banner at the top of each run
+prints the choice:
+  [stt-faster] runtime: wsl     (or 'native')
+
+========================================
+
+TWO WAYS TO USE THE BATS:
+
+(a) Copy-into-folder (legacy, no env var needed):
+    Copy the bat for your audio source into the folder containing the audio
+    files (e.g. C:\Users\PC\Downloads\transcribe\), then double-click it.
+    The bat treats its own folder as the audio dir.
+
+(b) Env var + run-in-place:
+    set STT_AUDIO_DIR=C:\Users\PC\Downloads\transcribe
+    Then double-click any bat directly under scripts\windows\. The bats
+    honor STT_AUDIO_DIR over their own folder when both are present.
+
+Transcripts land in:
+    <audio_folder>\processed\          (single-variant runs)
+    <audio_folder>\<timestamp>\        (multi-variant runs)
+Failed files land in:
+    <audio_folder>\failed\
 
 ========================================
 
 BATCH FILES:
-------------
 
 ESTONIAN:
   transcribe_estonian_Desk.bat       - Desk-mic / close-talk, variant 44
   transcribe_estonian_Teams.bat      - Teams / video-call, variant 61
-  transcribe_estonian_Online.bat     - Online / mixed-source, variants 53+52
+  transcribe_estonian_Online.bat     - Online / mixed-source, variant 52
   transcribe_estonian_32bit_cpu.bat  - CPU-only machines (et-32 preset),
                                        variant 7
 
 ENGLISH (uses 'turbo' preset):
   transcribe_english_Desk.bat        - Desk-mic / close-talk, variant 44
   transcribe_english_Teams.bat       - Teams / video-call, variant 61
+  transcribe_english_Online.bat      - Online / mixed-source, variant 52
 
 UTILITIES:
   compare_variants.bat               - Runs every builtin variant against a
@@ -42,13 +68,11 @@ e.g. `set "VARIANTS=1 36 44"`.
 ========================================
 
 SUPPORTED FORMATS:
------------------
   .wav  .mp3  .m4a  .flac  .ogg  .aac
 
 ========================================
 
 OUTPUT:
--------
 Each audio file generates a .json (transcript with per-segment timestamps,
 detected language, language probability) and a .txt (plain text) when run
 with `--output-format both`, which is the default for these batch files.
@@ -62,26 +86,33 @@ Failed inputs land under:         <audio_folder>\failed\
 ========================================
 
 NOTES:
-------
-- Processing is safe to run multiple times. Already-processed files are
-  identified by their location (under processed/ or failed/) and skipped.
-  Run history is appended to ~/.local/share/stt-faster/runs.jsonl inside
-  WSL.
-- To reprocess a file, move it back to the main folder.
-- First run downloads the model (~1.5-3 GB) to ~/.cache/hf inside WSL.
-  Later runs are fast.
+- Native Windows runs CPU-only by default. CUDA + cuDNN are not installed
+  by setup.bat; if missing on the box, the model loader prints a
+  highly-visible GPU-fallback banner and proceeds on CPU.
+- Run history (`runs.jsonl`) is per-runtime: WSL writes to
+  ~/.local/share/stt-faster/runs.jsonl inside WSL, native writes to
+  %USERPROFILE%\.local\share\stt-faster\runs.jsonl. Both runtimes on the
+  same box keep separate histories.
+- The hardcoded WSL repo path that controls auto-detect lives in
+  scripts\windows\_runtime.bat (STT_WSL_REPO=...). Edit it if you move the
+  WSL repo.
+- First run downloads the model (~1.5-3 GB). Models cache at
+  ~/.cache/hf inside WSL or %USERPROFILE%\.cache\hf on native Windows.
 
 ========================================
 
 TROUBLESHOOTING:
----------------
-If a batch file doesn't work:
-1. Make sure WSL2 is running.
-2. Confirm the venv exists at ~/projects/stt-faster/.venv (run the project
-   bootstrap if not).
-3. Run check_status.bat to see the database state.
-4. For more detail:
-     wsl -e bash -c "cd ~/projects/stt-faster && .venv/bin/python \
-       scripts/transcribe_manager.py status --verbose"
+1. Banner says `runtime: native` but you expected `wsl`:
+   - Check `where wsl` returns a path and that
+     `wsl -e test -x /home/kristjans/projects/stt-faster/.venv/bin/python`
+     exits 0. Both probes must pass for the WSL branch to fire.
+2. Banner says `runtime: wsl` but you wanted native (e.g. testing the
+   Windows venv):
+   - Temporarily rename the WSL .venv, or override STT_WSL_REPO in
+     scripts\windows\_runtime.bat to a path that doesn't exist.
+3. Native run fails with "cannot find python":
+   - Re-run setup.bat from the repo root.
+4. Diagnostic status (any runtime):
+   - Run check_status.bat.
 
 ========================================
