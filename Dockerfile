@@ -22,18 +22,23 @@ ENV VENV_PATH=/opt/venv \
     UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_LINK_MODE=copy
 
+# CPU/GPU torch variant selection. Override with `--build-arg STT_VARIANT=cu130`
+# to build a CUDA-enabled image. See
+# docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.6.
+ARG STT_VARIANT=cpu
+
 WORKDIR /app
 
 # Install ONLY production dependencies (no test group)
 COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --locked --no-install-project --no-dev
+    uv sync --locked --no-install-project --no-dev --extra "${STT_VARIANT}"
 
 # Install the project itself
 COPY backend/ /app/backend/
 COPY scripts/ /app/scripts/
 RUN --mount=type=cache,target=/root/.cache/uv,sharing=locked \
-    uv sync --locked --no-dev
+    uv sync --locked --no-dev --extra "${STT_VARIANT}"
 
 ############################################
 # Runtime stage: Minimal production image #
