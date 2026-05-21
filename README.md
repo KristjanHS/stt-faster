@@ -36,8 +36,8 @@ Batch audio transcription with Estonian (default) and English models, with speak
 # Process folder (Estonian default)
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio
 
-# Check status
-.venv/bin/python scripts/transcribe_manager.py status --verbose
+# Show recent runs
+.venv/bin/stt-faster db recent
 
 # Use different model
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --preset large8gb

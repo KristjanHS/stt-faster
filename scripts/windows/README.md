@@ -26,7 +26,7 @@ After setup, every bat in `scripts\windows\` works without further configuration
 | `transcribe_english_Online.bat` | English | 52 | Online / mixed-source English (`turbo` preset) |
 | `compare_variants.bat` | Estonian | all builtin variants | Comparison run across every variant in the registry; also generates the HTML report |
 | `report_only.bat` | – | – | Regenerates the variant HTML report from existing outputs |
-| `check_status.bat` | – | – | Prints the transcription queue status |
+| `check_status.bat` | – | – | Shows recent transcription run history (`stt-faster db recent`) |
 | `_runtime.bat` | – | – | Shared helper: runtime probe, audio-dir resolution, WSL path translation. Not invoked directly. |
 
 To change which variant a file uses, edit the `set "VARIANTS=..."` line at the top — space-separated for multiple (e.g. `set "VARIANTS=1 36 44"`).
