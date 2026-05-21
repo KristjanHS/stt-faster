@@ -15,6 +15,7 @@ Usage::
 from __future__ import annotations
 
 import logging
+import os
 import sys
 
 from backend.transcribe import _get_cached_model_path, _get_estonian_model_path
@@ -23,6 +24,7 @@ LOGGER = logging.getLogger("stt-faster.prefetch")
 
 ESTONIAN_MODEL = "TalTechNLP/whisper-large-v3-turbo-et-verbatim"
 ENGLISH_MODEL = "Systran/faster-distil-whisper-large-v3"
+PYANNOTE_MODEL = "pyannote/speaker-diarization-3.1"
 
 
 def prefetch_all() -> None:
@@ -33,6 +35,46 @@ def prefetch_all() -> None:
     LOGGER.info("Prefetching English model (full snapshot): %s", ENGLISH_MODEL)
     en_path = _get_cached_model_path(ENGLISH_MODEL)
     LOGGER.info("  -> %s", en_path)
+
+    LOGGER.info("Prefetching pyannote diarization model: %s", PYANNOTE_MODEL)
+    pyannote_path = prefetch_pyannote(PYANNOTE_MODEL)
+    LOGGER.info("  -> %s", pyannote_path)
+
+
+def prefetch_pyannote(repo_id: str) -> str:
+    # Errors are raised as RuntimeError here; the backend/diarize/ subsystem
+    # (added in the next commit) will re-raise these via DiarizationConfigError.
+    # Revision pin is required by Bandit B615 and must be a literal SHA in the
+    # snapshot_download() call (Bandit only accepts literal 40-char hex strings,
+    # not module constants or function parameters). Resolved from HF API 2026-05-21.
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import HfHubHTTPError
+
+    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+    if not token:
+        raise RuntimeError(
+            f"HF_TOKEN is not set. The {repo_id} model is HuggingFace-gated; "
+            "see docs/diarization_setup.md for one-time token + model-license setup."
+        )
+    try:
+        return snapshot_download(
+            repo_id=repo_id,
+            token=token,
+            revision="84fd25912480287da0247647c3d2b4853cb3ee5d",  # pragma: allowlist secret
+        )
+    except HfHubHTTPError as exc:
+        status = getattr(exc.response, "status_code", None) if exc.response is not None else None
+        if status == 401:
+            raise RuntimeError(
+                f"HF_TOKEN was rejected (401) fetching {repo_id}. "
+                "Verify the token at https://huggingface.co/settings/tokens; see docs/diarization_setup.md."
+            ) from exc
+        if status == 403:
+            raise RuntimeError(
+                f"HuggingFace returned 403 for {repo_id}. Accept the model license at "
+                f"https://huggingface.co/{repo_id}; see docs/diarization_setup.md."
+            ) from exc
+        raise
 
 
 def main() -> int:

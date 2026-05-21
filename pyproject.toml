@@ -34,6 +34,10 @@ dependencies = [
     # Core app
     "python-dotenv>=1.1.1,<2.0.0",
     "rich>=14.1.0,<15.0.0",
+    # Diarization (pyannote.audio + torch dependencies)
+    # pyannote.audio 3.3.x is compatible with the pyannote/speaker-diarization-3.1 model.
+    # Requires HF_TOKEN at runtime; see docs/diarization_setup.md.
+    "pyannote.audio>=3.3.0,<4.0.0",
 ]
 
 [dependency-groups]
