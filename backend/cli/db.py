@@ -1,177 +1,130 @@
-"""Database inspection commands for stt-faster CLI."""
+"""Run-log inspection commands for stt-faster CLI.
+
+Reads from the append-only JSONL log written by :class:`backend.run_log.JsonlRunLog`
+(Stage G.c). The flat top-level record shape lets ``show`` / ``recent`` work
+directly off ``dict`` payloads without a SQL row adapter.
+"""
 
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 import typer
 from rich.console import Console
 
-from backend.database import TranscriptionDatabase
+from backend.run_log import JsonlRunLog
 
 LOGGER = logging.getLogger(__name__)
 
-app = typer.Typer(name="db", help="Database inspection commands")
+app = typer.Typer(name="db", help="Run-log inspection commands")
 console = Console()
 
-RunRow = Mapping[str, Any]
+_TZ_OFFSETS = {
+    "EET": 2,
+    "EEST": 3,
+    "UTC": 0,
+    "EST": -5,
+    "EDT": -4,
+}
 
 
-def get_timezone_offset(timezone_name: str) -> timedelta:
-    """Get timezone offset in hours.
-
-    Args:
-        timezone_name: Timezone name like 'EET', 'EST', etc.
-
-    Returns:
-        timedelta offset
-    """
-    offsets = {
-        "EET": 2,  # Eastern European Time (UTC+2)
-        "EEST": 3,  # Eastern European Summer Time (UTC+3)
-        "UTC": 0,
-        "EST": -5,  # Eastern Standard Time
-        "EDT": -4,  # Eastern Daylight Time
-    }
-    hours = offsets.get(timezone_name.upper(), 0)
-    return timedelta(hours=hours)
+def _tz_offset(name: str) -> timedelta:
+    return timedelta(hours=_TZ_OFFSETS.get(name.upper(), 0))
 
 
-def format_timestamp(dt: datetime, tz_offset: timedelta) -> tuple[str, str]:
-    """Format timestamp in both UTC and local timezone.
-
-    Args:
-        dt: datetime object (assumed UTC if no tzinfo)
-        tz_offset: timezone offset
-
-    Returns:
-        Tuple of (utc_str, local_str)
-    """
+def _format_recorded_at(value: Any, tz_offset: timedelta) -> tuple[str, str] | None:
+    """Render ``recorded_at`` (ISO-8601 ``Z`` suffix) as (utc_str, local_str)."""
+    if not isinstance(value, str):
+        return None
+    try:
+        dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=UTC)
-
-    utc_str = dt.strftime("%Y-%m-%d %H:%M:%S")
-    local_dt = dt + tz_offset
-    local_str = local_dt.strftime("%Y-%m-%d %H:%M:%S")
-
+    utc_str = dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S")
+    local_str = (dt.astimezone(UTC) + tz_offset).strftime("%Y-%m-%d %H:%M:%S")
     return utc_str, local_str
 
 
-def _resolve_run_timestamps(run: RunRow, tz_offset: timedelta) -> tuple[str, str] | None:
-    """Return ``(utc_str, local_str)`` for a run row, or ``None`` if the row carries no datetime."""
-    recorded_at = run.get("recorded_at")
-    if not isinstance(recorded_at, datetime):
-        return None
-    return format_timestamp(recorded_at, tz_offset)
-
-
-def _fetch_run_for_show(run_id: int | None) -> RunRow:
-    """Load the run targeted by ``db show``. Raises ``typer.Exit`` on miss / empty history."""
-    with TranscriptionDatabase() as db:
-        if run_id is not None:
-            run = db.get_run_by_id(run_id)
-            if not run:
-                console.print(f"[red]Run ID {run_id} not found in database[/red]")
-                raise typer.Exit(1)
-            return run
-        runs = db.get_run_history(limit=1)
-        if not runs:
-            console.print("[yellow]No runs found in database[/yellow]")
-            raise typer.Exit(0)
-        return runs[0]
-
-
-def _print_timing_block(run: RunRow) -> None:
-    """Print the optional ``--- Timing ---`` rows for a run."""
-    console.print("\n[bold]--- Timing ---[/bold]")
-    total_time = run.get("total_processing_time")
-    if total_time:
-        console.print(f"Total processing time: {total_time:.2f} seconds ({total_time / 60:.2f} minutes)")
-    preprocess_time = run.get("total_preprocess_time")
-    if preprocess_time:
-        console.print(f"Preprocessing time: {preprocess_time:.2f} seconds")
-    transcribe_time = run.get("total_transcribe_time")
-    if transcribe_time:
-        console.print(f"Transcription time: {transcribe_time:.2f} seconds ({transcribe_time / 60:.2f} minutes)")
-    audio_duration = run.get("total_audio_duration")
-    if audio_duration:
-        console.print(f"Total audio duration: {audio_duration:.2f} seconds ({audio_duration / 60:.2f} minutes)")
-    speed_ratio = run.get("speed_ratio")
-    if speed_ratio:
-        console.print(f"Speed ratio: {speed_ratio:.2f}x realtime")
-
-
-def _print_run_details(run: RunRow, run_id: int | None, timezone: str, tz_offset: timedelta) -> None:
+def _print_run(record: dict[str, Any], timezone: str, tz_offset: timedelta) -> None:
     """Print the full single-run detail view used by ``db show``."""
-    timestamps = _resolve_run_timestamps(run, tz_offset)
-    if timestamps is None:
-        console.print(f"[red]Unexpected timestamp type: {type(run.get('recorded_at'))}[/red]")
-        raise typer.Exit(1)
-    utc_str, local_str = timestamps
+    formatted = _format_recorded_at(record.get("recorded_at"), tz_offset)
+    utc_str, local_str = formatted if formatted else ("N/A", "N/A")
+
+    preprocess = cast("dict[str, Any]", record.get("preprocess") or {})
+    model = cast("dict[str, Any]", record.get("model") or {})
+    totals = cast("dict[str, Any]", record.get("totals") or {})
 
     console.print("=" * 80)
-    if run_id is not None:
-        console.print(f"[bold]RUN INFORMATION (ID: {run_id})[/bold]")
-    else:
-        console.print("[bold]LATEST RUN INFORMATION[/bold]")
+    console.print(f"[bold]RUN ID: {record.get('id', 'N/A')}[/bold]")
     console.print("=" * 80)
-    console.print(f"\nRun ID: {run['id']}")
     console.print(f"Recorded at (UTC): {utc_str}")
     console.print(f"Recorded at ({timezone}): {local_str}")
-    console.print(f"\nInput folder: {run.get('input_folder', 'N/A')}")
-    console.print(f"Preset: {run.get('preset', 'N/A')}")
-    console.print(f"Language: {run.get('language', 'N/A')}")
+    console.print(f"\nInput folder: {record.get('input_folder', 'N/A')}")
+    console.print(f"Preset: {record.get('preset', 'N/A')}")
+    console.print(f"Language: {record.get('language', 'N/A')}")
 
     console.print("\n[bold]--- Configuration ---[/bold]")
-    console.print(f"Preprocess enabled: {run.get('preprocess_enabled', False)}")
-    if run.get("preprocess_profile"):
-        console.print(f"Preprocess profile: {run.get('preprocess_profile')}")
-    console.print(f"Model: {run.get('model_id', 'N/A')}")
-    console.print(f"Device: {run.get('device', 'N/A')}")
-    console.print(f"Compute type: {run.get('compute_type', 'N/A')}")
+    console.print(f"Preprocess enabled: {preprocess.get('enabled', False)}")
+    if preprocess.get("profile"):
+        console.print(f"Preprocess profile: {preprocess['profile']}")
+    console.print(f"Model: {model.get('id', 'N/A')}")
+    console.print(f"Device: {model.get('device', 'N/A')}")
+    console.print(f"Compute type: {model.get('compute_type', 'N/A')}")
 
     console.print("\n[bold]--- Results ---[/bold]")
-    console.print(f"Files found: {run.get('files_found', 0)}")
-    console.print(f"Succeeded: {run.get('succeeded', 0)}")
-    console.print(f"Failed: {run.get('failed', 0)}")
+    console.print(f"Files found: {totals.get('files_found', 0)}")
+    console.print(f"Succeeded: {totals.get('succeeded', 0)}")
+    console.print(f"Failed: {totals.get('failed', 0)}")
 
-    _print_timing_block(run)
+    console.print("\n[bold]--- Timing ---[/bold]")
+    for label, key in (
+        ("Total processing time", "processing_time_s"),
+        ("Preprocessing time", "preprocess_time_s"),
+        ("Transcription time", "transcribe_time_s"),
+        ("Total audio duration", "audio_duration_s"),
+    ):
+        value = totals.get(key)
+        if isinstance(value, (int, float)):
+            console.print(f"{label}: {value:.2f} seconds ({value / 60:.2f} minutes)")
+    speed_ratio = totals.get("speed_ratio")
+    if isinstance(speed_ratio, (int, float)):
+        console.print(f"Speed ratio: {speed_ratio:.2f}x realtime")
     console.print("=" * 80)
 
 
-def _print_runs_compact(runs: Sequence[RunRow], tz_offset: timedelta) -> None:
-    """Render the ``db recent --compact`` listing."""
-    console.print(f"\n[bold]Recent {len(runs)} runs (compact):[/bold]\n")
-    for run in runs:
-        timestamps = _resolve_run_timestamps(run, tz_offset)
-        if timestamps is None:
+def _print_runs_compact(records: list[dict[str, Any]], tz_offset: timedelta) -> None:
+    console.print(f"\n[bold]Recent {len(records)} runs (compact):[/bold]\n")
+    for record in records:
+        formatted = _format_recorded_at(record.get("recorded_at"), tz_offset)
+        if formatted is None:
             continue
-        _, local_str = timestamps
+        _, local_str = formatted
+        totals = cast("dict[str, Any]", record.get("totals") or {})
         console.print(
-            f"  {run['id']:4d} | {local_str} | "
-            f"Succeeded: {run.get('succeeded', 0):3d} | Failed: {run.get('failed', 0):3d}"
+            f"  {record.get('id', 0):4d} | {local_str} | "
+            f"Succeeded: {totals.get('succeeded', 0):3d} | Failed: {totals.get('failed', 0):3d}"
         )
 
 
-def _print_runs_full(runs: Sequence[RunRow], tz_offset: timedelta, timezone: str) -> None:
-    """Render the default per-run summary listing for ``db recent``."""
-    console.print(f"\n[bold]Recent {len(runs)} runs:[/bold]\n")
-    for run in runs:
-        timestamps = _resolve_run_timestamps(run, tz_offset)
-        if timestamps is None:
+def _print_runs_full(records: list[dict[str, Any]], tz_offset: timedelta, timezone: str) -> None:
+    console.print(f"\n[bold]Recent {len(records)} runs:[/bold]\n")
+    for record in records:
+        formatted = _format_recorded_at(record.get("recorded_at"), tz_offset)
+        if formatted is None:
             continue
-        utc_str, local_str = timestamps
-
+        utc_str, local_str = formatted
+        totals = cast("dict[str, Any]", record.get("totals") or {})
         console.print("=" * 80)
-        console.print(f"[bold]Run ID: {run['id']}[/bold]")
+        console.print(f"[bold]Run ID: {record.get('id', 'N/A')}[/bold]")
         console.print(f"Recorded at (UTC): {utc_str}")
         console.print(f"Recorded at ({timezone}): {local_str}")
-        console.print(f"Input folder: {run.get('input_folder', 'N/A')}")
-        console.print(f"Preset: {run.get('preset', 'N/A')}")
-        console.print(f"Succeeded: {run.get('succeeded', 0)} | Failed: {run.get('failed', 0)}")
+        console.print(f"Input folder: {record.get('input_folder', 'N/A')}")
+        console.print(f"Preset: {record.get('preset', 'N/A')}")
+        console.print(f"Succeeded: {totals.get('succeeded', 0)} | Failed: {totals.get('failed', 0)}")
         console.print("")
 
 
@@ -181,11 +134,21 @@ def show(
     timezone: Annotated[str, typer.Option("--timezone", "-t", help="Timezone name for display")] = "EET",
 ) -> None:
     """Show run information by ID or latest if no ID provided."""
-    tz_offset = get_timezone_offset(timezone)
-
+    tz_offset = _tz_offset(timezone)
     try:
-        run = _fetch_run_for_show(run_id)
-        _print_run_details(run, run_id, timezone, tz_offset)
+        run_log = JsonlRunLog()
+        if run_id is not None:
+            record = run_log.get(run_id)
+            if record is None:
+                console.print(f"[red]Run ID {run_id} not found in run log[/red]")
+                raise typer.Exit(1)
+        else:
+            records = run_log.tail(1)
+            if not records:
+                console.print("[yellow]No runs found in run log[/yellow]")
+                raise typer.Exit(0)
+            record = records[0]
+        _print_run(record, timezone, tz_offset)
     except typer.Exit:
         raise
     except Exception as e:
@@ -200,41 +163,21 @@ def recent(
     timezone: Annotated[str, typer.Option("--timezone", "-t", help="Timezone name for display")] = "EET",
     compact: Annotated[bool, typer.Option("--compact", "-c", help="Compact output format")] = False,
 ) -> None:
-    """Show recent runs from the database."""
-    tz_offset = get_timezone_offset(timezone)
-
+    """Show recent runs from the run log (most-recent last)."""
+    tz_offset = _tz_offset(timezone)
     try:
-        with TranscriptionDatabase() as db:
-            runs = db.get_run_history(limit=limit)
-
-        if not runs:
-            console.print("[yellow]No runs found in database[/yellow]")
+        run_log = JsonlRunLog()
+        records = run_log.tail(limit)
+        if not records:
+            console.print("[yellow]No runs found in run log[/yellow]")
             raise typer.Exit(0)
-
         if compact:
-            _print_runs_compact(runs, tz_offset)
+            _print_runs_compact(records, tz_offset)
         else:
-            _print_runs_full(runs, tz_offset, timezone)
-
+            _print_runs_full(records, tz_offset, timezone)
     except typer.Exit:
         raise
     except Exception as e:
         console.print(f"[red]Error:[/red] {e}")
         LOGGER.exception("db recent failed")
         raise typer.Exit(1) from e
-
-
-@app.command()
-def check_params() -> None:
-    """Check parameter completeness in the database."""
-    # TODO: Implement check_parameter_completeness functionality
-    console.print("[yellow]check-params command not yet implemented[/yellow]")
-    raise typer.Exit(0)
-
-
-@app.command()
-def check_orphaned() -> None:
-    """Check for orphaned metrics in the database."""
-    # TODO: Implement check_orphaned_metrics functionality
-    console.print("[yellow]check-orphaned command not yet implemented[/yellow]")
-    raise typer.Exit(0)

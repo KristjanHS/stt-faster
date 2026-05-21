@@ -23,6 +23,38 @@ def _default_model_factory(model_path: str, device: DeviceType, compute_type: Co
 
 _ALLOWED_COMPUTE_TYPES = {"int8", "float16", "int8_float16", "float32"}
 
+_FALLBACK_BANNER_WIDTH = 78
+
+
+def _log_gpu_fallback_banner(
+    model_path: str,
+    device: DeviceType,
+    compute_type: ComputeType,
+    error: BaseException,
+) -> None:
+    """Emit a multi-line, highly visible banner when GPU load fails and we fall back to CPU.
+
+    The banner is intentionally noisy: a single one-line warning is too easy to miss in
+    INFO-level transcription logs, and users frequently don't realize an hour-long run
+    was on CPU until they wonder why it was slow.
+    """
+    bar = "!" * _FALLBACK_BANNER_WIDTH
+    lines = [
+        "",
+        bar,
+        "!!  GPU UNAVAILABLE — FALLING BACK TO CPU",
+        "!!",
+        f"!!  GPU initialization failed for {model_path}",
+        f"!!  Requested: device={device} compute={compute_type}",
+        f"!!  Error: {error}",
+        "!!",
+        "!!  Continuing on CPU (compute=int8). Transcription will be SIGNIFICANTLY SLOWER.",
+        "!!  Set STT_DEVICE=cpu to silence this banner, or fix the GPU/cuDNN setup to re-enable GPU.",
+        bar,
+        "",
+    ]
+    LOGGER.warning("\n".join(lines))
+
 
 class DeviceSelector:
     """Selects the appropriate device (CPU/GPU) for model loading.
@@ -118,16 +150,7 @@ class ModelLoader:
             LOGGER.info("Loading model on GPU (compute=%s): %s", compute_type, model_path)
             return self._load_on_device(model_path, device, compute_type)
         except Exception as error:
-            LOGGER.warning(
-                (
-                    "⚠️  GPU initialization failed for %s (requested %s/%s): %s. "
-                    "Falling back to CPU int8; expect slower transcription."
-                ),
-                model_path,
-                device,
-                compute_type,
-                error,
-            )
+            _log_gpu_fallback_banner(model_path, device, compute_type, error)
             try:
                 return self._load_on_device(model_path, "cpu", "int8")
             except Exception as cpu_error:

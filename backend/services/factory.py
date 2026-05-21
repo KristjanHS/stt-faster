@@ -3,14 +3,12 @@
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from backend.database import TranscriptionDatabase
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
-from backend.services.duckdb_state_store import DuckDBStateStore
+from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
     FileMover,
     OutputWriter,
-    StateStore,
     TranscriptionService,
 )
 from backend.services.json_output_writer import JsonOutputWriter
@@ -34,6 +32,8 @@ class ServiceFactory:
         preset: str = "et-large",
         language: str | None = None,
         output_format: str = "txt",
+        diarize: bool = True,
+        num_speakers: int = 2,
     ) -> TranscriptionService:
         """Create transcription service with default implementations."""
         if variant is not None:
@@ -43,6 +43,8 @@ class ServiceFactory:
                 preset=preset,
                 language=language,
                 output_format=output_format,
+                diarize=diarize,
+                num_speakers=num_speakers,
             )
 
         # Create standard service with defaults
@@ -57,13 +59,18 @@ class ServiceFactory:
             preprocess_config=preprocess_config,
             preprocess_runner=preprocess_runner,
             transcription_config=transcription_config,
+            diarize=diarize,
+            num_speakers=num_speakers,
         )
 
     @staticmethod
-    def create_state_store(db_path: str | Path | None = None) -> StateStore:
-        """Create state store with default database."""
-        db = TranscriptionDatabase(db_path)
-        return DuckDBStateStore(db)
+    def create_run_log(path: str | Path | None = None) -> JsonlRunLog:
+        """Create the append-only JSONL run log.
+
+        When ``path`` is ``None``, falls back to
+        :func:`backend.config.get_default_run_log_path` (XDG-compliant).
+        """
+        return JsonlRunLog(path)
 
     @staticmethod
     def create_file_mover() -> FileMover:

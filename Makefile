@@ -9,7 +9,7 @@
 .PHONY: unit integration e2e verify-variants
 # Audio
 .PHONY: preprocess-audio
-# Database
+# Run log
 .PHONY: show-run show-runs
 # Reports
 .PHONY: variant-report
@@ -59,7 +59,7 @@ help:
 	@echo "  -- Audio --"
 	@echo "  preprocess-audio  - Run preprocessing on tests/test.mp3 (AUDIO=..., OUT=... to override)"
 	@echo ""
-	@echo "  -- Database --"
+	@echo "  -- Run log --"
 	@echo "  show-run          - Show run information (RUN_ID=... to specify, or shows latest)"
 	@echo "  show-runs         - Show last 20 runs in compact format"
 	@echo ""
@@ -236,9 +236,9 @@ show-run:
 	  exit 1; \
 	fi
 	@if [ -n "$(RUN_ID)" ]; then \
-	  .venv/bin/python scripts/db/show_run.py "$(RUN_ID)"; \
+	  .venv/bin/python -m backend.cli.main db show "$(RUN_ID)"; \
 	else \
-	  .venv/bin/python scripts/db/show_run.py; \
+	  .venv/bin/python -m backend.cli.main db show; \
 	fi
 
 # Show last 20 runs in compact format
@@ -247,7 +247,7 @@ show-runs:
 	  echo "Missing .venv/bin/python. Run ./run_uv.sh first."; \
 	  exit 1; \
 	fi
-	.venv/bin/python scripts/db/show_recent_runs.py --limit 20 --compact
+	.venv/bin/python -m backend.cli.main db recent --limit 20
 
 # Generate variant comparison report
 # Optional parameters:

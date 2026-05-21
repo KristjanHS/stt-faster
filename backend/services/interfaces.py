@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, runtime_checkable
 
-from backend.database import FileMetricRecord, RunRecord
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.orchestrator import PreprocessResult
 from backend.transcribe import TranscriptionMetrics
@@ -43,23 +42,6 @@ class PreprocessService(Protocol):
 
     def preprocess(self, audio_path: str, config: PreprocessConfig) -> PreprocessResult:
         """Preprocess audio file."""
-        ...
-
-
-@runtime_checkable
-class StateStore(Protocol):
-    """Service for managing transcription state."""
-
-    def update_status(self, file_path: str, status: str, error_message: str | None = None) -> None:
-        """Update file processing status."""
-        ...
-
-    def record_run(self, run_record: RunRecord) -> int:
-        """Record a processing run and return run_id."""
-        ...
-
-    def record_file_metric(self, file_record: FileMetricRecord) -> None:
-        """Record file-level metrics."""
         ...
 
 

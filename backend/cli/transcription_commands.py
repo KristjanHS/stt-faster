@@ -5,10 +5,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import os
 import shutil
 import subprocess  # nosec B404
-import sys
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
@@ -34,27 +32,6 @@ LOGGER = logging.getLogger(__name__)
 
 # Create Typer app for unified CLI
 app = typer.Typer(name="transcribe", help="Transcription processing commands")
-
-
-_TEST_RUN_SENTINELS: tuple[str, ...] = ("pytest", "unittest", "junit")
-
-
-def _is_test_run() -> bool:
-    """Return True when this process is running under a test runner.
-
-    PYTEST_CURRENT_TEST is set by pytest for each test item; the argv
-    sentinel check covers unittest/junit + bare `pytest` invocations that
-    have not yet entered a test item. The sentinel is matched against
-    each argv token's basename so it does not false-positive on path
-    arguments like `--db-path /tmp/pytest_results/db.duckdb`.
-    """
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        return True
-    for arg in sys.argv:
-        basename = os.path.basename(arg).lower()
-        if any(s in basename for s in _TEST_RUN_SENTINELS):
-            return True
-    return False
 
 
 def _get_git_commit_hash() -> str | None:
@@ -172,7 +149,6 @@ def _configure_logging(verbose: bool) -> None:
         level = logging.INFO
         # Reduce noise from internal modules in non-verbose mode
         logging.getLogger("backend.processor").setLevel(logging.WARNING)
-        logging.getLogger("backend.database").setLevel(logging.WARNING)
         logging.getLogger("backend.model_loader").setLevel(logging.WARNING)
         logging.getLogger("faster_whisper").setLevel(logging.WARNING)
         # Keep important progress loggers at INFO
@@ -268,6 +244,8 @@ def _process_single_variant(
         run_config.model_preset = args.preset
         run_config.language = args.language
         run_config.output_format = args.output_format
+        run_config.diarize = args.diarize
+        run_config.num_speakers = args.num_speakers
 
         # Create services using factory
         transcription_service = ServiceFactory.create_transcription_service(
@@ -275,14 +253,16 @@ def _process_single_variant(
             preset=args.preset,
             language=args.language,
             output_format=args.output_format,
+            diarize=args.diarize,
+            num_speakers=args.num_speakers,
         )
-        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
         output_writer = ServiceFactory.create_output_writer()
 
         processor = TranscriptionProcessor(
             transcription_service=transcription_service,
-            state_store=state_store,
+            run_log=run_log,
             file_mover=file_mover,
             output_writer=output_writer,
             run_config=run_config,
@@ -329,20 +309,24 @@ def _run_single_variant(
         run_config.model_preset = args.preset
         run_config.language = args.language
         run_config.output_format = args.output_format
+        run_config.diarize = args.diarize
+        run_config.num_speakers = args.num_speakers
 
         transcription_service = ServiceFactory.create_transcription_service(
             variant=variant,
             preset=args.preset,
             language=args.language,
             output_format=args.output_format,
+            diarize=args.diarize,
+            num_speakers=args.num_speakers,
         )
-        state_store = ServiceFactory.create_state_store(db_path=args.db_path)
+        run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
         output_writer = ServiceFactory.create_output_writer()
 
         processor = TranscriptionProcessor(
             transcription_service=transcription_service,
-            state_store=state_store,
+            run_log=run_log,
             file_mover=file_mover,
             output_writer=output_writer,
             run_config=run_config,
@@ -443,6 +427,8 @@ def _process_multi_variant(
         "preset": args.preset,
         "language": args.language,
         "output_format": args.output_format,
+        "diarize": args.diarize,
+        "num_speakers": args.num_speakers,
         "variants": all_variant_metadata,
         "summary": {
             "total_variants": len(variants),
@@ -485,20 +471,6 @@ def cmd_process(args: argparse.Namespace) -> int:
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    # When db_path is None, downstream ServiceFactory.create_state_store falls
-    # back to get_default_db_path() (~/.local/share/stt-faster/transcribe_state.duckdb).
-    # The test-run check below only adjusts log verbosity — it does NOT
-    # redirect to a separate test database; tests pass an explicit db_path.
-    is_test = _is_test_run()
-    if args.db_path is None and not is_test:
-        # Ensure db_path remains None to use production database
-        LOGGER.info(
-            "Using production database for non-test run (input folder: %s)",
-            input_folder,
-        )
-    elif is_test:
-        LOGGER.debug("Test run detected - using test database if db_path not specified")
-
     # Parse and validate variants
     variant_numbers, error = _parse_variant_numbers(args)
     if error:
@@ -528,8 +500,11 @@ def process(
     ] = "both",
     variant: Annotated[int | None, typer.Option("--variant", "-v", help="Variant number")] = None,
     variants: Annotated[str | None, typer.Option("--variants", help="Comma-separated list of variant numbers")] = None,
-    db_path: Annotated[str | None, typer.Option("--db-path", help="Path to database file")] = None,
     verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose output")] = False,
+    diarize: Annotated[
+        bool, typer.Option("--diarize/--no-diarize", help="Run pyannote speaker diarization (default: enabled)")
+    ] = True,
+    num_speakers: Annotated[int, typer.Option("--num-speakers", help="Number of speakers to diarize")] = 2,
 ) -> None:
     """Process audio files in the specified folder."""
 
@@ -541,8 +516,9 @@ def process(
     args.output_format = output_format
     args.variant = variant
     args.variants = variants
-    args.db_path = db_path
     args.verbose = verbose
+    args.diarize = diarize
+    args.num_speakers = num_speakers
 
     exit_code = cmd_process(args)
     if exit_code != 0:

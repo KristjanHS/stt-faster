@@ -5,12 +5,12 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Union
 
-from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, RunSummarizer
+from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, summarize_run
 from backend.run_config import RunConfig
+from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
     FileMover,
     OutputWriter,
-    StateStore,
     TranscriptionService,
 )
 from backend.transcribe import DEFAULT_OUTPUT_FORMAT
@@ -28,7 +28,7 @@ class TranscriptionProcessor:
     def __init__(
         self,
         transcription_service: TranscriptionService,
-        state_store: StateStore,
+        run_log: JsonlRunLog,
         file_mover: FileMover,
         output_writer: OutputWriter,
         run_config: RunConfig | None = None,
@@ -37,6 +37,8 @@ class TranscriptionProcessor:
         preset: str = "et-large",
         language: str | None = None,
         output_format: str | None = None,
+        diarize: bool | None = None,
+        num_speakers: int | None = None,
         variant: Union["Variant", None] = None,
         disable_file_moving: bool = False,
     ) -> None:
@@ -44,7 +46,7 @@ class TranscriptionProcessor:
 
         Args:
             transcription_service: Service for transcribing audio files
-            state_store: Service for managing transcription state
+            run_log: Append-only JSONL run log (one record per batch).
             file_mover: Service for moving files
             output_writer: Service for writing transcription output
             run_config: Complete run configuration with all settings (new API)
@@ -63,6 +65,10 @@ class TranscriptionProcessor:
             run_config.model_preset = preset
             run_config.language = language
             run_config.output_format = output_format or DEFAULT_OUTPUT_FORMAT
+            if diarize is not None:
+                run_config.diarize = diarize
+            if num_speakers is not None:
+                run_config.num_speakers = num_speakers
 
         self.run_config = run_config
         self.effective_config = run_config.get_effective_config()
@@ -72,6 +78,8 @@ class TranscriptionProcessor:
         self.preset = self.effective_config.model_preset
         self.language = self.effective_config.language
         self.output_format = self.effective_config.output_format
+        self.diarize = self.effective_config.diarize
+        self.num_speakers = self.effective_config.num_speakers
         self._disable_file_moving = disable_file_moving
 
         # For backward compatibility with existing code that expects these attributes
@@ -87,12 +95,11 @@ class TranscriptionProcessor:
         self._file_mover_policy = FileMoverPolicy(self.input_folder, file_mover)
         self._file_processor = FileProcessor(
             transcription_service=transcription_service,
-            state_store=state_store,
             output_writer=output_writer,
             file_mover_policy=self._file_mover_policy,
             processor_ref=self,
         )
-        self._run_summarizer = RunSummarizer(state_store)
+        self._run_log = run_log
 
         # For backward compatibility
         self._move = file_mover.move
@@ -209,7 +216,8 @@ class TranscriptionProcessor:
         results = self.process_all_files(files_to_process)
         results["files_found"] = len(files_to_process)
         total_processing_time = time.time() - run_start
-        results["run_statistics"] = self._run_summarizer.summarize_run(
+        results["run_statistics"] = summarize_run(
+            run_log=self._run_log,
             results=results,
             config_snapshot=config_snapshot,
             total_processing_time=total_processing_time,
@@ -217,6 +225,8 @@ class TranscriptionProcessor:
             preset=self.preset,
             language=self.language,
             output_format=self.output_format,
+            diarize=self.diarize,
+            num_speakers=self.num_speakers,
         )
 
         return results

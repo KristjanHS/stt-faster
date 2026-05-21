@@ -7,7 +7,7 @@ from typing import Any
 
 from backend.preprocess.config import PreprocessConfig
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult, TranscriptionService
-from backend.transcribe import TranscriptionMetrics
+from backend.transcribe import TranscriptionMetrics, format_segments_as_text
 from backend.variants.executor import (
     create_variant_preprocess_runner,
     create_variant_transcribe_config,
@@ -29,11 +29,15 @@ class VariantTranscriptionService:
         language: str | None,
         output_format: str,
         base_transcription_service: TranscriptionService | None = None,
+        diarize: bool = True,
+        num_speakers: int = 2,
     ):
         self.variant = variant
         self.preset = preset
         self.language = language
         self.output_format = output_format
+        self._diarize = diarize
+        self._num_speakers = num_speakers
 
         # Build preprocessing config
         self.preprocess_config = PreprocessConfig()  # Use defaults
@@ -82,6 +86,8 @@ class VariantTranscriptionService:
                 preprocess_runner=self.preprocess_runner,
                 transcription_config=self.transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
         elif is_minimal:
             # For minimal config, use the internal function that omits parameters
@@ -95,6 +101,8 @@ class VariantTranscriptionService:
                 preprocess_runner=self.preprocess_runner,
                 transcription_config=self.transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
         else:
             # Use standard transcription
@@ -108,6 +116,8 @@ class VariantTranscriptionService:
                 preprocess_runner=self.preprocess_runner,
                 transcription_config_provider=lambda: self.transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
 
         # Write output in the specified format
@@ -125,12 +135,7 @@ class VariantTranscriptionService:
             txt_path.parent.mkdir(parents=True, exist_ok=True)
             segments: list[dict[str, Any]] = payload.get("segments", [])
             with open(txt_path, "w", encoding="utf-8") as f:
-                for segment in segments:
-                    if "text" in segment:
-                        text = segment["text"]
-                        if isinstance(text, str):
-                            f.write(text)
-                            f.write("\n")
+                f.write(format_segments_as_text(segments))
             created_files.append(txt_path)
 
         if output_format in ("json", "both"):

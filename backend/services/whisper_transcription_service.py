@@ -25,10 +25,14 @@ class WhisperTranscriptionService:
         preprocess_config: PreprocessConfig,
         preprocess_runner: Callable[[str, PreprocessConfig], PreprocessResult],
         transcription_config: TranscriptionConfig,
+        diarize: bool = True,
+        num_speakers: int = 2,
     ):
         self._preprocess_config = preprocess_config
         self._preprocess_runner = preprocess_runner
         self._transcription_config = transcription_config
+        self._diarize = diarize
+        self._num_speakers = num_speakers
 
     def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         """Transcribe audio and return result with metrics."""
@@ -58,6 +62,8 @@ class WhisperTranscriptionService:
                 preprocess_runner=self._preprocess_runner,
                 transcription_config=transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
         elif is_minimal:
             # For minimal config, use the internal function that omits parameters
@@ -69,6 +75,8 @@ class WhisperTranscriptionService:
                 preprocess_runner=self._preprocess_runner,
                 transcription_config=transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
         else:
             # Use standard transcription with full config and metrics collection
@@ -80,6 +88,8 @@ class WhisperTranscriptionService:
                 preprocess_runner=self._preprocess_runner,
                 transcription_config_provider=lambda: self._transcription_config,
                 metrics_collector=_collect,
+                diarize=self._diarize,
+                num_speakers=self._num_speakers,
             )
 
         return TranscriptionResult(metrics=metrics_container.get("value"), payload=payload)

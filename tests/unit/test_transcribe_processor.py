@@ -6,16 +6,20 @@ from pathlib import Path
 
 import pytest
 
-from backend.database import TranscriptionDatabase
 from backend.processor import TranscriptionProcessor
 from backend.run_config import RunConfig
+from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
 from backend.services.interfaces import TranscriptionResult
 from backend.transcribe import TranscriptionMetrics
 
 
+def _make_run_log(temp_folder: Path) -> JsonlRunLog:
+    """Construct a JsonlRunLog inside the test's temp folder."""
+    return JsonlRunLog(temp_folder / "runs.jsonl")
+
+
 def _create_test_processor(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     preset: str = "et-large",
     language: str | None = None,
@@ -36,14 +40,13 @@ def _create_test_processor(
         language=language,
         output_format=output_format,
     )
-    # Use the provided temp_db instead of creating a new one to avoid conflicts
-    state_store = ServiceFactory.create_state_store(db_path=temp_db.db_path)
+    run_log = _make_run_log(temp_folder)
     file_mover = ServiceFactory.create_file_mover()
     output_writer = ServiceFactory.create_output_writer()
 
     return TranscriptionProcessor(
         transcription_service=transcription_service,
-        state_store=state_store,
+        run_log=run_log,
         file_mover=file_mover,
         output_writer=output_writer,
         run_config=run_config,
@@ -51,20 +54,20 @@ def _create_test_processor(
     )
 
 
-def test_processor_custom_preset(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_processor_custom_preset(temp_folder: Path) -> None:
     """Test processor with custom preset."""
-    processor = _create_test_processor(temp_db, temp_folder, preset="turbo")
+    processor = _create_test_processor(temp_folder, preset="turbo")
     assert processor.preset == "turbo"
 
 
-def test_scan_folder_empty(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_scan_folder_empty(temp_folder: Path) -> None:
     """Test scanning an empty folder."""
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.scan_folder()
     assert len(files) == 0
 
 
-def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_scan_folder_with_audio_files(temp_folder: Path) -> None:
     """Test scanning a folder with audio files."""
     # Create some test audio files
     (temp_folder / "audio1.wav").touch()
@@ -72,7 +75,7 @@ def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folde
     (temp_folder / "audio3.m4a").touch()
     (temp_folder / "not_audio.txt").touch()
 
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.scan_folder()
 
     assert len(files) == 3
@@ -82,7 +85,7 @@ def test_scan_folder_with_audio_files(temp_db: TranscriptionDatabase, temp_folde
     assert not any("not_audio.txt" in f for f in files)
 
 
-def test_scan_folder_ignores_subdirectories(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_scan_folder_ignores_subdirectories(temp_folder: Path) -> None:
     """Test that scanning ignores files in subdirectories."""
     # Create files in root
     (temp_folder / "audio1.wav").touch()
@@ -92,41 +95,25 @@ def test_scan_folder_ignores_subdirectories(temp_db: TranscriptionDatabase, temp
     subfolder.mkdir()
     (subfolder / "audio2.wav").touch()
 
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.scan_folder()
 
     assert len(files) == 1
     assert "audio1.wav" in files[0]
 
 
-def test_get_files_to_process(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
+def test_get_files_to_process(temp_folder: Path) -> None:
     """Test getting list of files to process from folder."""
     # Create test audio files
     (temp_folder / "audio1.wav").touch()
     (temp_folder / "audio2.wav").touch()
 
-    processor = _create_test_processor(temp_db, temp_folder)
+    processor = _create_test_processor(temp_folder)
     files = processor.get_files_to_process()
 
     assert len(files) == 2
     assert any("audio1.wav" in f for f in files)
     assert any("audio2.wav" in f for f in files)
-
-
-def test_get_files_returns_all_regardless_of_db(temp_db: TranscriptionDatabase, temp_folder: Path) -> None:
-    """Test that get_files_to_process returns all files regardless of database state."""
-    audio_file = temp_folder / "audio1.wav"
-    audio_file.touch()
-
-    # Mark file as completed in database
-    temp_db.add_file(str(audio_file), "completed")
-
-    processor = _create_test_processor(temp_db, temp_folder)
-    files = processor.get_files_to_process()
-
-    # File should still be returned - file location is source of truth
-    assert len(files) == 1
-    assert str(audio_file) in files
 
 
 class RecordingTranscribe:
@@ -196,7 +183,6 @@ class RecordingMover:
 
 
 def test_process_file_success(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test successfully processing a file."""
@@ -205,7 +191,6 @@ def test_process_file_success(
     audio_file.touch()
 
     # Register file in database
-    temp_db.add_file(str(audio_file), "pending")
 
     # Create mock transcription service
     from unittest.mock import Mock
@@ -239,7 +224,7 @@ def test_process_file_success(
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -250,10 +235,10 @@ def test_process_file_success(
     assert result.metrics is not None
     mock_transcription_service.transcribe.assert_called_once()
 
-    # Verify status updated
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "completed"
+    # Stage G.b: file status now lives on the returned FileProcessingStats
+    # (rolled into JSONL files[] by summarize_run at end-of-run).
+    assert result.file_path == str(audio_file)
+    assert result.error_message is None
 
     # Verify file moved to processed folder
     assert not audio_file.exists()
@@ -261,7 +246,6 @@ def test_process_file_success(
 
 
 def test_process_file_failure(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -275,7 +259,6 @@ def test_process_file_failure(
     audio_file.touch()
 
     # Register file in database
-    temp_db.add_file(str(audio_file), "pending")
 
     # Create mock transcription service that fails
     from unittest.mock import Mock
@@ -288,7 +271,7 @@ def test_process_file_failure(
         run_config = RunConfig.from_env_and_variant(temp_folder, None)
         processor = TranscriptionProcessor(
             transcription_service=mock_transcription_service,
-            state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+            run_log=_make_run_log(temp_folder),
             file_mover=ServiceFactory.create_file_mover(),
             output_writer=ServiceFactory.create_output_writer(),
             run_config=run_config,
@@ -303,11 +286,10 @@ def test_process_file_failure(
     assert result.status == "failed"
     assert result.metrics is None
 
-    # Verify status updated to failed
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "RuntimeError" in status["error_message"]
+    # Stage G.b: status + error message now live on the returned
+    # FileProcessingStats (rolled into JSONL files[] by summarize_run).
+    assert result.error_message is not None
+    assert "RuntimeError" in result.error_message
 
     # Verify file moved to failed folder
     assert not audio_file.exists()
@@ -315,7 +297,6 @@ def test_process_file_failure(
 
 
 def test_process_file_not_found(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -327,11 +308,10 @@ def test_process_file_not_found(
     audio_file = temp_folder / "nonexistent.wav"
 
     # Register file in database (but don't create it)
-    temp_db.add_file(str(audio_file), "pending")
 
     # Capture logs at ERROR level to verify expected error logging
     with caplog.at_level(logging.ERROR, logger="backend.processor"):
-        processor = _create_test_processor(temp_db, temp_folder)
+        processor = _create_test_processor(temp_folder)
         result = processor.process_file(str(audio_file))
 
     # Verify expected error was logged (this is intentional for this test)
@@ -342,15 +322,12 @@ def test_process_file_not_found(
     assert result.status == "failed"
     assert result.error_message is not None
 
-    # Verify status updated to failed
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "not found" in status["error_message"].lower()
+    # Stage G.b: status + error message now live on the returned
+    # FileProcessingStats (rolled into JSONL files[] by summarize_run).
+    assert "not found" in result.error_message.lower()
 
 
 def test_process_all_files(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test processing all files in provided list."""
@@ -391,7 +368,7 @@ def test_process_all_files(
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -406,7 +383,6 @@ def test_process_all_files(
 
 
 def test_process_folder(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test full folder processing workflow."""
@@ -445,9 +421,10 @@ def test_process_folder(
     )
 
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
+    run_log = _make_run_log(temp_folder)
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=run_log,
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -468,9 +445,18 @@ def test_process_folder(
     assert stats["total_transcribe_time"] == 1.0  # 0.5 + 0.5
     assert stats["average_speed_ratio"] == 120.0  # (120.0 + 120.0) / 2
 
+    # I-3 review fix: read back the JSONL record to prove the append path
+    # actually wrote a structurally-correct entry, not just that the call
+    # didn't raise. stats["run_id"] alone could pass against an empty dict.
+    persisted = run_log.tail(1)
+    assert len(persisted) == 1
+    persisted_record = persisted[0]
+    assert persisted_record["id"] == stats["run_id"]
+    assert len(persisted_record["files"]) == 2
+    assert {f["status"] for f in persisted_record["files"]} == {"completed"}
+
 
 def test_process_file_move_failure_keeps_pending_status(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
@@ -487,7 +473,6 @@ def test_process_file_move_failure_keeps_pending_status(
     audio_file.touch()
 
     # Register file
-    temp_db.add_file(str(audio_file), "pending")
 
     # Create mock transcription service
     from unittest.mock import Mock
@@ -526,7 +511,7 @@ def test_process_file_move_failure_keeps_pending_status(
         run_config = RunConfig.from_env_and_variant(temp_folder, None)
         processor = TranscriptionProcessor(
             transcription_service=mock_transcription_service,
-            state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+            run_log=_make_run_log(temp_folder),
             file_mover=mock_file_mover,
             output_writer=ServiceFactory.create_output_writer(),
             run_config=run_config,
@@ -545,18 +530,17 @@ def test_process_file_move_failure_keeps_pending_status(
     assert result.status == "failed"
     assert result.error_message
 
-    # Verify status is 'failed', NOT 'completed'
-    status = temp_db.get_status(str(audio_file))
-    assert status is not None
-    assert status["status"] == "failed"
-    assert "Permission denied" in status["error_message"]
+    # Stage G.b: status + error message now live on the returned
+    # FileProcessingStats (rolled into JSONL files[] by summarize_run).
+    # The bug being regression-tested here is that the success-status update
+    # happens BEFORE the move; on move failure the status must remain "failed".
+    assert "Permission denied" in result.error_message
 
     # Verify file is still in original location (not moved)
     assert audio_file.exists()
 
 
 def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test that files in subdirectories preserve directory structure when _output_base_dir is set.
@@ -575,8 +559,6 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
     audio2.touch()
 
     # Register files
-    temp_db.add_file(str(audio1), "pending")
-    temp_db.add_file(str(audio2), "pending")
 
     # Create output base directory (simulating multi-variant mode)
     output_base = temp_folder / "outputs"
@@ -614,7 +596,7 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
     run_config.output_format = "both"
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
@@ -646,15 +628,12 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
 
 
 def test_process_file_root_level_file_with_output_base_dir(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
 ) -> None:
     """Test that files at root level work correctly with _output_base_dir (no subdirectory created)."""
     # Create file at root level
     audio_file = temp_folder / "audio.wav"
     audio_file.touch()
-
-    temp_db.add_file(str(audio_file), "pending")
 
     output_base = temp_folder / "outputs"
     output_base.mkdir()
@@ -691,7 +670,7 @@ def test_process_file_root_level_file_with_output_base_dir(
     run_config.output_format = "both"
     processor = TranscriptionProcessor(
         transcription_service=mock_transcription_service,
-        state_store=ServiceFactory.create_state_store(db_path=temp_db.db_path),
+        run_log=_make_run_log(temp_folder),
         file_mover=ServiceFactory.create_file_mover(),
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,

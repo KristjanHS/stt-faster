@@ -89,7 +89,6 @@ def test_scripts_are_thin_wrappers():
         excluded_scripts = {
             "compare_transcription_variants.py",
             "generate_variant_report.py",
-            "check_parameter_completeness.py",  # Database checking utility script
         }
         if script_file.name in excluded_scripts:
             # Allow up to 2000 lines for comparison/utility scripts

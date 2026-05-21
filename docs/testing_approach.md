@@ -161,33 +161,39 @@ When testing error handling scenarios, tests intentionally trigger errors or war
 **✅ Good - Captures and verifies expected errors:**
 ```python
 def test_process_file_failure(
-    temp_db: TranscriptionDatabase,
     temp_folder: Path,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     """Test handling of transcription failure.
-    
+
     This test intentionally triggers a transcription error to verify error handling.
     Expected ERROR logs are captured and verified, not suppressed.
     """
     # Create test audio file
     audio_file = temp_folder / "audio1.wav"
     audio_file.touch()
-    temp_db.add_file(str(audio_file), "pending")
 
-    # Make transcription fail intentionally
-    transcribe = RecordingTranscribe(should_fail=True)
+    # Mock transcription service that fails
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.side_effect = RuntimeError("boom")
 
     # Capture logs at ERROR level to verify expected error logging
     with caplog.at_level(logging.ERROR, logger="backend.processor"):
-        processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+        run_config = RunConfig.from_env_and_variant(temp_folder, None)
+        processor = TranscriptionProcessor(
+            transcription_service=mock_transcription_service,
+            run_log=_make_run_log(temp_folder),
+            file_mover=ServiceFactory.create_file_mover(),
+            output_writer=ServiceFactory.create_output_writer(),
+            run_config=run_config,
+        )
         result = processor.process_file(str(audio_file))
 
     # Verify expected error was logged (this is intentional for this test)
     assert any("Failed to process" in record.message for record in caplog.records), (
         "Expected ERROR log for transcription failure (this is intentional)"
     )
-    
+
     # Verify error handling behavior
     assert result.status == "failed"
     assert result.metrics is None
@@ -195,11 +201,18 @@ def test_process_file_failure(
 
 **❌ Bad - Errors appear without context:**
 ```python
-def test_process_file_failure(temp_db, temp_folder):
+def test_process_file_failure(temp_folder):
     """Test handling of transcription failure."""
     # Error logs appear but aren't verified or documented as intentional
-    transcribe = RecordingTranscribe(should_fail=True)
-    processor = TranscriptionProcessor(temp_db, temp_folder, transcribe_fn=transcribe)
+    mock_transcription_service = Mock()
+    mock_transcription_service.transcribe.side_effect = RuntimeError("boom")
+    processor = TranscriptionProcessor(
+        transcription_service=mock_transcription_service,
+        run_log=_make_run_log(temp_folder),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        run_config=RunConfig.from_env_and_variant(temp_folder, None),
+    )
     result = processor.process_file(str(audio_file))
     assert result.status == "failed"
 ```

@@ -8,8 +8,9 @@ The system provides automated batch transcription of audio files with:
 - **Multiple model presets** (Estonian fine-tuned, multilingual, fast/slow variants)
 - **Variant system** (16 pre-configured combinations of preprocessing and transcription parameters)
 - **Automatic file management** (processed/failed folder organization)
-- **Database tracking** (SQLite-based history and metrics)
-- **Flexible output formats** (TXT, JSON, or both)
+- **Run log** (JSONL append-only history and metrics)
+- **Speaker diarization** (default-on; pyannote.audio with 2 speakers; see [docs/diarization_setup.md](diarization_setup.md))
+- **Flexible output formats** (TXT — default, with timestamps and speaker labels; JSON; or both)
 
 ## Models
 
@@ -71,11 +72,11 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 # Process folder with default settings (Estonian model)
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio
 
-# Check processing status
-.venv/bin/python scripts/transcribe_manager.py status
+# Show recent run history (reads from ~/.local/share/stt-faster/runs.jsonl)
+.venv/bin/python -m backend.cli.main db recent --limit 10
 
-# Verbose status with file details
-.venv/bin/python scripts/transcribe_manager.py status --verbose
+# Show a single run's details
+.venv/bin/python -m backend.cli.main db show <run_id>
 ```
 
 ### Advanced Options
@@ -87,9 +88,13 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 # Force language detection
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --language et
 
-# Output format options
+# Output format options (default: txt)
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --output-format json
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --output-format both
+
+# Diarization (default on, 2 speakers; see docs/diarization_setup.md)
+.venv/bin/python scripts/transcribe_manager.py process /path/to/audio --no-diarize
+.venv/bin/python scripts/transcribe_manager.py process /path/to/audio --num-speakers 3
 
 # Use variant (NEW!)
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --variant 7
@@ -103,12 +108,13 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 - `--preset`: Model preset (`turbo`, `distil`, `large8gb`, `et-large`, `et-32`, `small`)
 - `--language`: Force language code (e.g., `en`, `et`, `ru`). Auto-detect if not specified
 - `--output-format`: Output format (`txt`, `json`, `both`) - default: `txt`
+- `--diarize` / `--no-diarize`: Speaker diarization toggle - default: `--diarize` (requires HF_TOKEN; see [docs/diarization_setup.md](diarization_setup.md))
+- `--num-speakers N`: Expected speaker count - default: `2`
 - `--variant`: Variant number (1-16) - default: uses standard configuration
-- `--db-path`: Custom database path (default: XDG data home)
 
-**`status` command:**
-- `--verbose`: Show detailed file list with status markers
-- `--db-path`: Custom database path
+**Run history (`stt-faster db ...`):**
+- `db recent --limit N`: Show the most recent N runs in compact format
+- `db show <run_id>`: Show full detail for a single run
 
 ## Architecture
 
@@ -117,7 +123,7 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 1. **`TranscriptionProcessor`** (`backend/processor.py`)
    - Manages file lifecycle (scan, process, move to processed/failed)
    - Handles variant-aware transcription when variant is specified
-   - Records metrics and run statistics to database
+   - Appends per-run metrics and statistics to the JSONL run log
 
 2. **Variant System** (`backend/variants/`)
    - **`registry.py`**: Defines 16 built-in variants (1-11 use declarative steps, 12-16 use custom functions)
@@ -130,10 +136,10 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
    - Supports custom preprocessing runners and transcription configs
    - Handles model loading, caching, and transcription execution
 
-4. **Database** (`backend/database/`)
-   - DuckDB-based tracking of processed files
-   - Records run metadata and file-level metrics
-   - Provides status summaries and history
+4. **Run Log** (`backend/run_log.py`)
+   - Append-only JSONL log at `~/.local/share/stt-faster/runs.jsonl`
+   - One JSON record per run with nested `preprocess`/`model`/`params`/`totals`/`files` groups
+   - Read via `stt-faster db recent` / `stt-faster db show`
 
 ### File Flow
 
@@ -164,16 +170,29 @@ Core dependencies (in `pyproject.toml`):
 
 ## Output Formats
 
+Selected via `--output-format {txt,json,both}`. Default: `txt`.
+
 ### TXT Format
-Plain text file with one segment per line:
+One whisper segment per line. Timestamps are emitted unconditionally; speaker labels appear when diarization is on.
+
+**With diarization (default):**
 ```
-Segment 1 text
-Segment 2 text
-...
+[00:00:00.40 --> 00:00:03.05] SPEAKER_00: Segment 1 text
+[00:00:03.10 --> 00:00:05.70] SPEAKER_01: Segment 2 text
+[00:00:05.80 --> 00:00:09.10] SPEAKER_00: Segment 3 text
 ```
 
+**With `--no-diarize`:**
+```
+[00:00:00.40 --> 00:00:03.05] Segment 1 text
+[00:00:03.10 --> 00:00:05.70] Segment 2 text
+```
+
+Line shape: `[hh:mm:ss.ff --> hh:mm:ss.ff] SPEAKER_NN: text` (or `[hh:mm:ss.ff --> hh:mm:ss.ff] text` without diarization). `SPEAKER_00` is deterministically the chronologically-first speaker in the file — re-runs of the same audio produce stable labels (see `backend/diarize/pipeline.py::anchor_speaker_zero`).
+
 ### JSON Format
-Structured output with full metadata:
+Structured output with full metadata. The `speaker` field appears on each segment when diarization is on, and is absent otherwise (additive — JSON consumers that don't know about `speaker` are unaffected).
+
 ```json
 {
   "audio": "filename.wav",
@@ -185,21 +204,22 @@ Structured output with full metadata:
       "id": 0,
       "start": 0.0,
       "end": 5.2,
-      "text": "Segment text"
+      "text": "Segment text",
+      "speaker": "SPEAKER_00"
     }
   ]
 }
 ```
 
 ### Both Format
-Generates both `.txt` and `.json` files for the same audio file.
+Generates both `.txt` and `.json` files for the same audio file. Used by `compare_variants.bat` (with `--no-diarize`, since the downstream report generators consume JSON and don't need speaker labels per variant).
 
 ## Validation
 
 ✅ Estonian/English models load correctly  
 ✅ Model caching works  
 ✅ Files move to correct folders  
-✅ Database tracking accurate  
+✅ Run log tracking accurate  
 ✅ Windows batch files functional  
 ✅ Variant system integrated (16 variants: 1-11 declarative, 12-16 custom)  
 ✅ All unit tests pass (103 tests)  

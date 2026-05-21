@@ -25,6 +25,8 @@ class EffectiveRunConfig:
     output_format: str
     language: str | None
     model_preset: str
+    diarize: bool
+    num_speakers: int
 
 
 @dataclass(slots=True)
@@ -58,6 +60,8 @@ class RunConfig:
     output_format: str = "json"
     language: str | None = None
     model_preset: str = "et-large"
+    diarize: bool = True
+    num_speakers: int = 2
 
     # Component configs with defaults
     preprocess: PreprocessConfig = field(default_factory=PreprocessConfig)
@@ -71,12 +75,18 @@ class RunConfig:
         # Validate individual component configs
         self._validate_preprocess_config()
         self._validate_transcription_config()
+        self._validate_diarization_config()
 
         # Cross-config validation
         self._validate_cross_config_consistency()
 
         # Variant override validation
         self._validate_variant_overrides()
+
+    def _validate_diarization_config(self) -> None:
+        """Validate diarization configuration."""
+        if self.num_speakers < 1:
+            raise ValueError(f"num_speakers must be >= 1, got {self.num_speakers}")
 
     def _validate_preprocess_config(self) -> None:
         """Validate preprocess configuration."""
@@ -212,6 +222,8 @@ class RunConfig:
             output_format=self.output_format,
             language=self.language,
             model_preset=self.model_preset,
+            diarize=self.diarize,
+            num_speakers=self.num_speakers,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -221,6 +233,8 @@ class RunConfig:
             "output_format": self.output_format,
             "language": self.language,
             "model_preset": self.model_preset,
+            "diarize": self.diarize,
+            "num_speakers": self.num_speakers,
             "preprocess": {
                 "enabled": self.preprocess.enabled,
                 "target_sample_rate": self.preprocess.target_sample_rate,
