@@ -42,17 +42,20 @@ def prefetch_all() -> None:
 
 
 def prefetch_pyannote(repo_id: str) -> str:
-    # Errors are raised as RuntimeError here; the backend/diarize/ subsystem
-    # (added in the next commit) will re-raise these via DiarizationConfigError.
     # Revision pin is required by Bandit B615 and must be a literal SHA in the
     # snapshot_download() call (Bandit only accepts literal 40-char hex strings,
     # not module constants or function parameters). Resolved from HF API 2026-05-21.
+    # Cross-ref: backend/diarize/pyannote_runner.py uses Pipeline.from_pretrained
+    # without a revision pin — relies on pyannote.audio==3.4.0 lock to resolve the
+    # same SHA. Keep this literal in sync if the model card updates a default revision.
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import HfHubHTTPError
 
+    from backend.diarize.errors import DiarizationConfigError
+
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
     if not token:
-        raise RuntimeError(
+        raise DiarizationConfigError(
             f"HF_TOKEN is not set. The {repo_id} model is HuggingFace-gated; "
             "see docs/diarization_setup.md for one-time token + model-license setup."
         )
@@ -65,12 +68,12 @@ def prefetch_pyannote(repo_id: str) -> str:
     except HfHubHTTPError as exc:
         status = getattr(exc.response, "status_code", None) if exc.response is not None else None
         if status == 401:
-            raise RuntimeError(
+            raise DiarizationConfigError(
                 f"HF_TOKEN was rejected (401) fetching {repo_id}. "
                 "Verify the token at https://huggingface.co/settings/tokens; see docs/diarization_setup.md."
             ) from exc
         if status == 403:
-            raise RuntimeError(
+            raise DiarizationConfigError(
                 f"HuggingFace returned 403 for {repo_id}. Accept the model license at "
                 f"https://huggingface.co/{repo_id}; see docs/diarization_setup.md."
             ) from exc

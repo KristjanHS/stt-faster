@@ -25,8 +25,9 @@ def overlap_assign(
 ) -> list[dict[str, Any]]:
     """Assign each segment the speaker whose turn covers the most of it.
 
-    Segments with zero overlap to any turn are returned without a `speaker`
-    field (caller decides how to render).
+    Segments with zero overlap to any turn (including zero-length segments —
+    start == end) are returned without a `speaker` field. On ties, the
+    earlier-starting turn wins because `turns` is expected sorted by start.
     """
     out: list[dict[str, Any]] = []
     for seg in segments:

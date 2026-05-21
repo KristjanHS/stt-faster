@@ -82,8 +82,9 @@ def run_pyannote(
                 "see docs/diarization_setup.md."
             ) from exc
         raise DiarizationConfigError(f"HuggingFace error loading {PYANNOTE_MODEL}: {exc}") from exc
-    except Exception as exc:
-        raise DiarizationConfigError(f"Failed to load pyannote pipeline {PYANNOTE_MODEL}: {exc}") from exc
+    # Non-HF load failures (OSError, CUDA init, etc.) propagate as-is — they are not
+    # config errors. processor.py's per-file try/except handles them as file-level
+    # failures, not batch aborts.
 
     try:
         diarization: Any = pipeline(audio_path, num_speakers=num_speakers)
