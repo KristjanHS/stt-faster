@@ -77,7 +77,9 @@ class TestProcessCommand:
             from transcribe_manager import cmd_process, create_parser
 
             parser = create_parser()
-            args = parser.parse_args(["process", str(cli_test_folder), "--preset", "turbo"])
+            args = parser.parse_args(
+                ["process", str(cli_test_folder), "--preset", "turbo", "--no-diarize"],
+            )
 
             with (
                 patch("backend.variants.executor.pick_model") as mock_pick_model_executor,
