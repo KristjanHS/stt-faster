@@ -1,8 +1,8 @@
 @echo off
-REM Emit the active uv extras variant ("cpu" or "cu126") for this checkout.
+REM Emit the active uv extras variant ("cpu" or "cu130") for this checkout.
 REM
 REM Reads <repo>\.stt-variant.local (gitignored). Absent file => "cpu". Anything
-REM other than "cpu" or "cu126" is rejected with a clear error so a typo doesn't
+REM other than "cpu" or "cu130" is rejected with a clear error so a typo doesn't
 REM silently fall back to the default.
 REM
 REM See docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
@@ -25,10 +25,10 @@ if /i "!VARIANT!"=="cpu" (
     echo cpu
     endlocal & exit /b 0
 )
-if /i "!VARIANT!"=="cu126" (
-    echo cu126
+if /i "!VARIANT!"=="cu130" (
+    echo cu130
     endlocal & exit /b 0
 )
 
-echo unknown variant '!VARIANT!' in .stt-variant.local -- expected 'cpu' or 'cu126' 1>&2
+echo unknown variant '!VARIANT!' in .stt-variant.local -- expected 'cpu' or 'cu130' 1>&2
 endlocal & exit /b 1

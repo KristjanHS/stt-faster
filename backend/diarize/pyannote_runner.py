@@ -118,7 +118,7 @@ def run_pyannote(
         raise DiarizationConfigError(f"pyannote.audio is not installed: {exc}. Run `uv sync` to install.") from exc
 
     try:
-        pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL, use_auth_token=token)
+        pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL, token=token)  # type: ignore[reportUnknownMemberType]
     except HfHubHTTPError as exc:
         status = getattr(exc.response, "status_code", None)
         if status == 401:
@@ -137,6 +137,11 @@ def run_pyannote(
     # Non-HF load failures (OSError, CUDA init, etc.) propagate as-is — they are not
     # config errors. processor.py's per-file try/except handles them as file-level
     # failures, not batch aborts.
+    if pipeline is None:
+        raise DiarizationConfigError(
+            f"Pipeline.from_pretrained returned None for {PYANNOTE_MODEL} (silent auth/download failure); "
+            "see docs/diarization_setup.md."
+        )
 
     try:
         waveform, sample_rate = _load_audio_tensor(audio_path)
