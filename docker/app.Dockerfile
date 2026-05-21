@@ -23,7 +23,7 @@ ENV VENV_PATH=/opt/venv \
 
 # CPU/GPU torch variant selection. Override with `--build-arg STT_VARIANT=cu130`
 # to build a CUDA-enabled image. See
-# docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.6.
+# docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.6.
 ARG STT_VARIANT=cpu
 
 WORKDIR /app

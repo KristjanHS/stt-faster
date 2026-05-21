@@ -15,7 +15,7 @@
 ## Quick Start
 
 - Create .venv and install dev/test toolchain (editable install, **CPU torch wheels by default**): `./run_uv.sh`
-- GPU users: `make use-gpu` once per machine (writes `.stt-variant.local`), then `./run_uv.sh`. `make use-cpu` to switch back; `make show-variant` to check. Mechanism: uv extras `cpu` / `cu130` — see `docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`.
+- GPU users: `make use-gpu` once per machine (writes `.stt-variant.local`), then `./run_uv.sh`. `make use-cpu` to switch back; `make show-variant` to check. Mechanism: uv extras `cpu` / `cu130` — see `docs/Transcription_solution.md` § "CPU / GPU install variants".
 - Run pre-commit via uv (uses the venv): `uv run pre-commit run --all-files`
 - Quick integration test run: `make integration-local`
 - Start Docker services (if needed): `docker compose -f docker/docker-compose.yml up -d --build`

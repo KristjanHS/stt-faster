@@ -1,11 +1,22 @@
 # CUDA dependencies — CPU/GPU split via uv extras
 
-**Status**: Design — ready for implementation
+**Status**: SHIPPED (D1–D4 all landed on `main` 2026-05-21).
 **Date**: 2026-05-21
 **Owner**: Kristjan
 **Supersedes**: none
-**Related**: `2026-05-21-portable-windows-setup-design.md` (shares `_runtime.bat` infrastructure),
+**Related**: `archived/2026-05-21-portable-windows-setup-design.md` (shares `_runtime.bat` infrastructure),
 `docs/diarization_setup.md` (HF_TOKEN setup that pairs with this)
+
+## §0 — Implementation note (added at archive time)
+
+Shipped on `main` 2026-05-21 across four stages:
+
+- **D1 — deps mechanism**: `42ca21f` (cu126 initial) + `105c101` (bumped cu126 → cu130 after pyannote community-1 retired the `torchaudio<2.7` constraint). `pyproject.toml` extras + sources + conflicts; `uv.lock` regen; `.gitignore` adds `.stt-variant.local`; `scripts/select_variant.{sh,bat}` ship.
+- **D2 — wrappers**: `run_uv.sh` calls `select_variant.sh` and passes `--extra "$VARIANT"`. Makefile gains `use-cpu` / `use-gpu` / `show-variant` / `sync` targets and every other `uv sync` callsite (`make pre-commit`, `test`, `setup-uv`) routes through the selector. `_runtime.bat` integration was obsoleted by the bat-docker-fallback shipped the same day (`3af8236`) — Windows hosts no longer run native `uv sync`; they dispatch to the Docker image which carries its own variant arg.
+- **D3 — CI + Docker**: `3db93b6` (Docker `ARG STT_VARIANT=cpu` + `--extra ${STT_VARIANT}` in both `Dockerfile` and `docker/app.Dockerfile`); `dff382a` (`make export-reqs-cpu` / `export-reqs-cu130` split + `pip-audit-gpu`); `bcf1eb7` (CPU-isolation canary `tests/unit/test_no_transitive_cuda.py`); `0212d4e` (wire `pip-audit-gpu` into the `trivy_pip-audit` workflow). All `.github/workflows/*.yml` `uv sync` calls pass `--extra cpu` explicitly. Two intentional deviations from the design captured in §8c (direct `--extra` in Docker instead of the `.stt-variant.local`-via-`run_uv.sh` indirection; `importlib.metadata.distribution` canary instead of `find_spec` — cu13 wheels expose no importable `nvidia.cublas` module).
+- **D4 — docs**: `8f0a3dd` (README quick-start, `docs/Transcription_solution.md` GPU note, `docs/diarization_setup.md` torch-floor note, `pyproject.toml:9` comment refreshed). The `# for GPU: torch = { index = "pytorch-cu130"}` dead comment was removed when the live binding shipped in D1.
+
+Load-bearing rationale from §4.1 (rejected alternatives) + §8 decisions 2/4/7/8 was migrated into `docs/Transcription_solution.md` § "CPU / GPU install variants" at archive time — that is now the canonical living reference. This file is the audit trail.
 
 ## 1. Problem
 

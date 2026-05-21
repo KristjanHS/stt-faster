@@ -5,7 +5,7 @@ REM Reads <repo>\.stt-variant.local (gitignored). Absent file => "cpu". Anything
 REM other than "cpu" or "cu130" is rejected with a clear error so a typo doesn't
 REM silently fall back to the default.
 REM
-REM See docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
+REM See docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
 
 setlocal enabledelayedexpansion
 

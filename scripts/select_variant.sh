@@ -6,7 +6,7 @@
 # silently fall back to the default.
 #
 # Wrappers (run_uv.sh, Makefile targets) call this and pass `--extra ${variant}`
-# to `uv sync`. See docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
+# to `uv sync`. See docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
 
 set -euo pipefail
 

@@ -6,7 +6,7 @@ pyannote.audio's transitive resolution) the CPU runner ends up with ~3 GB of
 CUDA libraries it never uses.
 
 This test fails the moment `nvidia-cublas` shows up on a CPU install — which is
-the canary the §5.8 of docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md
+the canary the §5.8 of docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md
 explicitly calls out. Cheap and runs in unit-test time (no torch import).
 """
 
