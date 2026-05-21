@@ -8,7 +8,7 @@ Audio is decoded in-process with PyAV and handed to pyannote via its
 documented tensor-input API (`{"waveform": (channel, time), "sample_rate": int}`).
 This sidesteps `torchcodec`, whose import-time soft-failure emits a noisy
 warning but is never reached on the tensor path. See design doc
-`docs/plans/2026-05-21-pyannote-community-1-migration-design.md` §2.
+`docs/plans/archived/2026-05-21-pyannote-community-1-migration-design.md` §2.
 """
 
 from __future__ import annotations
