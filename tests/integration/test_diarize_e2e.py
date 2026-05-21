@@ -1,6 +1,6 @@
 """End-to-end diarization test on a real two-speaker fixture.
 
-Plan: docs/plans/2026-05-21-diarization-txt-default-design.md §6.
+Plan: docs/plans/archived/2026-05-21-diarization-txt-default-design.md §6.
 
 Skips cleanly when ``HF_TOKEN`` / ``HUGGINGFACE_HUB_TOKEN`` is unset or
 when the licensed fixture (`tests/fixtures/audio/two_speakers_10s.wav`)

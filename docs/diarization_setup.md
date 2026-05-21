@@ -68,7 +68,7 @@ Run the prefetch script — it downloads the Estonian, English, and pyannote wei
 .venv\Scripts\python scripts\prefetch_models.py
 ```
 
-Expected last line: `Prefetch complete.` If you see `DiarizationConfigError`, jump to [Troubleshooting](#troubleshooting).
+On success the script ends with `Prefetch complete.` On failure you'll see a `DiarizationConfigError` traceback — jump to [Troubleshooting](#troubleshooting) and re-run.
 
 ## Runtime constraints
 
