@@ -2,7 +2,7 @@
 # Meta
 .PHONY: help
 # Setup
-.PHONY: setup-hooks setup-uv export-reqs install-act setup-act new-project-bootstrap new-project-cleanup new-project-post new-project-git-setup
+.PHONY: setup-hooks setup-uv sync use-cpu use-gpu show-variant export-reqs install-act setup-act new-project-bootstrap new-project-cleanup new-project-post new-project-git-setup
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
@@ -36,6 +36,10 @@ help:
 	@echo "  -- Setup --"
 	@echo "  setup-hooks        - Configure Git hooks path"
 	@echo "  setup-uv           - Create venv and sync dev/test via uv"
+	@echo "  sync               - Run ./run_uv.sh (uses .stt-variant.local; defaults to cpu)"
+	@echo "  use-cpu            - Set this checkout to the CPU extra (writes .stt-variant.local) and sync"
+	@echo "  use-gpu            - Set this checkout to the cu130 GPU extra (writes .stt-variant.local) and sync"
+	@echo "  show-variant       - Print the currently selected variant (cpu by default)"
 	@echo "  new-project-bootstrap - Copy this repo to ~/projects/<SLUG> (requires SLUG=...)"
 	@echo "  new-project-cleanup   - In the copied repo: strip app code and rename to <SLUG> (requires SLUG=...)"
 	@echo "  new-project-post      - In the copied repo: install tooling + quick unit tests"
@@ -96,6 +100,27 @@ setup-hooks:
 setup-uv:
 	@./run_uv.sh
 
+# Variant-aware sync: ./run_uv.sh reads .stt-variant.local (cpu by default) and
+# passes the matching --extra to `uv sync`. See
+# docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
+sync:
+	@./run_uv.sh
+
+use-cpu:
+	@echo cpu > .stt-variant.local
+	@$(MAKE) sync
+
+use-gpu:
+	@echo cu130 > .stt-variant.local
+	@$(MAKE) sync
+
+show-variant:
+	@if [ -f .stt-variant.local ]; then \
+		cat .stt-variant.local; \
+	else \
+		echo "(default: cpu — no .stt-variant.local present)"; \
+	fi
+
 new-project-bootstrap:
 	@if [ -z "$(SLUG)" ]; then \
 		echo "Usage: make new-project-bootstrap SLUG=<project-slug>"; \
@@ -109,7 +134,8 @@ new-project-cleanup:
 new-project-post:
 	@echo "Setting up tooling (uv) and running a quick unit test sweep..."
 	./run_uv.sh
-	uv sync --group dev --group test --frozen || uv sync --group dev --group test
+	uv sync --extra "$$(./scripts/select_variant.sh)" --group dev --group test --frozen \
+		|| uv sync --extra "$$(./scripts/select_variant.sh)" --group dev --group test
 	uv run pre-commit install --install-hooks || true
 	@echo "Git init/remote setup is now manual. Run scripts/new_project_git_setup.py yourself if you want automation."
 	@if [ -x .venv/bin/python ]; then \
@@ -187,7 +213,7 @@ pip-audit: export-reqs
 	uvx --from pip-audit pip-audit -r requirements.txt
 
 uv-sync-test:
-	uv sync --group test --frozen
+	uv sync --extra "$$(./scripts/select_variant.sh)" --group test --frozen
 	uv pip check
 
 # New canonical unit test target
@@ -293,7 +319,7 @@ pyright:
 
 yamlfmt:
 	# Ensure dev + test groups are present so later test steps still work
-	uv sync --group dev --group test --frozen
+	uv sync --extra "$$(./scripts/select_variant.sh)" --group dev --group test --frozen
 	uv run pre-commit run yamlfmt -a
 
 # Ruff targets (use uv-run to avoid global installs)
@@ -314,7 +340,7 @@ ruff-fix:
 # Run full pre-commit suite (dev deps required)
 pre-commit:
 	# Keep test deps installed to avoid breaking local test runs after this target
-	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv sync --group dev --group test --frozen
+	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv sync --extra "$$(./scripts/select_variant.sh)" --group dev --group test --frozen
 	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv run pre-commit run --all-files
 
 # Run the same checks as the Git pre-push hook, forcing all SKIP flags to 0
