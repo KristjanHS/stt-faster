@@ -1,8 +1,28 @@
 # Windows `.bat` Docker fallback — design
 
 **Date:** 2026-05-21
-**Status:** Designed, not yet implemented
+**Status:** SHIPPED (`3af8236` U1+U2+U3 + `73f67b6` Shape 3 positional fix).
 **Author:** mybrain session w/ Claude
+
+## §0 — Implementation note (added at archive time)
+
+Shipped on `main` 2026-05-21 in two commits:
+- `3af8236` — all three units (U1 `_runtime.bat`, U2 ten caller bats, U3
+  `setup.bat` rewrite + `scripts/windows/README.md` + `HOW_TO_USE.txt`).
+- `73f67b6` — Shape 3 fix: append `/workspace` positional to the
+  `generate_variant_report.py` docker invocations in `report_only.bat`
+  and `compare_variants.bat`. The original design template at §"Shape 3"
+  inherited a gap from the WSL side, where the script's auto-detect
+  fallback `Path("/mnt/c/Users/PC/Downloads/transcribe")` happens to
+  exist on the dev machine. Inside the container that path is absent,
+  so the script exited with "Error: Default directory not found" before
+  reaching its outer-dir timestamp search. Fix: pass `/workspace`
+  explicitly. Caught in code review.
+
+§Architecture / §Implementation units operational facts are now reflected in
+`scripts/windows/_runtime.bat`, the caller bats, `setup.bat`, and the
+README/HOW_TO_USE docs. Decisions log + "Why not the alternatives"
+rationale stays here as audit trail.
 
 ## Goal
 
