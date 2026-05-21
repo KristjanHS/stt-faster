@@ -35,9 +35,13 @@ dependencies = [
     "python-dotenv>=1.1.1,<2.0.0",
     "rich>=14.1.0,<15.0.0",
     # Diarization (pyannote.audio + torch dependencies)
-    # pyannote.audio 3.3.x is compatible with the pyannote/speaker-diarization-3.1 model.
+    # pyannote.audio 3.4.0 is compatible with the pyannote/speaker-diarization-3.1 model.
+    # torchaudio constraint: pyannote 3.4 imports torchaudio.AudioMetaData which was
+    # removed in torchaudio 2.7. pyannote 4.x avoids this but pulls torchcodec which
+    # needs FFmpeg>=6 shared libs (not portable across Win + WSL + Docker targets).
     # Requires HF_TOKEN at runtime; see docs/diarization_setup.md.
-    "pyannote.audio>=3.3.0,<4.0.0",
+    "pyannote.audio==3.4.0",
+    "torchaudio>=2.2.0,<2.7.0",
 ]
 
 [dependency-groups]
