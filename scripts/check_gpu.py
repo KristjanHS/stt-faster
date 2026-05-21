@@ -164,7 +164,7 @@ def print_recommendations(results: dict[str, bool]) -> None:
 
     if not results.get("ctranslate2"):
         logger.info("\n4. Reinstall ctranslate2 with CUDA support:")
-        logger.info("   pip install --force-reinstall ctranslate2==4.4.0")
+        logger.info("   uv pip install --force-reinstall ctranslate2==4.6.2")
 
     if not results.get("model_load"):
         logger.info("\n5. If all libraries are installed but model loading fails:")
