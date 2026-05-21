@@ -55,7 +55,7 @@ if /i "%STT_RUNTIME%"=="none" (
 
 REM ---- Banner (mirrors the GPU-fallback banner philosophy) ----
 REM Skip the `audio:` line when the caller never asked us to resolve one
-REM (utility bats like check_status that don't process audio). The %CD%
+REM (utility bats like check_recent that don't process audio). The %CD%
 REM fallback above still keeps STT_AUDIO_DIR_RESOLVED non-empty for any
 REM downstream code that reads it; the banner just stops being misleading.
 echo [stt-faster] runtime: %STT_RUNTIME%
