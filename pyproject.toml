@@ -45,23 +45,23 @@ dependencies = [
     # Design: docs/plans/archived/2026-05-21-pyannote-community-1-migration-design.md §2.
     # Requires HF_TOKEN at runtime; see docs/diarization_setup.md.
     "pyannote.audio==4.0.4",
-    # torch + torchaudio moved to [project.optional-dependencies] (cpu / cu126 extras)
+    # torch + torchaudio moved to [project.optional-dependencies] (cpu / cu130 extras)
     # to keep base `uv sync` from pulling CUDA wheels transitively via pyannote.
     # See docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
 ]
 
 [project.optional-dependencies]
 # Mutually exclusive (see [tool.uv.conflicts]). Wrappers (run_uv.sh, _runtime.bat,
-# Make targets) always pass `--extra cpu` or `--extra cu126` based on the
+# Make targets) always pass `--extra cpu` or `--extra cu130` based on the
 # gitignored `.stt-variant.local` file. Bare `uv sync` with no extra is undefined
 # behaviour by policy — see design §8 decision 8.
 cpu = [
     "torch>=2.8.0,<3.0.0",
     "torchaudio>=2.8.0,<3.0.0",
 ]
-cu126 = [
-    "torch>=2.8.0,<3.0.0",
-    "torchaudio>=2.8.0,<3.0.0",
+cu130 = [
+    "torch>=2.11.0,<3.0.0",
+    "torchaudio>=2.11.0,<3.0.0",
 ]
 
 [dependency-groups]
@@ -84,21 +84,21 @@ test = [
 [tool.uv]
 add-bounds = "major"
 
-# cpu and cu126 extras are mutually exclusive — uv resolves both into a single
+# cpu and cu130 extras are mutually exclusive — uv resolves both into a single
 # `uv.lock` with conflicting markers, so a sync with one extra never installs
 # the other's wheels.
 conflicts = [
-    [ { extra = "cpu" }, { extra = "cu126" } ],
+    [ { extra = "cpu" }, { extra = "cu130" } ],
 ]
 
 [tool.uv.sources]
 torch = [
     { index = "pytorch-cpu",   extra = "cpu"   },
-    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu130", extra = "cu130" },
 ]
 torchaudio = [
     { index = "pytorch-cpu",   extra = "cpu"   },
-    { index = "pytorch-cu126", extra = "cu126" },
+    { index = "pytorch-cu130", extra = "cu130" },
 ]
 
 [[tool.uv.index]]
@@ -109,8 +109,8 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [[tool.uv.index]]
-name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [project.scripts]

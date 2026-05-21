@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Emit the active uv extras variant ("cpu" or "cu126") for this checkout.
+# Emit the active uv extras variant ("cpu" or "cu130") for this checkout.
 #
 # Reads <repo>/.stt-variant.local (gitignored). Absent file => "cpu". Anything
-# other than "cpu" or "cu126" is rejected with a clear error so a typo doesn't
+# other than "cpu" or "cu130" is rejected with a clear error so a typo doesn't
 # silently fall back to the default.
 #
 # Wrappers (run_uv.sh, Makefile targets) call this and pass `--extra ${variant}`
@@ -21,14 +21,14 @@ else
 fi
 
 case "$VARIANT" in
-    cpu|cu126)
+    cpu|cu130)
         printf '%s\n' "$VARIANT"
         ;;
     "")
         printf '%s\n' "cpu"
         ;;
     *)
-        printf "unknown variant '%s' in .stt-variant.local -- expected 'cpu' or 'cu126'\n" "$VARIANT" >&2
+        printf "unknown variant '%s' in .stt-variant.local -- expected 'cpu' or 'cu130'\n" "$VARIANT" >&2
         exit 1
         ;;
 esac
