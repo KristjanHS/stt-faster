@@ -69,7 +69,7 @@ jobs:
 
       - name: Sync dev dependencies
         run: |
-          uv sync --group dev --frozen
+          uv sync --extra cpu --group dev --frozen
 
       - name: Run Bandit scan (local)
         run: |
@@ -100,7 +100,7 @@ jobs:
 
       - name: Sync dev dependencies
         run: |
-          uv sync --group dev --frozen
+          uv sync --extra cpu --group dev --frozen
 
       - name: Run detect-secrets scan
         run: |
@@ -135,7 +135,7 @@ jobs:
 
       - name: Sync dev dependencies
         run: |
-          uv sync --group dev --frozen
+          uv sync --extra cpu --group dev --frozen
 
       - name: Run detect-secrets scan (local)
         run: |
