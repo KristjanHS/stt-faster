@@ -73,9 +73,23 @@ SUPPORTED FORMATS:
 ========================================
 
 OUTPUT:
-Each audio file generates a .json (transcript with per-segment timestamps,
-detected language, language probability) and a .txt (plain text) when run
-with `--output-format both`, which is the default for these batch files.
+Each audio file generates a .txt transcript with range timestamps and
+speaker labels by default:
+
+  [00:00:00.40 --> 00:00:03.05] SPEAKER_00: Tere, kuidas läheb?
+  [00:00:03.10 --> 00:00:05.70] SPEAKER_01: Aitäh, hästi.
+
+That is the default for the 7 production 1:1-meeting bats
+(transcribe_estonian_*.bat, transcribe_english_*.bat).
+
+compare_variants.bat is the one exception: it still emits .json + .txt
+(--output-format both) and runs with --no-diarize, because the variant-
+comparison report consumes JSON and doesn't need speaker labels per variant.
+
+Diarization requires a HuggingFace token; see
+  docs\diarization_setup.md
+for first-time setup. To skip speaker labels in a custom run, pass
+--no-diarize to transcribe_manager.py process (timestamps stay).
 
 Single-variant runs land under:   <audio_folder>\processed\
 Multi-variant runs land under:    <audio_folder>\YYYY-MM-DDTHH-MM-SS\

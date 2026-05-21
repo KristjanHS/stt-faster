@@ -24,7 +24,7 @@ Generate requirements.txt based on uv.lock: `make export-reqs`
 
 ## Audio Transcription
 
-Batch audio transcription with Estonian (default) and English models. [Technical details →](docs/TRANSCRIPTION_SOLUTION.md)
+Batch audio transcription with Estonian (default) and English models, with speaker diarization on by default. [Technical details →](docs/Transcription_solution.md) · [Diarization setup (HF token) →](docs/diarization_setup.md)
 
 ### Quick Start
 
@@ -44,7 +44,7 @@ Batch audio transcription with Estonian (default) and English models. [Technical
 
 **Model presets**: `et-large` (Estonian, default), `large8gb` (English/multi, best accuracy), `turbo` (fast), `distil` (fastest)
 
-**Output**: Files moved to `processed/` subfolder with JSON transcripts. Failed files in `failed/` subfolder.
+**Output**: Files moved to `processed/` subfolder with `.txt` transcripts (range timestamps + speaker labels by default). Use `--output-format both` for `.json` alongside, or `--no-diarize` to skip speaker labels. Failed files in `failed/` subfolder.
 
 **Troubleshooting**: For WSL paths use `/mnt/c/Users/...`. Delete `~/.local/share/stt-faster/runs.jsonl` to reset run history.
 
