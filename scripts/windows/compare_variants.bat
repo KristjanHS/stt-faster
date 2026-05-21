@@ -117,7 +117,7 @@ if /i "!STT_RUNTIME!"=="wsl" (
       -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
       -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
       --entrypoint python ^
-      stt-faster:latest /app/scripts/generate_variant_report.py --far-speaker-range 252-291 --silence-range 19-61
+      stt-faster:latest /app/scripts/generate_variant_report.py /workspace --far-speaker-range 252-291 --silence-range 19-61
 )
 set "REPORT_ERROR=!errorlevel!"
 
