@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import struct
+import sys
+import types
 import wave
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 import pytest
 
@@ -23,6 +24,20 @@ def _make_http_error(status_code: int) -> Exception:
     exc.response = response  # type: ignore[assignment]
     exc.server_message = None
     return exc
+
+
+def _install_pyannote_stub(monkeypatch: pytest.MonkeyPatch, from_pretrained_impl: Any) -> None:
+    # Stub pyannote.audio in sys.modules so run_pyannote's lazy
+    # `from pyannote.audio import Pipeline` resolves to a fake. The real import
+    # costs ~5s (loads torch + sklearn + hf_hub); these error-mapping tests
+    # never exercise pyannote internals, so paying it is pure overhead.
+    stub_pipeline = type("Pipeline", (), {"from_pretrained": staticmethod(from_pretrained_impl)})
+    stub_audio = types.ModuleType("pyannote.audio")
+    stub_audio.Pipeline = stub_pipeline  # type: ignore[attr-defined]
+    stub_root = types.ModuleType("pyannote")
+    stub_root.audio = stub_audio  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "pyannote", stub_root)
+    monkeypatch.setitem(sys.modules, "pyannote.audio", stub_audio)
 
 
 class TestRunPyannoteErrors:
@@ -45,9 +60,9 @@ class TestRunPyannoteErrors:
         def raise_401(*_: Any, **__: Any) -> Any:
             raise _make_http_error(401)
 
-        with patch("pyannote.audio.Pipeline.from_pretrained", side_effect=raise_401):
-            with pytest.raises(DiarizationConfigError) as exc_info:
-                run_pyannote("fake.wav")
+        _install_pyannote_stub(monkeypatch, raise_401)
+        with pytest.raises(DiarizationConfigError) as exc_info:
+            run_pyannote("fake.wav")
         msg = str(exc_info.value)
         assert "401" in msg
         assert "huggingface.co/settings/tokens" in msg
@@ -61,9 +76,9 @@ class TestRunPyannoteErrors:
         def raise_403(*_: Any, **__: Any) -> Any:
             raise _make_http_error(403)
 
-        with patch("pyannote.audio.Pipeline.from_pretrained", side_effect=raise_403):
-            with pytest.raises(DiarizationConfigError) as exc_info:
-                run_pyannote("fake.wav")
+        _install_pyannote_stub(monkeypatch, raise_403)
+        with pytest.raises(DiarizationConfigError) as exc_info:
+            run_pyannote("fake.wav")
         msg = str(exc_info.value)
         assert "403" in msg
         assert "pyannote/speaker-diarization-community-1" in msg
