@@ -173,6 +173,11 @@ show-variant:; @cat .stt-variant.local 2>/dev/null || echo "(default: cpu)"
 
 ### 5.6 Docker
 
+> **See §8c for the shipped form.** Both `Dockerfile` and `docker/app.Dockerfile`
+> pass `--extra ${STT_VARIANT}` directly to `uv sync` (no temp variant file, no
+> `run_uv.sh` copy step inside the image). The form below is the original
+> design, retained for the audit trail.
+
 ```dockerfile
 ARG STT_VARIANT=cpu
 RUN echo "$STT_VARIANT" > .stt-variant.local && ./run_uv.sh

@@ -165,8 +165,10 @@ Input Folder/
 Core dependencies (in `pyproject.toml`):
 - `faster-whisper`: Fast Whisper implementation via CTranslate2
 - `huggingface_hub`: Model downloading and caching
-- `ctranslate2==4.4.0`: Inference engine
+- `ctranslate2`: Inference engine
 - `ffmpeg-python`: Audio preprocessing (for variants with preprocessing)
+
+**CPU / GPU install variants**: `./run_uv.sh` installs CPU torch wheels by default. GPU hosts run `make use-gpu` once to switch to the `cu130` extra (writes `.stt-variant.local`); subsequent syncs auto-pick GPU. Mechanism documented in `docs/plans/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`; runtime constraints (torch/torchaudio floors) in `docs/diarization_setup.md`.
 
 ## Output Formats
 
