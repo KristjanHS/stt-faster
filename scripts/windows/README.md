@@ -50,6 +50,10 @@ A new transcribe bat is ~19 lines. Copy any existing one (e.g. `transcribe_engli
 
 ```bat
 @echo off
+REM VARIANTS / DIARIZE / NUM_SPEAKERS deliberately sit BEFORE `setlocal` so
+REM they're visible at the top of the file for editing. CMD doesn't unset
+REM them when `setlocal` runs, and the helpers pick them up via delayed
+REM expansion that propagates across `call`.
 set "VARIANTS=52"
 set "DIARIZE="          REM "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
 set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-detect
@@ -59,7 +63,12 @@ set "STT_CALLER_DIR=%~dp0"
 set "STT_TITLE=Audio Transcription - <LANG> (<source>)"
 set "STT_MODEL=<model display string>"
 set "STT_LANG=<English | Estonian | ...>"
-set "STT_CLI_TAIL=--preset <preset> --language <code> --output-format txt"
+set "STT_CLI_TAIL=--language <code> --output-format txt"
+REM Add `--preset <name>` to STT_CLI_TAIL if the variant needs a non-default
+REM preset (e.g. `--preset turbo` for English, `--preset et-32` for CPU-only
+REM Estonian). Default Estonian model is `et-large` and is picked up
+REM automatically when `--preset` is omitted; the existing
+REM `transcribe_estonian_{Desk,Teams,Online}.bat` bats show this pattern.
 call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
 call "%~dp0_variants.bat"
 call "%~dp0_banner.bat"

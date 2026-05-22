@@ -29,6 +29,13 @@ set "DOCKER_ENV_ARGS="
 if defined HF_TOKEN set "DOCKER_ENV_ARGS=!DOCKER_ENV_ARGS! -e HF_TOKEN=!HF_TOKEN!"
 if defined HF_XET_HIGH_PERFORMANCE set "DOCKER_ENV_ARGS=!DOCKER_ENV_ARGS! -e HF_XET_HIGH_PERFORMANCE=!HF_XET_HIGH_PERFORMANCE!"
 
+REM Banner-line for HF_TOKEN state - lifted from the old docker-forced bat.
+REM Useful for debugging "why are model downloads slow / rate-limited" without
+REM having to inspect the env. The diarize fail-fast above covers the hard
+REM failure (DIARIZE=1 + missing token); this echo covers the soft case
+REM (rate-limit warnings when downloading models without an authenticated session).
+if defined HF_TOKEN (echo [stt-faster] HF token: set ^(passed to container^)) else (echo [stt-faster] HF token: not set ^(rate-limit warnings expected on first model download^))
+
 REM ---- Diarize fail-fast: pyannote requires HF_TOKEN with the license accepted ----
 REM Fire before docker run so the user gets a clear hint instead of a
 REM mid-pipeline crash inside the container. Trigger on the raw caller
