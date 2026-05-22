@@ -160,7 +160,7 @@ def print_recommendations(results: dict[str, bool]) -> None:
         logger.info("\n3. Install cuDNN:")
         logger.info("   Ubuntu/Debian:")
         logger.info("   sudo apt-get update")
-        logger.info("   sudo apt-get install -y cudnn9-cuda-12")
+        logger.info("   sudo apt-get install -y cudnn9-cuda-13")
 
     if not results.get("ctranslate2"):
         logger.info("\n4. Reinstall ctranslate2 with CUDA support:")
