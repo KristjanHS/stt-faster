@@ -16,7 +16,6 @@ from __future__ import annotations
 import gc
 import logging
 import os
-import threading
 import time
 import warnings
 from typing import TYPE_CHECKING, Any, cast
@@ -39,46 +38,67 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
-DIARIZE_HEARTBEAT_INTERVAL_SECONDS = 60.0
+# Mirrors backend/transcribe.py PROGRESS_LOG_INTERVAL_SECONDS — duplicated
+# rather than imported to keep diarize free of cross-module coupling.
+PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 
 
-class _DiarizeHeartbeat:
-    """Background thread that logs diarization progress every 60s.
+class _DiarizeProgressHook:
+    """Pyannote hook that emits per-stage progress via LOGGER.
 
-    Pyannote's pipeline call is a single opaque forward pass, so the most
-    useful real-time signal is wall-clock elapsed vs. source-audio duration —
-    same minute cadence as the transcription progress logger.
+    Pyannote 4.x calls the hook on stage entry (``completed=None, total=None``)
+    and then repeatedly within long stages with monotonic ``(completed, total)``
+    ints. Step transitions always log; in-stage updates are throttled to one
+    line per ``PROGRESS_LOG_INTERVAL_SECONDS`` for cadence parity with the
+    transcription progress logger.
     """
 
     def __init__(self, audio_duration: float | None) -> None:
         self._audio_duration = audio_duration
-        self._stop = threading.Event()
-        self._thread = threading.Thread(target=self._run, daemon=True)
-        self._start_time = time.time()
+        self._start_time = 0.0
+        self._last_log_time = 0.0
+        self._last_step: str | None = None
 
-    def __enter__(self) -> "_DiarizeHeartbeat":
+    def __enter__(self) -> "_DiarizeProgressHook":
         self._start_time = time.time()
-        self._thread.start()
+        self._last_log_time = self._start_time
+        self._last_step = None
         return self
 
     def __exit__(self, *_exc: object) -> None:
-        self._stop.set()
-        self._thread.join(timeout=1.0)
+        return None
 
-    def _run(self) -> None:
-        while not self._stop.wait(DIARIZE_HEARTBEAT_INTERVAL_SECONDS):
-            elapsed_min = (time.time() - self._start_time) / 60
-            if self._audio_duration:
-                audio_min = self._audio_duration / 60
-                percent = min(elapsed_min / audio_min * 100, 999.0)
-                LOGGER.info(
-                    "⌛ Diarization progress: elapsed %.1f min on %.1f min audio (%.1f%% wall/audio)",
-                    elapsed_min,
-                    audio_min,
-                    percent,
-                )
-            else:
-                LOGGER.info("⌛ Diarization progress: elapsed %.1f min", elapsed_min)
+    def __call__(
+        self,
+        step_name: str,
+        step_artifact: Any,
+        file: Any | None = None,
+        total: int | None = None,
+        completed: int | None = None,
+    ) -> None:
+        now = time.time()
+        is_transition = step_name != self._last_step or (completed is None and total is None)
+        if not is_transition and (now - self._last_log_time) < PROGRESS_LOG_INTERVAL_SECONDS:
+            return
+        elapsed_min = (now - self._start_time) / 60
+        if completed is not None and total:
+            percent = min(completed / total * 100, 999.0)
+            LOGGER.info(
+                "⌛ Diarization progress: %s %d/%d (%.1f%%), elapsed %.1f min",
+                step_name,
+                completed,
+                total,
+                percent,
+                elapsed_min,
+            )
+        else:
+            LOGGER.info(
+                "⌛ Diarization progress: %s, elapsed %.1f min",
+                step_name,
+                elapsed_min,
+            )
+        self._last_log_time = now
+        self._last_step = step_name
 
 
 def _read_hf_token() -> str | None:
@@ -151,8 +171,9 @@ def run_pyannote(
     DiarizationConfigError on HF_TOKEN/license failures (batch-aborting) and
     DiarizationRuntimeError on per-file pyannote crashes.
 
-    ``audio_duration`` (seconds, optional) drives the heartbeat progress log;
-    when None the heartbeat falls back to elapsed-only output.
+    ``audio_duration`` (seconds, optional) is retained for caller-side context
+    around the surrounding 🎙️/✅ bookend lines; the per-stage progress lines
+    emitted via pyannote's hook protocol do not render it.
     """
     token = _read_hf_token()
     if not token:
@@ -212,10 +233,11 @@ def run_pyannote(
         else:
             LOGGER.info("🐌 Diarization pipeline on CPU (no CUDA available)")
         waveform, sample_rate = _load_audio_tensor(audio_path)
-        with _DiarizeHeartbeat(audio_duration):
+        with _DiarizeProgressHook(audio_duration) as hook:
             diarization: Any = pipeline(
                 {"waveform": waveform, "sample_rate": sample_rate},
                 num_speakers=num_speakers,
+                hook=hook,
             )
     except DiarizationRuntimeError:
         raise
