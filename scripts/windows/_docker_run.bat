@@ -6,7 +6,7 @@ REM   - `setlocal enabledelayedexpansion` before calling.
 REM   - Caller (typically _transcribe.bat) has run _runtime.bat + _variants.bat
 REM     already, so these are populated:
 REM       STT_AUDIO_DIR_RESOLVED  (Windows path; mounted at /workspace)
-REM       STT_DIARIZE_ARGS        (e.g. "--diarize --num-speakers 2" or empty)
+REM       STT_DIARIZE_ARGS        (e.g. "--diarize --num-speakers 2" or "--no-diarize"; always explicit)
 REM       VARIANTS_COMMA          ("52" / "1,36,44" / ...)
 REM   - Caller sets STT_CLI_TAIL with the preset/language/output-format flags
 REM     (e.g. "--preset turbo --language en --output-format txt").

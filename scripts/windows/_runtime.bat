@@ -17,7 +17,10 @@ REM   STT_RUNTIME            - "wsl" or "docker"  (this helper exits /b 1 on "no
 REM   STT_WSL_REPO           - hardcoded WSL repo path
 REM   STT_AUDIO_DIR_RESOLVED - Windows path to audio dir (trailing \ stripped)
 REM   STT_AUDIO_DIR_WSL      - same path translated to /mnt/<drive>/... form
-REM   STT_DIARIZE_ARGS       - composed CLI args ("--diarize --num-speakers 2", or empty)
+REM   STT_DIARIZE_ARGS       - composed CLI args ("--diarize --num-speakers 2"
+REM                            or "--no-diarize"). Always explicit, never empty -
+REM                            the Python CLI's --diarize/--no-diarize default is
+REM                            True, so omission silently re-enables diarization.
 REM   STT_REPO_GUESS         - guessed repo root (`%~dp0..\..`); used by auto-build
 REM
 REM Scratch vars (also leak to caller scope - reserved names, do not reuse):
@@ -147,13 +150,18 @@ REM `set "DIARIZE="` may either undefine DIARIZE or leave it defined-but-empty
 REM depending on the Windows/CMD build; lines below handle both cases.
 REM `!NUM_SPEAKERS!` (delayed) inside the parens block below avoids the
 REM parse-time-expansion trap with caller-scope vars.
-set "STT_DIARIZE_ARGS="
+REM
+REM STT_DIARIZE_ARGS is ALWAYS explicit (`--diarize` or `--no-diarize`),
+REM never empty. The Python CLI's `--diarize/--no-diarize` default is True
+REM (see backend/cli/transcription_commands.py), so omitting the flag would
+REM silently re-enable diarization even when the bat banner says "off".
 set "STT_DIARIZE_ON=0"
 if /i "%DIARIZE%"=="1" set "STT_DIARIZE_ON=1"
 if not defined DIARIZE if /i "%STT_RUNTIME%"=="wsl" set "STT_DIARIZE_ON=1"
 if defined DIARIZE if "%DIARIZE%"=="" if /i "%STT_RUNTIME%"=="wsl" set "STT_DIARIZE_ON=1"
 if /i "%DIARIZE%"=="0" set "STT_DIARIZE_ON=0"
 
+set "STT_DIARIZE_ARGS=--no-diarize"
 if "%STT_DIARIZE_ON%"=="1" (
     set "STT_DIARIZE_ARGS=--diarize"
     if defined NUM_SPEAKERS if not "!NUM_SPEAKERS!"=="" set "STT_DIARIZE_ARGS=--diarize --num-speakers !NUM_SPEAKERS!"
