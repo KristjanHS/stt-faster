@@ -8,46 +8,12 @@ set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-det
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
-call "%~dp0_runtime.bat"
-if errorlevel 1 (
-    pause
-    exit /b 1
-)
-
-REM Normalize space-separated VARIANTS to comma-separated for --variants.
-set "VARIANTS_COMMA="
-set /a VARIANT_COUNT=0
-for %%v in (!VARIANTS!) do (
-    if "!VARIANTS_COMMA!"=="" (
-        set "VARIANTS_COMMA=%%v"
-    ) else (
-        set "VARIANTS_COMMA=!VARIANTS_COMMA!,%%v"
-    )
-    set /a VARIANT_COUNT+=1
-)
-
-echo ========================================
-echo Audio Transcription - ESTONIAN (Online)
-echo ========================================
-echo Model:    TalTech Estonian Whisper (et-large)
-echo Language: Estonian
-if !VARIANT_COUNT!==1 (echo Variant:  !VARIANTS_COMMA!) else (echo Variants: !VARIANTS_COMMA! ^(!VARIANT_COUNT! variants^))
-echo.
-
-if /i "!STT_RUNTIME!"=="wsl" (
-    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --language et --output-format txt !STT_DIARIZE_ARGS! --variants '!VARIANTS_COMMA!'"
-) else (
-    docker run --rm ^
-      -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
-      -v "%USERPROFILE%\.cache\hf:/home/appuser/.cache/hf" ^
-      -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
-      stt-faster:latest process /workspace --language et --output-format txt !STT_DIARIZE_ARGS! --variants "!VARIANTS_COMMA!"
-)
-
-echo.
-echo ========================================
-echo Processing Complete!
-echo ========================================
-echo Processed: !STT_AUDIO_DIR_RESOLVED!\processed\
-echo Failed:    !STT_AUDIO_DIR_RESOLVED!\failed\
-pause
+set "STT_TITLE=Audio Transcription - ESTONIAN (Online)"
+set "STT_MODEL=TalTech Estonian Whisper (et-large)"
+set "STT_LANG=Estonian"
+set "STT_CLI_TAIL=--language et --output-format txt"
+call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
+call "%~dp0_variants.bat"
+call "%~dp0_banner.bat"
+call "%~dp0_transcribe.bat"
+call "%~dp0_footer.bat"
