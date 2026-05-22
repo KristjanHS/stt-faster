@@ -193,7 +193,14 @@ def run_pyannote(
             "see docs/diarization_setup.md."
         )
 
+    import torch
+
     try:
+        if torch.cuda.is_available():
+            pipeline.to(torch.device("cuda"))  # pyright: ignore[reportPrivateImportUsage]
+            LOGGER.info("🚀 Diarization pipeline on GPU (CUDA)")
+        else:
+            LOGGER.info("🐌 Diarization pipeline on CPU (no CUDA available)")
         waveform, sample_rate = _load_audio_tensor(audio_path)
         with _DiarizeHeartbeat(audio_duration):
             diarization: Any = pipeline(
