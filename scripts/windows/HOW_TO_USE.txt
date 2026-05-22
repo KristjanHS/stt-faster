@@ -90,6 +90,9 @@ A transcribe bat is ~19 lines. Copy any existing one and edit the knobs at
 the top + four STT_* lines (title / model / language / CLI tail):
 
   @echo off
+  REM The three knobs below sit BEFORE setlocal on purpose - they're meant
+  REM to be edited at the top of the file. CMD doesn't unset them when
+  REM setlocal runs, and the helpers read them via delayed expansion.
   set "VARIANTS=52"
   set "DIARIZE="          REM "" = runtime default; "0" = off; "1" = on
   set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on
@@ -98,7 +101,11 @@ the top + four STT_* lines (title / model / language / CLI tail):
   set "STT_TITLE=Audio Transcription - <LANG> (<source>)"
   set "STT_MODEL=<model display string>"
   set "STT_LANG=<English | Estonian | ...>"
-  set "STT_CLI_TAIL=--preset <preset> --language <code> --output-format txt"
+  set "STT_CLI_TAIL=--language <code> --output-format txt"
+  REM Add `--preset <name>` to STT_CLI_TAIL when the variant needs a
+  REM non-default preset (e.g. `--preset turbo` for English, `--preset et-32`
+  REM for CPU-only Estonian). Default Estonian preset is `et-large` and is
+  REM picked up automatically when `--preset` is omitted.
   call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
   call "%~dp0_variants.bat"
   call "%~dp0_banner.bat"
