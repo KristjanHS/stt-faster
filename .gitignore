@@ -103,6 +103,9 @@ coverage/
 # Analysis & Scan Reports
 *.sarif
 
+# Local audio fixtures (developer-supplied, not redistributed)
+tests/test.mp3
+
 # Third-party libraries you've vendored/included
 vendor/
 third_party/

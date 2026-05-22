@@ -7,14 +7,32 @@ skips when absent.
 
 ## `two_speakers_10s.wav`
 
-Used by `tests/integration/test_diarize_e2e.py`. A ~10-second WAV with
-two distinct speakers, mono or stereo, 16 kHz or higher.
+Used by `tests/integration/test_diarize_e2e.py`. A 10-second mono
+16 kHz PCM WAV with two distinct speakers.
 
-Not checked into git. The integration test skips cleanly when the file
-is absent. Acceptable sources:
+Not checked into git. The integration test skips cleanly when the
+file is absent.
 
-- **Fresh recording**: record two people each saying ~5s. Simplest
-  path; license is your own.
+### Recommended source: pyannote-audio `sample.wav` (MIT)
+
+The upstream pyannote-audio repo ships a 30s diarization demo at
+`src/pyannote/audio/sample/sample.wav` with a companion `sample.rttm`
+ground truth labelling two speakers (`speaker90`, `speaker91`)
+alternating from ~6.7s onward. Skip the first 5s and take the next 10s
+so the window straddles the speaker change:
+
+```sh
+curl -fsSL -o /tmp/pa_sample.wav \
+  https://github.com/pyannote/pyannote-audio/raw/main/src/pyannote/audio/sample/sample.wav
+ffmpeg -y -ss 5 -i /tmp/pa_sample.wav -t 10 -ac 1 -ar 16000 -c:a pcm_s16le \
+  tests/fixtures/audio/two_speakers_10s.wav
+```
+
+License: MIT (same as the pyannote-audio repo).
+
+### Fallback sources
+
+- **Fresh recording**: record two people each saying ~5s. License is your own.
 - **LibriSpeech** (CC BY 4.0): concatenate two short utterances from
   different speakers in `dev-clean/`. Trim to ≤ 10s with `ffmpeg`.
 - **VoxConverse** (CC BY 4.0): excerpt a 10s span from a diarized
@@ -22,7 +40,7 @@ is absent. Acceptable sources:
 - **Public-domain podcast**: extract a 10s window from a
   CC0/public-domain interview.
 
-Place the file at `tests/fixtures/audio/two_speakers_10s.wav` and run:
+### Running the test
 
 ```sh
 HF_TOKEN=... .venv/bin/python -m pytest tests/integration/test_diarize_e2e.py -q
