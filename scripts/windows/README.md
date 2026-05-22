@@ -27,9 +27,47 @@ After setup, every bat in `scripts\windows\` works without further configuration
 | `compare_variants.bat` | Estonian | all builtin variants | Comparison run across every variant in the registry; also generates the HTML report |
 | `report_only.bat` | – | – | Regenerates the variant HTML report from existing outputs |
 | `check_recent.bat` | – | – | Shows recent transcription run history (`stt-faster db recent`) |
-| `_runtime.bat` | – | – | Shared helper: runtime probe, audio-dir resolution, WSL path translation. Not invoked directly. |
+| `_*.bat` | – | – | Shared helpers — see [Helpers](#helpers) below. Not invoked directly. |
 
 To change which variant a file uses, edit the `set "VARIANTS=..."` line at the top — space-separated for multiple (e.g. `set "VARIANTS=1 36 44"`).
+
+## Helpers
+
+The transcribe bats delegate the boilerplate to six helper files. None of them are meant to be double-clicked — they're called from the top-level bats. Each helper documents its caller contract + outputs + scratch-var leaks in a header comment.
+
+| Helper | Purpose |
+|--------|---------|
+| `_runtime.bat` | Probes WSL / Docker, resolves audio dir, translates Windows path → `/mnt/...`, composes `STT_DIARIZE_ARGS`, prints the runtime banner. Owns the docker-image auto-build prompt (opt out via `STT_NO_AUTOBUILD=1`). |
+| `_variants.bat` | Normalizes `VARIANTS` (space-separated) → `VARIANTS_COMMA` + `VARIANT_COUNT`. |
+| `_banner.bat` | Prints the title / model / language / variant(s) header. Honors `STT_TITLE_SUFFIX` (e.g. `[DOCKER FORCED]`). |
+| `_transcribe.bat` | Dispatches WSL vs Docker. WSL branch invokes `wsl -e bash -c "..."`; docker branch delegates to `_docker_run.bat`. |
+| `_docker_run.bat` | Composes `DOCKER_ENV_ARGS` from `HF_TOKEN` / `HF_XET_HIGH_PERFORMANCE`, runs the diarize fail-fast HF_TOKEN guard, and executes `docker run`. |
+| `_footer.bat` | Prints the "Processing Complete!" trailer + `pause`. |
+
+## Adding a new transcribe variant
+
+A new transcribe bat is ~19 lines. Copy any existing one (e.g. `transcribe_english_Online.bat`) and edit only the knobs at the top + four `STT_*` lines:
+
+```bat
+@echo off
+set "VARIANTS=52"
+set "DIARIZE="          REM "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
+set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-detect
+
+setlocal enabledelayedexpansion
+set "STT_CALLER_DIR=%~dp0"
+set "STT_TITLE=Audio Transcription - <LANG> (<source>)"
+set "STT_MODEL=<model display string>"
+set "STT_LANG=<English | Estonian | ...>"
+set "STT_CLI_TAIL=--preset <preset> --language <code> --output-format txt"
+call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
+call "%~dp0_variants.bat"
+call "%~dp0_banner.bat"
+call "%~dp0_transcribe.bat"
+call "%~dp0_footer.bat"
+```
+
+For docker-forced variants, also `set "STT_FORCE_DOCKER=1"` and `set "STT_TITLE_SUFFIX=[DOCKER FORCED]"` before the `_runtime.bat` call. See `transcribe_english_Online_docker.bat` for the canonical example.
 
 ## Usage
 
@@ -73,16 +111,18 @@ Results land next to the audio file:
 
 ## How the runtime dispatch works
 
-Every bat calls `_runtime.bat` first. The helper:
+Every transcribe bat calls `_runtime.bat` first. The helper:
 
-1. Probes WSL: `where wsl` AND `wsl -e test -x <STT_WSL_REPO>/.venv/bin/python`. Both pass → `STT_RUNTIME=wsl`.
+1. Probes WSL: `where wsl` AND `wsl -e test -x <STT_WSL_REPO>/.venv/bin/python`. Both pass → `STT_RUNTIME=wsl`. Skipped when the caller sets `STT_FORCE_DOCKER=1`.
 2. If still unset, probes Docker: `where docker` AND `docker image inspect stt-faster:latest`. Both pass → `STT_RUNTIME=docker`.
-3. If neither probe matches, prints an error pointing at `setup.bat` and exits non-zero.
-4. Resolves the audio dir: `STT_AUDIO_DIR` env var → caller's `STT_CALLER_DIR` (set to `%~dp0` by the bat) → `%CD%`. Trailing backslash trimmed.
-5. Translates the resolved Windows path to `/mnt/<drive>/...` form for WSL invocations.
-6. Prints a banner: `[stt-faster] runtime: <wsl|docker>`, audio dir, and (when WSL) the WSL repo path.
+3. If docker is on PATH but the image is missing AND `STT_NO_AUTOBUILD` is not `1`, prompts to build it (`docker build -t stt-faster:latest .` from the repo root). On Y + successful build → `STT_RUNTIME=docker`. On N / build-failed / repo-not-detected, exits non-zero.
+4. If both probes (and auto-build) failed, prints `ERROR: no runtime available` and exits non-zero.
+5. Resolves the audio dir: `STT_AUDIO_DIR` env var → caller's `STT_CALLER_DIR` (set to `%~dp0` by the bat) → `%CD%`. Trailing backslash trimmed.
+6. Translates the resolved Windows path to `/mnt/<drive>/...` form for WSL invocations.
+7. Composes `STT_DIARIZE_ARGS` from caller `DIARIZE` / `NUM_SPEAKERS` knobs + runtime default (WSL=on, Docker=off).
+8. Prints a banner: `[stt-faster] runtime: <wsl|docker>`, audio dir, WSL repo path (when WSL), diarize state.
 
-The calling bat then branches on `STT_RUNTIME` and dispatches the same Python invocation to either WSL (`wsl -e bash -c "..."`) or the Docker image (`docker run --rm -v ... stt-faster:latest ...`).
+After `_runtime.bat` returns, the bat calls `_variants.bat`, `_banner.bat`, `_transcribe.bat`, and `_footer.bat` in sequence. `_transcribe.bat` is the one that branches on `STT_RUNTIME` — it dispatches the same Python invocation to either WSL (`wsl -e bash -c "..."`) or the Docker image (via `_docker_run.bat`).
 
 ## Model presets
 

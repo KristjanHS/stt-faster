@@ -69,6 +69,48 @@ e.g. `set "VARIANTS=1 36 44"`.
 
 ========================================
 
+SHARED HELPERS (_*.bat, not invoked directly):
+
+  _runtime.bat       - Runtime probe (WSL / Docker), audio-dir resolution,
+                       WSL path translation, diarize-args composition,
+                       docker-image auto-build prompt.
+  _variants.bat      - Normalizes VARIANTS (space-separated) to comma form.
+  _banner.bat        - Prints title / model / language / variant(s) header.
+  _transcribe.bat    - Dispatches WSL vs Docker.
+  _docker_run.bat    - Composes docker env + runs the production image.
+  _footer.bat        - "Processing Complete!" trailer + pause.
+
+Each helper documents its caller contract and outputs in a header comment.
+
+========================================
+
+ADDING A NEW TRANSCRIBE VARIANT:
+
+A transcribe bat is ~19 lines. Copy any existing one and edit the knobs at
+the top + four STT_* lines (title / model / language / CLI tail):
+
+  @echo off
+  set "VARIANTS=52"
+  set "DIARIZE="          REM "" = runtime default; "0" = off; "1" = on
+  set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on
+  setlocal enabledelayedexpansion
+  set "STT_CALLER_DIR=%~dp0"
+  set "STT_TITLE=Audio Transcription - <LANG> (<source>)"
+  set "STT_MODEL=<model display string>"
+  set "STT_LANG=<English | Estonian | ...>"
+  set "STT_CLI_TAIL=--preset <preset> --language <code> --output-format txt"
+  call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
+  call "%~dp0_variants.bat"
+  call "%~dp0_banner.bat"
+  call "%~dp0_transcribe.bat"
+  call "%~dp0_footer.bat"
+
+For docker-forced variants, also set STT_FORCE_DOCKER=1 and
+STT_TITLE_SUFFIX=[DOCKER FORCED] before the _runtime.bat call.
+See transcribe_english_Online_docker.bat for the canonical example.
+
+========================================
+
 SUPPORTED FORMATS:
   .wav  .mp3  .m4a  .flac  .ogg  .aac
 
