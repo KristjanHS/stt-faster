@@ -1,13 +1,10 @@
 """Variant-aware transcription service implementation."""
 
-import json
 import logging
-from pathlib import Path
-from typing import Any
 
 from backend.preprocess.config import PreprocessConfig
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult, TranscriptionService
-from backend.transcribe import TranscriptionMetrics, format_segments_as_text
+from backend.transcribe import TranscriptionMetrics
 from backend.variants.executor import (
     create_variant_preprocess_runner,
     create_variant_transcribe_config,
@@ -120,29 +117,4 @@ class VariantTranscriptionService:
                 num_speakers=self._num_speakers,
             )
 
-        # Write output in the specified format
-        self._write_output(request.output_path, payload, self.output_format)
-
         return TranscriptionResult(metrics=metrics_container.get("value"), payload=payload)
-
-    def _write_output(self, output_path: str, payload: dict[str, Any], output_format: str) -> list[Path]:
-        """Write transcription output in the specified format."""
-        created_files: list[Path] = []
-        base_path = Path(output_path)
-
-        if output_format in ("txt", "both"):
-            txt_path = base_path.with_suffix(".txt")
-            txt_path.parent.mkdir(parents=True, exist_ok=True)
-            segments: list[dict[str, Any]] = payload.get("segments", [])
-            with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(format_segments_as_text(segments))
-            created_files.append(txt_path)
-
-        if output_format in ("json", "both"):
-            json_path = base_path.with_suffix(".json")
-            json_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(json_path, "w", encoding="utf-8") as f:
-                json.dump(payload, f, ensure_ascii=False, indent=2)
-            created_files.append(json_path)
-
-        return created_files

@@ -16,6 +16,8 @@ from __future__ import annotations
 import gc
 import logging
 import os
+import threading
+import time
 import warnings
 from typing import TYPE_CHECKING, Any, cast
 
@@ -23,6 +25,10 @@ from typing import TYPE_CHECKING, Any, cast
 # the failure path emits a UserWarning even though our tensor-input flow never
 # touches torchcodec at runtime. Filter once before the lazy pyannote import.
 warnings.filterwarnings("ignore", message=r".*torchcodec.*", category=UserWarning)
+# Pyannote's SAP pooling fires `std(): degrees of freedom is <= 0` whenever a
+# pooled window has a single frame — cosmetic upstream artefact, no effect on
+# the returned diarization. Suppress so the bat-driven console stays readable.
+warnings.filterwarnings("ignore", message=r"std\(\): degrees of freedom.*", category=UserWarning)
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.diarize.pipeline import SpeakerTurn
@@ -33,6 +39,46 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
+DIARIZE_HEARTBEAT_INTERVAL_SECONDS = 60.0
+
+
+class _DiarizeHeartbeat:
+    """Background thread that logs diarization progress every 60s.
+
+    Pyannote's pipeline call is a single opaque forward pass, so the most
+    useful real-time signal is wall-clock elapsed vs. source-audio duration —
+    same minute cadence as the transcription progress logger.
+    """
+
+    def __init__(self, audio_duration: float | None) -> None:
+        self._audio_duration = audio_duration
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, daemon=True)
+        self._start_time = time.time()
+
+    def __enter__(self) -> "_DiarizeHeartbeat":
+        self._start_time = time.time()
+        self._thread.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self._stop.set()
+        self._thread.join(timeout=1.0)
+
+    def _run(self) -> None:
+        while not self._stop.wait(DIARIZE_HEARTBEAT_INTERVAL_SECONDS):
+            elapsed_min = (time.time() - self._start_time) / 60
+            if self._audio_duration:
+                audio_min = self._audio_duration / 60
+                percent = min(elapsed_min / audio_min * 100, 999.0)
+                LOGGER.info(
+                    "⌛ Diarization progress: elapsed %.1f min on %.1f min audio (%.1f%% wall/audio)",
+                    elapsed_min,
+                    audio_min,
+                    percent,
+                )
+            else:
+                LOGGER.info("⌛ Diarization progress: elapsed %.1f min", elapsed_min)
 
 
 def _read_hf_token() -> str | None:
@@ -97,12 +143,16 @@ def run_pyannote(
     audio_path: str,
     *,
     num_speakers: int = 2,
+    audio_duration: float | None = None,
 ) -> list[SpeakerTurn]:
     """Run pyannote speaker-diarization-community-1 on the given audio file.
 
     Returns a list of SpeakerTurn ordered by start time. Raises
     DiarizationConfigError on HF_TOKEN/license failures (batch-aborting) and
     DiarizationRuntimeError on per-file pyannote crashes.
+
+    ``audio_duration`` (seconds, optional) drives the heartbeat progress log;
+    when None the heartbeat falls back to elapsed-only output.
     """
     token = _read_hf_token()
     if not token:
@@ -145,10 +195,11 @@ def run_pyannote(
 
     try:
         waveform, sample_rate = _load_audio_tensor(audio_path)
-        diarization: Any = pipeline(
-            {"waveform": waveform, "sample_rate": sample_rate},
-            num_speakers=num_speakers,
-        )
+        with _DiarizeHeartbeat(audio_duration):
+            diarization: Any = pipeline(
+                {"waveform": waveform, "sample_rate": sample_rate},
+                num_speakers=num_speakers,
+            )
     except DiarizationRuntimeError:
         raise
     except Exception as exc:
@@ -158,7 +209,10 @@ def run_pyannote(
         _release_cuda()
 
     turns: list[SpeakerTurn] = []
-    for segment, _, speaker in diarization.itertracks(yield_label=True):
+    # pyannote community-1 returns DiarizeOutput; .speaker_diarization is the
+    # Annotation that earlier model versions returned directly.
+    annotation = diarization.speaker_diarization
+    for segment, _, speaker in annotation.itertracks(yield_label=True):
         turns.append(SpeakerTurn(start=float(segment.start), end=float(segment.end), speaker=str(speaker)))
     turns.sort(key=lambda t: t.start)
     return turns

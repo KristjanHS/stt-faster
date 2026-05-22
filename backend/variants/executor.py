@@ -620,16 +620,37 @@ def _run_transcription(
         logprob_threshold=logprob_threshold,
     )
 
+    whisper_elapsed_min = (time.time() - transcribe_start) / 60
+    LOGGER.info(
+        "✅ Transcription complete: %d segments, elapsed %.1f min",
+        len(segment_payloads),
+        whisper_elapsed_min,
+    )
+
     if diarize:
         from backend.diarize import annotate as diarize_annotate  # noqa: PLC0415
 
-        annotate_kwargs: dict[str, Any] = {"num_speakers": num_speakers}
+        audio_minutes = (total_audio_duration or 0) / 60
+        LOGGER.info(
+            "🎙️  Starting diarization (%d speakers, %.1f min audio)",
+            num_speakers,
+            audio_minutes,
+        )
+        diarize_start = time.time()
+        annotate_kwargs: dict[str, Any] = {
+            "num_speakers": num_speakers,
+            "audio_duration": total_audio_duration,
+        }
         if diarize_runner is not None:
             annotate_kwargs["runner"] = diarize_runner
         segment_payloads = diarize_annotate(
             segment_payloads,
             str(preprocess_result.output_path),
             **annotate_kwargs,
+        )
+        LOGGER.info(
+            "✅ Diarization complete: elapsed %.1f min",
+            (time.time() - diarize_start) / 60,
         )
 
     transcribe_time = time.time() - transcribe_start

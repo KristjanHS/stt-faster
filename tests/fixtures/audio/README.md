@@ -7,7 +7,7 @@ skips when absent.
 
 ## `two_speakers_10s.wav`
 
-Used by `tests/integration/test_diarize_e2e.py`. A 10-second mono
+Used by `tests/integration/test_diarize_with_pyannote.py`. A 10-second mono
 16 kHz PCM WAV with two distinct speakers.
 
 Not checked into git. The integration test skips cleanly when the
@@ -18,13 +18,16 @@ file is absent.
 The upstream pyannote-audio repo ships a 30s diarization demo at
 `src/pyannote/audio/sample/sample.wav` with a companion `sample.rttm`
 ground truth labelling two speakers (`speaker90`, `speaker91`)
-alternating from ~6.7s onward. Skip the first 5s and take the next 10s
-so the window straddles the speaker change:
+alternating from ~6.7s onward. The first ~10s contain only short turns
+(≤1.7s each) which pyannote community-1 collapses into a single speaker.
+Skip to 10s and take the next 10s — that window lands on a 4.13s
+speaker90 block followed by a 3.43s speaker91 block, which community-1
+reliably separates:
 
 ```sh
 curl -fsSL -o /tmp/pa_sample.wav \
   https://github.com/pyannote/pyannote-audio/raw/main/src/pyannote/audio/sample/sample.wav
-ffmpeg -y -ss 5 -i /tmp/pa_sample.wav -t 10 -ac 1 -ar 16000 -c:a pcm_s16le \
+ffmpeg -y -ss 10 -i /tmp/pa_sample.wav -t 10 -ac 1 -ar 16000 -c:a pcm_s16le \
   tests/fixtures/audio/two_speakers_10s.wav
 ```
 
@@ -43,7 +46,7 @@ License: MIT (same as the pyannote-audio repo).
 ### Running the test
 
 ```sh
-HF_TOKEN=... .venv/bin/python -m pytest tests/integration/test_diarize_e2e.py -q
+HF_TOKEN=... .venv/bin/python -m pytest tests/integration/test_diarize_with_pyannote.py -q
 ```
 
 The test asserts: 2+ distinct speakers found; `SPEAKER_00` is the

@@ -1,4 +1,9 @@
-"""End-to-end diarization test on a real two-speaker fixture.
+"""Real-model diarization test on a two-speaker fixture.
+
+Lives in `tests/integration/` because it exercises a single subsystem
+(`backend.transcribe`) with a real pyannote model — not the full
+container-backed pipeline. The Docker pipeline equivalent is
+`tests/e2e/test_production_container.py::TestProductionDiarization`.
 
 Plan: docs/plans/archived/2026-05-21-diarization-txt-default-design.md §6.
 

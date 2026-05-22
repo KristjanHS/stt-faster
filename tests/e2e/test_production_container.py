@@ -34,7 +34,7 @@ SENSITIVE_ENV_VARS = {"HF_TOKEN", "HUGGING_FACE_HUB_TOKEN", "API_KEY", "SECRET",
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
 IMAGE_NAME = "stt-faster:test-prod"
-TEST_AUDIO_FILE = PROJECT_ROOT / "tests" / "test.mp3"
+DIARIZE_FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "audio" / "two_speakers_10s.wav"
 
 # HuggingFace token is now provided via the hf_token fixture in tests/conftest.py
 # Tests requiring the token should accept it as a fixture parameter
@@ -335,98 +335,6 @@ class TestProductionRuntime:
 
 
 @pytest.mark.docker
-@pytest.mark.network
-class TestProductionTranscription:
-    """Test actual transcription functionality (requires network for model download)."""
-
-    @pytest.mark.slow
-    def test_transcribe_with_test_audio(self, production_image: str, hf_token: str | None) -> None:
-        """Test transcription with actual audio file (slow, downloads model).
-
-        Note: test.mp3 is in Estonian, so we use the et-large preset (production default).
-        GPU is enabled if available for faster transcription.
-
-        Authentication: Uses HF_TOKEN if available, otherwise relies on huggingface-cli login.
-        If the model requires authentication and neither is available, the test will fail
-        with a clear error from huggingface_hub.
-        """
-        if not TEST_AUDIO_FILE.exists():
-            pytest.fail("Test audio file not found; e2e container test requires tests/test.mp3")
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmppath = Path(tmpdir)
-
-            # Copy test audio to temp workspace
-            import shutil
-
-            workspace_audio = tmppath / "workspace"
-            workspace_audio.mkdir()
-            shutil.copy(TEST_AUDIO_FILE, workspace_audio / "test.mp3")
-
-            # Use local HF cache to avoid re-downloading models
-            import os
-
-            local_hf_cache = os.path.expanduser(os.getenv("HF_HOME", "~/.cache/hf"))
-            logger.info(f"Using local HF cache: {local_hf_cache}")
-
-            # Create data directory for transcription state
-            data_dir = tmppath / ".local" / "share" / "stt-faster"
-            data_dir.mkdir(parents=True)
-
-            # Production container is CPU-only for cloud-native deployment
-            # (GPU support would require cuDNN libraries, increasing image size)
-            logger.info("ℹ️  Production container uses CPU for cloud-native deployment")
-
-            # Run transcription with HF_TOKEN for model download
-            # Use et-large preset (Estonian model - matches test.mp3 language and production default)
-            # CPU-optimized for containers without cuDNN
-            result = run_docker_with_env(
-                image=production_image,
-                command_args=["process", "/workspace", "--preset", "et-large", "--output-format", "json"],
-                volumes=[
-                    (str(workspace_audio), "/workspace"),
-                    (local_hf_cache, "/home/appuser/.cache/hf"),
-                    (str(data_dir), "/home/appuser/.local/share/stt-faster"),
-                ],
-                env_vars={"HF_TOKEN": hf_token} if hf_token else {},
-                use_gpu=False,  # Production container is CPU-only
-                timeout=600,  # 10 minutes for model download + CPU transcription
-                check=False,
-            )
-
-            # Log the output for debugging
-            logger.info("Transcription output:\n%s", result.stdout)
-            if result.stderr:
-                logger.info("Transcription stderr:\n%s", result.stderr)
-
-            # Verify transcription succeeded
-            assert result.returncode == 0, f"Transcription failed with exit code {result.returncode}"
-
-            # Check if processed directory was created
-            processed_dir = workspace_audio / "processed"
-            assert processed_dir.exists(), "Processed directory not created"
-
-            # Check for JSON transcription files
-            json_files = list(processed_dir.glob("*.json"))
-            logger.info("Found %d JSON transcription files", len(json_files))
-            assert len(json_files) > 0, "No transcription files generated"
-
-            # Verify the transcription is in Estonian
-            if json_files:
-                import json
-
-                with json_files[0].open() as f:
-                    transcript_data = json.load(f)
-                    language = transcript_data.get("language")
-                    logger.info("Detected language: %s", language)
-                    # Estonian models should detect 'et' or 'est'
-                    if language:
-                        logger.info("✅ Language detected: %s", language)
-
-            logger.info("✅ Transcription completed successfully with %d files", len(json_files))
-
-
-@pytest.mark.docker
 class TestProductionSecurity:
     """Test security aspects of production container."""
 
@@ -459,6 +367,91 @@ class TestProductionSecurity:
         )
         # Should fail (su requires password or not available)
         assert "failed as expected" in result.stdout or result.returncode != 0
+
+
+@pytest.mark.docker
+@pytest.mark.network
+class TestProductionDiarization:
+    """Container × diarization combined — mirrors `transcribe_*_Desk.bat` flags.
+
+    On-host diarization is covered by `tests/integration/test_diarize_with_pyannote.py`.
+    This class exercises the container path setup.bat builds and the Windows
+    transcribe bats invoke: `docker run stt-faster:latest process /workspace
+    --diarize --num-speakers 2 ...` — transcription is implicit (no separate
+    no-diarize test, since `--diarize` runs the same whisper path plus pyannote).
+    """
+
+    @pytest.mark.slow
+    def test_diarize_two_speakers_in_container(
+        self,
+        production_image: str,
+        hf_token: str | None,
+    ) -> None:
+        if not hf_token:
+            pytest.skip(
+                "HF_TOKEN/HUGGING_FACE_HUB_TOKEN required for pyannote diarization — see docs/diarization_setup.md"
+            )
+        if not DIARIZE_FIXTURE.exists():
+            pytest.skip(f"Fixture {DIARIZE_FIXTURE} absent — see tests/fixtures/audio/README.md")
+
+        import os
+        import re
+        import shutil
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmppath = Path(tmpdir)
+            workspace = tmppath / "workspace"
+            workspace.mkdir()
+            shutil.copy(DIARIZE_FIXTURE, workspace / DIARIZE_FIXTURE.name)
+
+            local_hf_cache = os.path.expanduser(os.getenv("HF_HOME", "~/.cache/hf"))
+            data_dir = tmppath / ".local" / "share" / "stt-faster"
+            data_dir.mkdir(parents=True)
+
+            # Mirror the English Windows bats (transcribe_english_*.bat):
+            # `process /workspace --preset turbo --language en
+            #  --output-format txt --diarize --num-speakers 2`.
+            result = run_docker_with_env(
+                image=production_image,
+                command_args=[
+                    "process",
+                    "/workspace",
+                    "--preset",
+                    "turbo",
+                    "--language",
+                    "en",
+                    "--output-format",
+                    "txt",
+                    "--diarize",
+                    "--num-speakers",
+                    "2",
+                ],
+                volumes=[
+                    (str(workspace), "/workspace"),
+                    (local_hf_cache, "/home/appuser/.cache/hf"),
+                    (str(data_dir), "/home/appuser/.local/share/stt-faster"),
+                ],
+                env_vars={"HF_TOKEN": hf_token},
+                use_gpu=False,
+                timeout=900,
+                check=False,
+            )
+
+            logger.info("Diarize stdout:\n%s", result.stdout)
+            if result.stderr:
+                logger.info("Diarize stderr:\n%s", result.stderr)
+            assert result.returncode == 0, f"Container diarize exited {result.returncode}"
+
+            processed = workspace / "processed"
+            assert processed.exists(), "Processed directory not created"
+            txt_files = list(processed.rglob("*.txt"))
+            assert txt_files, "No .txt transcription files generated"
+
+            content = txt_files[0].read_text(encoding="utf-8")
+            speaker_labels = set(re.findall(r"SPEAKER_\d{2}", content))
+            assert len(speaker_labels) >= 2, (
+                f"Expected 2+ distinct SPEAKER_NN labels in {txt_files[0]}, got {speaker_labels!r}"
+            )
 
 
 if __name__ == "__main__":
