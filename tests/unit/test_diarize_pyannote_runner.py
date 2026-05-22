@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import struct
 import sys
 import types
@@ -128,3 +129,79 @@ class TestLoadAudioTensor:
         # Stereo → mono via PyAV's resampler (layout="mono")
         assert waveform.shape[0] == 1
         assert waveform.shape[1] > 0
+
+
+class TestDiarizeProgressHook:
+    """Cadence + line-shape behaviour for ``_DiarizeProgressHook``.
+
+    The hook's contract with pyannote is the gating piece of this module's
+    progress logging — once shipped, regressions show up only in production
+    log diffs. These tests pin the three behaviours that distinguish the
+    hook from the deleted wall-clock heartbeat: step transitions always log,
+    in-stage updates throttle to 60s, and the two log line shapes are
+    selected by the presence of ``(completed, total)``.
+    """
+
+    def test_transition_logs_immediately_then_throttles_within_60s(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from backend.diarize import pyannote_runner
+        from backend.diarize.pyannote_runner import _DiarizeProgressHook
+
+        clock = [1000.0]
+        monkeypatch.setattr(pyannote_runner.time, "time", lambda: clock[0])
+        caplog.set_level(logging.INFO, logger=pyannote_runner.LOGGER.name)
+
+        with _DiarizeProgressHook(audio_duration=None) as hook:
+            hook("embeddings", None, total=None, completed=None)
+            clock[0] += 30  # under throttle
+            hook("embeddings", None, total=100, completed=10)
+            clock[0] += 31  # cumulative 61s — throttle expires
+            hook("embeddings", None, total=100, completed=20)
+
+        msgs = [r.getMessage() for r in caplog.records if r.name == pyannote_runner.LOGGER.name]
+        assert len(msgs) == 2
+        assert "embeddings" in msgs[0] and "elapsed 0.0 min" in msgs[0]
+        assert "embeddings 20/100" in msgs[1] and "(20.0%)" in msgs[1]
+
+    def test_step_change_always_logs_regardless_of_throttle(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from backend.diarize import pyannote_runner
+        from backend.diarize.pyannote_runner import _DiarizeProgressHook
+
+        clock = [2000.0]
+        monkeypatch.setattr(pyannote_runner.time, "time", lambda: clock[0])
+        caplog.set_level(logging.INFO, logger=pyannote_runner.LOGGER.name)
+
+        with _DiarizeProgressHook(audio_duration=None) as hook:
+            hook("speaker_segmentation", None, total=None, completed=None)
+            clock[0] += 5  # well under throttle, but step changes
+            hook("embeddings", None, total=None, completed=None)
+            clock[0] += 5
+            hook("speaker_counting", None, total=None, completed=None)
+
+        msgs = [r.getMessage() for r in caplog.records if r.name == pyannote_runner.LOGGER.name]
+        assert len(msgs) == 3
+        assert "speaker_segmentation" in msgs[0]
+        assert "embeddings" in msgs[1]
+        assert "speaker_counting" in msgs[2]
+
+    def test_line_shape_with_and_without_progress_quantities(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        from backend.diarize import pyannote_runner
+        from backend.diarize.pyannote_runner import _DiarizeProgressHook
+
+        clock = [3000.0]
+        monkeypatch.setattr(pyannote_runner.time, "time", lambda: clock[0])
+        caplog.set_level(logging.INFO, logger=pyannote_runner.LOGGER.name)
+
+        with _DiarizeProgressHook(audio_duration=None) as hook:
+            hook("embeddings", None, total=None, completed=None)
+            clock[0] += 61
+            hook("embeddings", None, total=4, completed=1)
+
+        msgs = [r.getMessage() for r in caplog.records if r.name == pyannote_runner.LOGGER.name]
+        assert msgs[0] == "⌛ Diarization progress: embeddings, elapsed 0.0 min"
+        assert msgs[1] == "⌛ Diarization progress: embeddings 1/4 (25.0%), elapsed 1.0 min"
