@@ -86,8 +86,9 @@ def annotate(
 
     The `runner` parameter is injected for testability; default is the real
     pyannote pipeline (imported lazily to avoid loading torch at import time).
-    ``audio_duration`` (in seconds, optional) is forwarded to the runner so it
-    can render heartbeat progress against the source-audio minutes.
+    ``audio_duration`` (in seconds, optional) is forwarded to the runner as
+    context around the surrounding 🎙️/✅ bookend logs; the per-stage hook
+    progress lines themselves do not render it.
     """
     if runner is None:
         from backend.diarize.pyannote_runner import run_pyannote

@@ -46,11 +46,20 @@ PROGRESS_LOG_INTERVAL_SECONDS = 60.0
 class _DiarizeProgressHook:
     """Pyannote hook that emits per-stage progress via LOGGER.
 
-    Pyannote 4.x calls the hook on stage entry (``completed=None, total=None``)
-    and then repeatedly within long stages with monotonic ``(completed, total)``
-    ints. Step transitions always log; in-stage updates are throttled to one
-    line per ``PROGRESS_LOG_INTERVAL_SECONDS`` for cadence parity with the
-    transcription progress logger.
+    Pyannote 4.x calls the hook repeatedly within each stage; depending on
+    the stage, calls arrive with or without ``(completed, total)`` ints. The
+    surface we want is one log per stage entry + throttled progress lines
+    for the long ones — so:
+
+    - First call for a new ``step_name`` logs the entry line ("step, elapsed
+      N min") regardless of whether quantities are attached. Quantitative
+      detail (often ``0/N`` at entry) is identical information to the entry
+      line and is suppressed here.
+    - Subsequent same-step calls without quantities (``completed=None`` or
+      ``total`` falsy) are dropped — they would re-log the same entry line.
+    - Subsequent same-step calls with quantities are throttled to one line
+      per ``PROGRESS_LOG_INTERVAL_SECONDS`` for cadence parity with the
+      transcription progress logger.
     """
 
     def __init__(self, audio_duration: float | None) -> None:
@@ -77,28 +86,30 @@ class _DiarizeProgressHook:
         completed: int | None = None,
     ) -> None:
         now = time.time()
-        is_transition = step_name != self._last_step or (completed is None and total is None)
-        if not is_transition and (now - self._last_log_time) < PROGRESS_LOG_INTERVAL_SECONDS:
-            return
         elapsed_min = (now - self._start_time) / 60
-        if completed is not None and total:
-            percent = min(completed / total * 100, 999.0)
-            LOGGER.info(
-                "⌛ Diarization progress: %s %d/%d (%.1f%%), elapsed %.1f min",
-                step_name,
-                completed,
-                total,
-                percent,
-                elapsed_min,
-            )
-        else:
+        if step_name != self._last_step:
             LOGGER.info(
                 "⌛ Diarization progress: %s, elapsed %.1f min",
                 step_name,
                 elapsed_min,
             )
+            self._last_step = step_name
+            self._last_log_time = now
+            return
+        if completed is None or not total:
+            return
+        if (now - self._last_log_time) < PROGRESS_LOG_INTERVAL_SECONDS:
+            return
+        percent = min(completed / total * 100, 999.0)
+        LOGGER.info(
+            "⌛ Diarization progress: %s %d/%d (%.1f%%), elapsed %.1f min",
+            step_name,
+            completed,
+            total,
+            percent,
+            elapsed_min,
+        )
         self._last_log_time = now
-        self._last_step = step_name
 
 
 def _read_hf_token() -> str | None:

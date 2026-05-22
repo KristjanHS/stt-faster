@@ -205,3 +205,27 @@ class TestDiarizeProgressHook:
         msgs = [r.getMessage() for r in caplog.records if r.name == pyannote_runner.LOGGER.name]
         assert msgs[0] == "⌛ Diarization progress: embeddings, elapsed 0.0 min"
         assert msgs[1] == "⌛ Diarization progress: embeddings 1/4 (25.0%), elapsed 1.0 min"
+
+    def test_entry_with_zero_progress_logs_no_quantities_and_skips_redundant_marker(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Regression: pyannote can emit ``(completed=0, total=N)`` at stage entry
+        and follow up with ``(None, None)`` seconds later. Pre-fix we logged
+        both — once as ``"segmentation 0/3509 (0.0%)"`` and once as a redundant
+        ``"segmentation, elapsed 0.1 min"``. Now: one entry line, no quantities,
+        and the follow-up marker is suppressed.
+        """
+        from backend.diarize import pyannote_runner
+        from backend.diarize.pyannote_runner import _DiarizeProgressHook
+
+        clock = [4000.0]
+        monkeypatch.setattr(pyannote_runner.time, "time", lambda: clock[0])
+        caplog.set_level(logging.INFO, logger=pyannote_runner.LOGGER.name)
+
+        with _DiarizeProgressHook(audio_duration=None) as hook:
+            hook("segmentation", None, total=3509, completed=0)
+            clock[0] += 6
+            hook("segmentation", None, total=None, completed=None)
+
+        msgs = [r.getMessage() for r in caplog.records if r.name == pyannote_runner.LOGGER.name]
+        assert msgs == ["⌛ Diarization progress: segmentation, elapsed 0.0 min"]
