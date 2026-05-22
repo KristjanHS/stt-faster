@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from backend.transcribe import format_segments_as_text
+
 
 class JsonOutputWriter:
     """Concrete implementation for writing transcription output."""
@@ -18,12 +20,7 @@ class JsonOutputWriter:
             txt_path.parent.mkdir(parents=True, exist_ok=True)
             segments: list[dict[str, Any]] = payload.get("segments", [])
             with open(txt_path, "w", encoding="utf-8") as f:
-                for segment in segments:
-                    if "text" in segment:
-                        text = segment["text"]
-                        if isinstance(text, str):
-                            f.write(text)
-                            f.write("\n")
+                f.write(format_segments_as_text(segments))
             created_files.append(txt_path)
 
         if format in ("json", "both"):

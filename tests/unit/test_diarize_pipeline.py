@@ -101,8 +101,9 @@ class TestAnnotate:
     def test_runner_turns_get_assigned_and_anchored(self) -> None:
         segments = [_seg(0.0, 2.0), _seg(2.0, 4.0)]
 
-        def runner(_path: str, *, num_speakers: int) -> list[SpeakerTurn]:
+        def runner(_path: str, *, num_speakers: int, audio_duration: float | None = None) -> list[SpeakerTurn]:
             assert num_speakers == 2
+            assert audio_duration is None  # annotate() default forwards None when caller omits
             # Pyannote returns labels in arbitrary order; SPEAKER_01 covers first turn.
             return [
                 SpeakerTurn(0.0, 2.0, "SPEAKER_01"),

@@ -217,7 +217,7 @@ def test_process_file_success(
             preprocess_snr_after=-5.0,
             preprocess_steps=[],
         ),
-        payload={"segments": [{"text": "test transcription"}]},
+        payload={"segments": [{"start": 0.0, "end": 1.0, "text": "test transcription"}]},
     )
 
     # Create processor with mock service
@@ -362,7 +362,7 @@ def test_process_all_files(
             preprocess_snr_after=-5.0,
             preprocess_steps=[],
         ),
-        payload={"segments": [{"text": "test transcription"}]},
+        payload={"segments": [{"start": 0.0, "end": 1.0, "text": "test transcription"}]},
     )
 
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
@@ -417,7 +417,7 @@ def test_process_folder(
             preprocess_snr_after=-5.0,
             preprocess_steps=[],
         ),
-        payload={"segments": [{"text": "test transcription"}]},
+        payload={"segments": [{"start": 0.0, "end": 1.0, "text": "test transcription"}]},
     )
 
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
@@ -499,7 +499,7 @@ def test_process_file_move_failure_keeps_pending_status(
             preprocess_snr_after=-5.0,
             preprocess_steps=[],
         ),
-        payload={"segments": [{"text": "test transcription"}]},
+        payload={"segments": [{"start": 0.0, "end": 1.0, "text": "test transcription"}]},
     )
 
     # Create mock file mover that fails
@@ -589,7 +589,7 @@ def test_process_file_preserves_subdirectory_structure_with_output_base_dir(
             preprocess_snr_after=-5.0,
             preprocess_steps=[],
         ),
-        payload={"segments": [{"text": "test transcription"}]},
+        payload={"segments": [{"start": 0.0, "end": 1.0, "text": "test transcription"}]},
     )
 
     run_config = RunConfig.from_env_and_variant(temp_folder, None)
@@ -663,7 +663,7 @@ def test_process_file_root_level_file_with_output_base_dir(
             preprocess_snr_after=-5.0,
             preprocess_steps=[],
         ),
-        payload={"segments": [{"text": "test transcription"}]},
+        payload={"segments": [{"start": 0.0, "end": 1.0, "text": "test transcription"}]},
     )
 
     run_config = RunConfig.from_env_and_variant(temp_folder, None)

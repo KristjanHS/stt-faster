@@ -76,6 +76,7 @@ def annotate(
     *,
     num_speakers: int = 2,
     runner: Callable[..., list[SpeakerTurn]] | None = None,
+    audio_duration: float | None = None,
 ) -> list[dict[str, Any]]:
     """Attach speaker labels to whisper segments via pyannote diarization.
 
@@ -85,12 +86,14 @@ def annotate(
 
     The `runner` parameter is injected for testability; default is the real
     pyannote pipeline (imported lazily to avoid loading torch at import time).
+    ``audio_duration`` (in seconds, optional) is forwarded to the runner so it
+    can render heartbeat progress against the source-audio minutes.
     """
     if runner is None:
         from backend.diarize.pyannote_runner import run_pyannote
 
         runner = run_pyannote
-    turns = runner(audio_path, num_speakers=num_speakers)
+    turns = runner(audio_path, num_speakers=num_speakers, audio_duration=audio_duration)
     if not turns:
         return list(segments)
     assigned = overlap_assign(segments, turns)
