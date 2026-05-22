@@ -3,6 +3,8 @@ REM Audio Transcription - ESTONIAN, Online / mixed-source (variant 52)
 REM Edit the VARIANTS line below to use a different variant.
 REM Space-separated for multiple variants (e.g. "1 36 44").
 set "VARIANTS=52"
+set "DIARIZE="          REM "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
+set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-detect
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
@@ -33,13 +35,13 @@ if !VARIANT_COUNT!==1 (echo Variant:  !VARIANTS_COMMA!) else (echo Variants: !VA
 echo.
 
 if /i "!STT_RUNTIME!"=="wsl" (
-    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --language et --output-format txt --diarize --num-speakers 2 --variants '!VARIANTS_COMMA!'"
+    wsl -e bash -c "export HF_HOME=\"$HOME/.cache/hf\" && export HF_HUB_CACHE=\"$HF_HOME/hub\" && cd !STT_WSL_REPO! && .venv/bin/python scripts/transcribe_manager.py process '!STT_AUDIO_DIR_WSL!' --language et --output-format txt !STT_DIARIZE_ARGS! --variants '!VARIANTS_COMMA!'"
 ) else (
     docker run --rm ^
       -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
       -v "%USERPROFILE%\.cache\hf:/home/appuser/.cache/hf" ^
       -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
-      stt-faster:latest process /workspace --language et --output-format txt --diarize --num-speakers 2 --variants "!VARIANTS_COMMA!"
+      stt-faster:latest process /workspace --language et --output-format txt !STT_DIARIZE_ARGS! --variants "!VARIANTS_COMMA!"
 )
 
 echo.
