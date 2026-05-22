@@ -51,7 +51,7 @@ Steps 1-5 are independent helper files; old bats keep working through step 5. St
 **User verification:** edit one bat to `set "VARIANTS=1 36 44"`, run → banner shows `Variants: 1,36,44 (3 variants)`.
 
 ### Step 3 — Create `_banner.bat` and `_footer.bat`
-- `_banner.bat`: caller sets `STT_TITLE`, `STT_MODEL`, `STT_LANG`, optional `STT_TITLE_SUFFIX`. Reads `VARIANTS_COMMA`/`VARIANT_COUNT`. Prints the 5-line header.
+- `_banner.bat`: caller sets `STT_TITLE`, `STT_MODEL`, `STT_LANG`, optional `STT_TITLE_SUFFIX`. Reads `VARIANTS_COMMA`/`VARIANT_COUNT`. Prints the 4-content-line header (title, model, language, variant(s)) wrapped in two `=` separators + trailing blank.
 - `_footer.bat`: reads `STT_AUDIO_DIR_RESOLVED`. Prints "Processing Complete!" + Processed/Failed paths + `pause`.
 
 **User verification:** capture console output of one bat before/after — byte-identical.

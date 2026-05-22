@@ -13,6 +13,11 @@ REM     (e.g. "--preset turbo --language en --output-format txt").
 REM   - DIARIZE (raw caller knob) is read for the HF_TOKEN fail-fast guard.
 REM   - Helper does NOT setlocal.
 REM
+REM Scratch vars (leak to caller scope - reserved name, do not reuse):
+REM   DOCKER_ENV_ARGS - composed `-e KEY=VALUE` flags for the docker run line.
+REM     Note: this name is intentionally NOT STT_-prefixed for grep parity with
+REM     the lifted source; future callers should avoid the name regardless.
+REM
 REM Exits with the underlying `docker run` errorlevel (or 1 on the HF gate).
 REM
 REM Env-bridging rationale: docker run starts with an empty env, so only the
