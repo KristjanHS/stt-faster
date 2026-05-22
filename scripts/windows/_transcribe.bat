@@ -10,6 +10,10 @@ REM   - Caller sets STT_CLI_TAIL with preset/language/output-format flags
 REM     (e.g. "--preset turbo --language en --output-format txt"). Shared
 REM     between the WSL and docker branches today; collapses both branches
 REM     to one knob.
+REM   - DIARIZE (raw caller knob) is read transitively by _docker_run.bat
+REM     for the HF_TOKEN fail-fast guard - caller must set it (or leave
+REM     unset for the runtime-default off-for-docker behavior) before
+REM     calling this helper.
 REM   - Helper does NOT setlocal.
 REM
 REM Env-bridging asymmetry (persists by design):

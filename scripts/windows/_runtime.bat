@@ -20,6 +20,17 @@ REM   STT_AUDIO_DIR_WSL      - same path translated to /mnt/<drive>/... form
 REM   STT_DIARIZE_ARGS       - composed CLI args ("--diarize --num-speakers 2", or empty)
 REM   STT_REPO_GUESS         - guessed repo root (`%~dp0..\..`); used by auto-build
 REM
+REM Scratch vars (also leak to caller scope - reserved names, do not reuse):
+REM   STT_DIARIZE_ON         - 0/1 internal toggle composed from DIARIZE + STT_RUNTIME
+REM   STT_DIARIZE_BANNER     - banner-string scratch ("off" / "on" / "on (--num-speakers N)")
+REM   STT_CHOICE_RC          - auto-build prompt errorlevel capture
+REM   STT_BUILD_RC           - `docker build` errorlevel capture
+REM
+REM Caller obligations on failure:
+REM   - This helper `exit /b 1`s on no-runtime AND on auto-build-declined/failed.
+REM     Callers MUST handle: `if errorlevel 1 ( pause & exit /b 1 )` after the call,
+REM     or use the shorter `|| ( pause & exit /b 1 )` form.
+REM
 REM CMD-parser notes:
 REM   - Helpers assume the caller did `setlocal enabledelayedexpansion`;
 REM     helpers do NOT `setlocal` themselves (would hide outputs from caller).
