@@ -62,9 +62,10 @@ REM ---- Diarize resolution: caller knobs + runtime-aware default ----
 REM   DIARIZE=1        -> force on (any runtime)
 REM   DIARIZE=0        -> force off (any runtime)
 REM   DIARIZE unset/"" -> on if STT_RUNTIME=wsl, off otherwise
-REM Note: `set "DIARIZE="` undefines DIARIZE in CMD, so the `if not defined`
-REM branch also covers the explicit-empty case. The extra `if defined ...
-REM if "%DIARIZE%"==""` guard below is defensive belt-and-suspenders.
+REM `set "DIARIZE="` may either undefine DIARIZE or leave it defined-but-empty
+REM depending on the Windows/CMD build; lines below handle both cases.
+REM `!NUM_SPEAKERS!` (delayed) inside the parens block below avoids the
+REM parse-time-expansion trap with caller-scope vars.
 set "STT_DIARIZE_ARGS="
 set "STT_DIARIZE_ON=0"
 if /i "%DIARIZE%"=="1" set "STT_DIARIZE_ON=1"
@@ -74,7 +75,7 @@ if /i "%DIARIZE%"=="0" set "STT_DIARIZE_ON=0"
 
 if "%STT_DIARIZE_ON%"=="1" (
     set "STT_DIARIZE_ARGS=--diarize"
-    if defined NUM_SPEAKERS if not "%NUM_SPEAKERS%"=="" set "STT_DIARIZE_ARGS=--diarize --num-speakers %NUM_SPEAKERS%"
+    if defined NUM_SPEAKERS if not "!NUM_SPEAKERS!"=="" set "STT_DIARIZE_ARGS=--diarize --num-speakers !NUM_SPEAKERS!"
 )
 
 REM ---- Banner (mirrors the GPU-fallback banner philosophy) ----
@@ -93,7 +94,7 @@ REM Compose banner string in flat sequential ifs — nested if/else inside a
 REM parens block is parser-fragile in CMD (else-binding ambiguity).
 set "STT_DIARIZE_BANNER=off"
 if "%STT_DIARIZE_ON%"=="1" set "STT_DIARIZE_BANNER=on"
-if "%STT_DIARIZE_ON%"=="1" if defined NUM_SPEAKERS if not "%NUM_SPEAKERS%"=="" set "STT_DIARIZE_BANNER=on (--num-speakers %NUM_SPEAKERS%)"
+if "%STT_DIARIZE_ON%"=="1" if defined NUM_SPEAKERS if not "!NUM_SPEAKERS!"=="" set "STT_DIARIZE_BANNER=on (--num-speakers !NUM_SPEAKERS!)"
 echo [stt-faster] diarize: %STT_DIARIZE_BANNER%
 
 REM ---- Failure case: neither runtime available ----
