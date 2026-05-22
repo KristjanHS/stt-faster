@@ -64,7 +64,7 @@ jobs:
         # Skip under act (local GitHub Actions emulator) because ACTIONS_RUNTIME_TOKEN is not available.
         # On real GitHub runners, this will upload the reports/ directory as a build artifact.
         if: ${{ github.actor != 'nektos/act' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-unit
           path: reports/
@@ -115,7 +115,7 @@ jobs:
         run: docker compose -f docker/docker-compose.yml down -v
       - name: Upload integration test reports
         if: ${{ always() && github.actor != 'nektos/act' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-integration
           path: reports/
@@ -147,7 +147,7 @@ jobs:
         run: docker compose -f docker/docker-compose.yml down -v
       - name: Upload E2E test reports
         if: ${{ always() && github.actor != 'nektos/act' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: test-reports-e2e
           path: reports/
