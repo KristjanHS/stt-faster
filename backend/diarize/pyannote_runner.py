@@ -200,6 +200,10 @@ def run_pyannote(
             # pyannote's fix_reproducibility() (core/pipeline.py:__call__) flips
             # TF32 off and warns when CUDA + TF32-on. Setting it ourselves first
             # satisfies pyannote's contract proactively so the branch stays silent.
+            # These flags are process-global, but pyannote would assign the same
+            # False values on its first pipeline call anyway — we just do it
+            # earlier. faster-whisper uses CTranslate2, not torch.matmul, so its
+            # throughput is unaffected by these torch.backends flags.
             # See https://github.com/pyannote/pyannote-audio/issues/1370
             torch.backends.cuda.matmul.allow_tf32 = False
             torch.backends.cudnn.allow_tf32 = False
