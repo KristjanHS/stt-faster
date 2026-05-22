@@ -8,10 +8,10 @@ Why it's popular: up to ~4× faster and lower memory via CTranslate2; easy Pytho
 source .venv/bin/activate
 
 # to Install:
-pip install -U hf_transfer huggingface_hub faster-whisper
+pip install -U hf_xet huggingface_hub faster-whisper
 pip install --force-reinstall ctranslate2==4.4.0
 sudo apt-get update
-sudo apt-get -y install cudnn9-cuda-12
+sudo apt-get -y install cudnn9-cuda-13
 
 # For faster HF transfer and cache:
 # keep in your ~/.bashrc
