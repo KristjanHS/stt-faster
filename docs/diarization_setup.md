@@ -133,5 +133,5 @@ community-1 is ~real-time on GPU and ~3-5× real-time on CPU. For batch runs of 
 ## See also
 
 - [docs/Transcription_solution.md](Transcription_solution.md) — full output format reference (TXT line shape, JSON schema with `speaker`).
-- [scripts/windows/HOW_TO_USE.txt](../scripts/windows/HOW_TO_USE.txt) — Windows launcher reference.
+- [scripts/windows/README.md](../scripts/windows/README.md) — Windows launcher reference.
 - pyannote model card: <https://huggingface.co/pyannote/speaker-diarization-community-1>.
