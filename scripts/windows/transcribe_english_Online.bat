@@ -12,8 +12,15 @@ set "STT_TITLE=Audio Transcription - ENGLISH (Online)"
 set "STT_MODEL=Systran faster-distil-whisper-large-v3 (turbo)"
 set "STT_LANG=English"
 set "STT_CLI_TAIL=--preset turbo --language en --output-format txt"
-call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
-call "%~dp0_variants.bat"
-call "%~dp0_banner.bat"
-call "%~dp0_transcribe.bat"
-call "%~dp0_footer.bat"
+REM Helpers location. Default = WSL via UNC, works both in-place and when
+REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.
+REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"
+REM   set "STT_HELPERS_DIR=D:\code\stt-faster\scripts\windows\"
+REM   set "STT_HELPERS_DIR=\\wsl$\Ubuntu-22.04\home\you\stt-faster\scripts\windows\"
+set "STT_HELPERS_DIR=\\wsl$\Ubuntu\home\kristjans\projects\stt-faster\scripts\windows\"
+
+call "%STT_HELPERS_DIR%_runtime.bat" || ( pause & exit /b 1 )
+call "%STT_HELPERS_DIR%_variants.bat"
+call "%STT_HELPERS_DIR%_banner.bat"
+call "%STT_HELPERS_DIR%_transcribe.bat"
+call "%STT_HELPERS_DIR%_footer.bat"

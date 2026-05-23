@@ -50,9 +50,11 @@ REM if the repo moves inside WSL.
 set "STT_WSL_REPO=/home/kristjans/projects/stt-faster"
 
 REM Repo root for the auto-build flow. `%~dp0..\..` resolves to <repo>/
-REM (this bat sits at <repo>/scripts/windows/). When the bat is copied
-REM next to audio, the `if exist Dockerfile` check below fails and the
-REM flow falls back to the manual-build hint.
+REM (this bat sits at <repo>/scripts/windows/, whether reached locally or
+REM via the STT_HELPERS_DIR UNC path from a copied-out top-level bat).
+REM Either way STT_REPO_GUESS resolves to the actual repo root, so the
+REM `if exist Dockerfile` guard below passes and the auto-build prompt
+REM is available regardless of where the top-level bat lives.
 set "STT_REPO_GUESS=%~dp0..\.."
 
 REM ---- Audio dir resolution ----

@@ -6,7 +6,15 @@ REM Clear any inherited STT_CALLER_DIR so _runtime.bat suppresses the
 REM `audio:` banner line — this bat regenerates a report from existing
 REM outputs and doesn't consume the audio dir.
 set "STT_CALLER_DIR="
-call "%~dp0_runtime.bat"
+
+REM Helpers location. Default = WSL via UNC, works both in-place and when
+REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.
+REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"
+REM   set "STT_HELPERS_DIR=D:\code\stt-faster\scripts\windows\"
+REM   set "STT_HELPERS_DIR=\\wsl$\Ubuntu-22.04\home\you\stt-faster\scripts\windows\"
+set "STT_HELPERS_DIR=\\wsl$\Ubuntu\home\kristjans\projects\stt-faster\scripts\windows\"
+
+call "%STT_HELPERS_DIR%_runtime.bat"
 if errorlevel 1 (
     pause
     exit /b 1

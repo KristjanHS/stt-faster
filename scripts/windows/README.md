@@ -69,20 +69,30 @@ REM preset (e.g. `--preset turbo` for English, `--preset et-32` for CPU-only
 REM Estonian). Default Estonian model is `et-large` and is picked up
 REM automatically when `--preset` is omitted; the existing
 REM `transcribe_estonian_{Desk,Teams,Online}.bat` bats show this pattern.
-call "%~dp0_runtime.bat" || ( pause & exit /b 1 )
-call "%~dp0_variants.bat"
-call "%~dp0_banner.bat"
-call "%~dp0_transcribe.bat"
-call "%~dp0_footer.bat"
+
+REM Helpers location. Default = WSL via UNC, works both in-place and when
+REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.
+REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"
+REM   set "STT_HELPERS_DIR=D:\code\stt-faster\scripts\windows\"
+REM   set "STT_HELPERS_DIR=\\wsl$\Ubuntu-22.04\home\you\stt-faster\scripts\windows\"
+set "STT_HELPERS_DIR=\\wsl$\Ubuntu\home\kristjans\projects\stt-faster\scripts\windows\"
+
+call "%STT_HELPERS_DIR%_runtime.bat" || ( pause & exit /b 1 )
+call "%STT_HELPERS_DIR%_variants.bat"
+call "%STT_HELPERS_DIR%_banner.bat"
+call "%STT_HELPERS_DIR%_transcribe.bat"
+call "%STT_HELPERS_DIR%_footer.bat"
 ```
 
 For docker-forced variants, also `set "STT_FORCE_DOCKER=1"` and `set "STT_TITLE_SUFFIX=[DOCKER FORCED]"` before the `_runtime.bat` call. See `transcribe_english_Online_docker.bat` for the canonical example.
+
+The `STT_HELPERS_DIR` line is the only per-bat machine-config knob — edit it (or the matching line in a copied bat) if your stt-faster repo lives somewhere other than the default WSL path. The hardcoded `\\wsl$\Ubuntu\...` mirrors the `STT_WSL_REPO` hardcode in `_runtime.bat`.
 
 ## Usage
 
 Two ways to point a bat at an audio folder:
 
-**(a) Copy-into-folder (legacy, no env var):** copy the bat into the folder that holds your audio (e.g. `C:\Users\PC\Downloads\transcribe\`) and double-click it. The bat treats its own folder as the audio dir.
+**(a) Copy-into-folder (no env var):** copy the bat — and only the bat, no helpers — into the folder that holds your audio (e.g. `C:\Users\PC\Downloads\transcribe\`) and double-click it. The bat treats its own folder as the audio dir; helpers are reached via the `STT_HELPERS_DIR` UNC path baked into the bat (default points at the WSL repo). Edit that line in your copy if your stt-faster repo lives elsewhere.
 
 **(b) Env var + run-in-place:**
 ```bat
