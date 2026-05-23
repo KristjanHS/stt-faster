@@ -55,8 +55,10 @@ REM they're visible at the top of the file for editing. CMD doesn't unset
 REM them when `setlocal` runs, and the helpers pick them up via delayed
 REM expansion that propagates across `call`.
 set "VARIANTS=52"
-set "DIARIZE="          REM "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
-set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-detect
+REM DIARIZE: "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
+set "DIARIZE="
+REM NUM_SPEAKERS: only used when diarize resolves to on; "" = auto-detect
+set "NUM_SPEAKERS=2"
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"

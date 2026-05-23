@@ -3,8 +3,10 @@ REM Audio Transcription - ENGLISH, Desk-mic / close-talk (variant 44, turbo pres
 REM Edit the VARIANTS line below to use a different variant.
 REM Space-separated for multiple variants (e.g. "1 36 44").
 set "VARIANTS=44"
-set "DIARIZE="          REM "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
-set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-detect
+REM DIARIZE: "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
+set "DIARIZE="
+REM NUM_SPEAKERS: only used when diarize resolves to on; "" = auto-detect
+set "NUM_SPEAKERS=2"
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"

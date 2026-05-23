@@ -3,8 +3,10 @@ REM Audio Transcription - ESTONIAN, CPU-only (et-32 preset, variant 7)
 REM Variant 7: no preprocessing + minimal transcription parameters (no VAD filter).
 REM Edit the VARIANTS line below to use a different variant.
 set "VARIANTS=7"
-set "DIARIZE="          REM "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
-set "NUM_SPEAKERS=2"    REM only used when diarize resolves to on; "" = auto-detect
+REM DIARIZE: "" = runtime default (wsl=on, docker=off); "0" = off; "1" = on
+set "DIARIZE="
+REM NUM_SPEAKERS: only used when diarize resolves to on; "" = auto-detect
+set "NUM_SPEAKERS=2"
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
