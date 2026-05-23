@@ -17,8 +17,10 @@ REM   HF_XET_HIGH_PERFORMANCE   - "1" turns on Xet high-performance downloads
 REM                               (the `hf_xet` package is already in the image).
 REM Both are passed through to the container by _docker_run.bat only if defined.
 set "VARIANTS=52"
-set "DIARIZE="          REM "" = off (docker default); "0" = off; "1" = on
-set "NUM_SPEAKERS=2"    REM only used when DIARIZE=1; "" = auto-detect
+REM DIARIZE: "" = off (docker default); "0" = off; "1" = on
+set "DIARIZE="
+REM NUM_SPEAKERS: only used when DIARIZE=1; "" = auto-detect
+set "NUM_SPEAKERS=2"
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
