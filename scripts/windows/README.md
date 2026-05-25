@@ -77,7 +77,7 @@ REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required
 REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"
 REM   set "STT_HELPERS_DIR=D:\code\stt-faster\scripts\windows\"
 REM   set "STT_HELPERS_DIR=\\wsl$\Ubuntu-22.04\home\you\stt-faster\scripts\windows\"
-set "STT_HELPERS_DIR=\\wsl$\Ubuntu\home\kristjans\projects\stt-faster\scripts\windows\"
+set "STT_HELPERS_DIR=\\wsl$\Ubuntu-22.04\home\kristjans\projects\stt-faster\scripts\windows\"
 
 call "%STT_HELPERS_DIR%_runtime.bat" || ( pause & exit /b 1 )
 call "%STT_HELPERS_DIR%_variants.bat"
@@ -88,7 +88,7 @@ call "%STT_HELPERS_DIR%_footer.bat"
 
 For docker-forced variants, also `set "STT_FORCE_DOCKER=1"` and `set "STT_TITLE_SUFFIX=[DOCKER FORCED]"` before the `_runtime.bat` call. See `transcribe_english_Online_docker.bat` for the canonical example.
 
-The `STT_HELPERS_DIR` line is the only per-bat machine-config knob — edit it (or the matching line in a copied bat) if your stt-faster repo lives somewhere other than the default WSL path. The hardcoded `\\wsl$\Ubuntu\...` mirrors the `STT_WSL_REPO` hardcode in `_runtime.bat`.
+The `STT_HELPERS_DIR` line is the only per-bat machine-config knob — edit it (or the matching line in a copied bat) if your stt-faster repo lives somewhere other than the default WSL path. The hardcoded `\\wsl$\Ubuntu-22.04\...` mirrors the `STT_WSL_REPO` hardcode in `_runtime.bat`.
 
 ## Usage
 
