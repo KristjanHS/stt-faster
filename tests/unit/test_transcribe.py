@@ -5,14 +5,17 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from faster_whisper import WhisperModel
 
 from backend.exceptions import ModelLoadError, ModelNotFoundError
+from backend.model_config import ComputeType, DeviceType
 from backend.model_loader import DeviceSelector, ModelLoader
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.metrics import PreprocessMetrics
+from backend.preprocess.orchestrator import PreprocessResult
 from backend.transcribe import (
     TranscriptionMetrics,
     _get_estonian_model_path,
@@ -47,12 +50,12 @@ class RecordingResolver:
 
 
 class FixedDeviceSelector(DeviceSelector):
-    def __init__(self, device: str, compute_type: str):
+    def __init__(self, device: DeviceType, compute_type: ComputeType):
         super().__init__()
-        self.device = device
-        self.compute_type = compute_type
+        self.device: DeviceType = device
+        self.compute_type: ComputeType = compute_type
 
-    def select(self, config):  # noqa: ANN001
+    def select(self, config) -> tuple[DeviceType, ComputeType]:  # noqa: ANN001
         return self.device, self.compute_type
 
 
@@ -62,14 +65,14 @@ class RecordingModelFactory:
         self.return_value = return_value or object()
         self.calls: list[tuple[str, str, str]] = []
 
-    def __call__(self, model_path: str, device: str, compute_type: str):
+    def __call__(self, model_path: str, device: DeviceType, compute_type: ComputeType) -> WhisperModel:
         self.calls.append((model_path, device, compute_type))
         if self.side_effects:
             effect = self.side_effects.pop(0)
             if isinstance(effect, Exception):
                 raise effect
-            return effect
-        return self.return_value
+            return cast(WhisperModel, effect)
+        return cast(WhisperModel, self.return_value)
 
 
 class FakeSegment:
@@ -101,25 +104,29 @@ class RecordingModel:
         return self._segments, self._info
 
 
-class FakePreprocessResult:
+class FakePreprocessResult(PreprocessResult):
+    """Subclass of the real PreprocessResult so test fakes satisfy preprocess_runner typing."""
+
     def __init__(
         self,
         output_path: Path,
         duration: float | None = None,
         metrics: PreprocessMetrics | None = None,
     ):
-        self.output_path = output_path
-        self.output_path = output_path
-        self.input_info = (
+        input_info: Any = (
             type("Info", (), {"duration": duration, "channels": 1, "sample_rate": 16000, "sample_format": "s16"})()
             if duration is not None
             else None
         )
-        self.metrics = metrics or PreprocessMetrics(total_duration=0.0, steps=[])
-        self.profile = "test"
-        self.cleaned = False
+        super().__init__(
+            output_path=output_path,
+            input_info=input_info,
+            metrics=metrics or PreprocessMetrics(total_duration=0.0, steps=[]),
+            profile="test",
+            cleanup=self._mark_cleaned,
+        )
 
-    def cleanup(self) -> None:
+    def _mark_cleaned(self) -> None:
         self.cleaned = True
 
 
@@ -277,7 +284,7 @@ class TestSegmentToPayload:
         """Test conversion of a basic segment."""
         segment = FakeSegment(1, 0.0, 5.123456, "  Hello world  ")
 
-        result = segment_to_payload(segment)
+        result = segment_to_payload(cast(Any, segment))
 
         assert result == {
             "id": 1,
@@ -290,7 +297,7 @@ class TestSegmentToPayload:
         """Test segment with speaker information."""
         segment = FakeSegment(2, 5.0, 10.5, "Speaker text", speaker="SPEAKER_01")
 
-        result = segment_to_payload(segment)
+        result = segment_to_payload(cast(Any, segment))
 
         assert result == {
             "id": 2,
@@ -304,7 +311,7 @@ class TestSegmentToPayload:
         """Test that None values are excluded from payload."""
         segment = FakeSegment(None, 1.0, None, "text")
 
-        result = segment_to_payload(segment)
+        result = segment_to_payload(cast(Any, segment))
 
         assert result == {"start": 1.0, "text": "text"}
         assert "id" not in result
@@ -315,7 +322,7 @@ class TestSegmentToPayload:
         """Test that segment text is properly stripped."""
         segment = FakeSegment(1, 0.0, 1.0, "\n\t  Whitespace everywhere  \t\n")
 
-        result = segment_to_payload(segment)
+        result = segment_to_payload(cast(Any, segment))
 
         assert result["text"] == "Whitespace everywhere"
 
@@ -466,7 +473,7 @@ class TestTranscribeToJson:
 
         json_path = tmp_path / "test.json"
 
-        transcribe_to_json("test.wav", json_path, preset="et-large", transcribe_fn=fake_transcribe)
+        transcribe_to_json("test.wav", str(json_path), preset="et-large", transcribe_fn=fake_transcribe)
 
         assert calls == [("test.wav", "et-large", None)]
         assert json.loads(json_path.read_text()) == payload
@@ -484,7 +491,7 @@ class TestTranscribeToJson:
 
         json_path = tmp_path / "test.json"
 
-        transcribe_to_json("test.wav", json_path, preset="turbo", transcribe_fn=fake_transcribe)
+        transcribe_to_json("test.wav", str(json_path), preset="turbo", transcribe_fn=fake_transcribe)
 
         assert calls == [("test.wav", "turbo", None)]
         assert json.loads(json_path.read_text()) == payload
