@@ -20,6 +20,7 @@ from backend.transcribe import (
     pick_model,
     segment_to_payload,
     transcribe,
+    transcribe_and_save,
     transcribe_to_json,
     transcribe_to_text,
 )
@@ -457,7 +458,9 @@ class TestTranscribeToJson:
         payload = {"audio": "test.wav", "language": "et", "segments": []}
         calls: list[tuple[str, str, Any]] = []
 
-        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:
+        def fake_transcribe(
+            audio_path: str, preset: str, language: str | None = None, **_kwargs: Any
+        ) -> dict[str, Any]:
             calls.append((audio_path, preset, language))
             return payload
 
@@ -473,7 +476,9 @@ class TestTranscribeToJson:
         payload = {"audio": "test.wav", "language": "en"}
         calls: list[tuple[str, str, Any]] = []
 
-        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:
+        def fake_transcribe(
+            audio_path: str, preset: str, language: str | None = None, **_kwargs: Any
+        ) -> dict[str, Any]:
             calls.append((audio_path, preset, language))
             return payload
 
@@ -497,7 +502,9 @@ class TestTranscribeToText:
             ],
         }
 
-        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+        def fake_transcribe(
+            audio_path: str, preset: str, language: str | None = None, **_kwargs: Any
+        ) -> dict[str, Any]:  # noqa: ARG001
             return payload
 
         text_path = tmp_path / "out.txt"
@@ -516,7 +523,9 @@ class TestTranscribeToText:
             ],
         }
 
-        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+        def fake_transcribe(
+            audio_path: str, preset: str, language: str | None = None, **_kwargs: Any
+        ) -> dict[str, Any]:  # noqa: ARG001
             return payload
 
         text_path = tmp_path / "out.txt"
@@ -530,7 +539,9 @@ class TestTranscribeToText:
         """Hours past 00 render in `hh:` slot (regression guard for mm overflow)."""
         payload = {"segments": [{"start": 3661.5, "end": 3662.0, "text": "x"}]}
 
-        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+        def fake_transcribe(
+            audio_path: str, preset: str, language: str | None = None, **_kwargs: Any
+        ) -> dict[str, Any]:  # noqa: ARG001
             return payload
 
         text_path = tmp_path / "out.txt"
@@ -549,7 +560,9 @@ class TestTranscribeToText:
             ],
         }
 
-        def fake_transcribe(audio_path: str, preset: str, language: str | None = None) -> dict[str, Any]:  # noqa: ARG001
+        def fake_transcribe(
+            audio_path: str, preset: str, language: str | None = None, **_kwargs: Any
+        ) -> dict[str, Any]:  # noqa: ARG001
             return payload
 
         text_path = tmp_path / "out.txt"
@@ -618,3 +631,51 @@ class TestTranscribeDiarize:
             diarize=False,
             diarize_runner=sentinel_runner,
         )
+
+
+class TestTranscribeAndSave:
+    """Tests for diarize plumbing on transcribe_and_save (T3)."""
+
+    def test_transcribe_and_save_forwards_diarize_kwargs(self, tmp_path: Path) -> None:
+        """transcribe_and_save must forward diarize/num_speakers to transcribe_fn."""
+        captured_calls: list[dict[str, Any]] = []
+
+        def fake_transcribe(audio_path: str, preset: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ARG001
+            captured_calls.append(kwargs)
+            return {"segments": [], "language": "et"}
+
+        out_path = tmp_path / "out.json"
+        transcribe_and_save(
+            audio_path="test.wav",
+            output_path=str(out_path),
+            output_format="json",
+            diarize=True,
+            num_speakers=3,
+            transcribe_fn=fake_transcribe,
+        )
+
+        assert len(captured_calls) == 1
+        assert captured_calls[0].get("diarize") is True
+        assert captured_calls[0].get("num_speakers") == 3
+
+    def test_transcribe_and_save_both_format_forwards_to_both_paths(self, tmp_path: Path) -> None:
+        """output_format='both' must forward diarize to both txt and json writers."""
+        captured_calls: list[dict[str, Any]] = []
+
+        def fake_transcribe(audio_path: str, preset: str, **kwargs: Any) -> dict[str, Any]:  # noqa: ARG001
+            captured_calls.append(kwargs)
+            return {"segments": [], "language": "et"}
+
+        transcribe_and_save(
+            audio_path="test.wav",
+            output_path=str(tmp_path / "out"),
+            output_format="both",
+            diarize=True,
+            num_speakers=4,
+            transcribe_fn=fake_transcribe,
+        )
+
+        assert len(captured_calls) == 2
+        for call in captured_calls:
+            assert call.get("diarize") is True
+            assert call.get("num_speakers") == 4
