@@ -164,6 +164,9 @@ def execute_variant(
     language: str | None = None,
     *,
     context: VariantRunContext | None = None,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
 ) -> dict[str, Any]:
     """Execute a single variant and return results.
 
@@ -175,6 +178,11 @@ def execute_variant(
         context: Per-variant runtime context (output paths, datetime suffix,
             copy_intermediate flag). Defaults to an empty context (no intermediate
             output side effects).
+        diarize: When True, run pyannote diarization after transcription and
+            annotate segments with speaker labels. Defaults to False.
+        num_speakers: Expected speaker count when ``diarize`` is True. Ignored
+            otherwise. Must be >= 2 (enforced by RunConfig validators).
+        diarize_runner: Optional diarization runner override (test seam).
 
     Returns:
         Dictionary with variant results in same format as run_variant()
@@ -230,6 +238,9 @@ def execute_variant(
                 preprocess_config=preprocess_config,
                 preprocess_runner=preprocess_runner,
                 transcription_config=transcription_config,
+                diarize=diarize,
+                num_speakers=num_speakers,
+                diarize_runner=diarize_runner,
             )
         elif is_minimal:
             # Use minimal params transcription (omits parameters to let faster-whisper use defaults)
@@ -240,6 +251,9 @@ def execute_variant(
                 preprocess_config=preprocess_config,
                 preprocess_runner=preprocess_runner,
                 transcription_config=transcription_config,
+                diarize=diarize,
+                num_speakers=num_speakers,
+                diarize_runner=diarize_runner,
             )
         else:
             # Use standard transcription with full config
@@ -250,6 +264,9 @@ def execute_variant(
                 preprocess_config=preprocess_config,
                 preprocess_runner=preprocess_runner,
                 transcription_config=transcription_config,
+                diarize=diarize,
+                num_speakers=num_speakers,
+                diarize_runner=diarize_runner,
             )
 
         elapsed = time.time() - start_time

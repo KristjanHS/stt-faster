@@ -76,6 +76,26 @@ def main() -> int:
         default=[],
         help="Variant numbers to skip (e.g., --skip-variants 1 2 3)",
     )
+    diarize_group = parser.add_mutually_exclusive_group()
+    diarize_group.add_argument(
+        "--diarize",
+        dest="diarize",
+        action="store_true",
+        help="Run pyannote diarization after each variant transcription.",
+    )
+    diarize_group.add_argument(
+        "--no-diarize",
+        dest="diarize",
+        action="store_false",
+        help="Skip diarization (default).",
+    )
+    parser.set_defaults(diarize=False)
+    parser.add_argument(
+        "--num-speakers",
+        type=int,
+        default=2,
+        help="Expected speaker count when --diarize is set (default: 2, must be >= 2).",
+    )
 
     args = parser.parse_args()
 
@@ -202,6 +222,8 @@ def main() -> int:
                 datetime_suffix=datetime_suffix,
                 copy_intermediate=args.intermcopy,
             ),
+            diarize=args.diarize,
+            num_speakers=args.num_speakers,
         )
         results.append(result)
 

@@ -199,6 +199,37 @@ class TestVariantExecutor:
         # So we'll verify the structure in integration tests
         assert expected_keys  # Placeholder assertion
 
+    def test_execute_variant_forwards_diarize_kwargs(self, monkeypatch: Any, tmp_path: Path) -> None:
+        """execute_variant must forward diarize / num_speakers into the underlying helper."""
+        from backend.variants import executor as executor_mod  # noqa: PLC0415
+
+        captured: dict[str, Any] = {}
+
+        def fake_baseline(**kwargs: Any) -> dict[str, Any]:
+            captured.update(kwargs)
+            return {"segments": [], "duration": 0.0, "language": "et"}
+
+        monkeypatch.setattr(executor_mod, "transcribe_with_baseline_params", fake_baseline)
+
+        variant = get_variant_by_number(1)  # baseline_true_defaults
+        assert variant is not None
+
+        audio_file = tmp_path / "test.wav"
+        audio_file.write_bytes(b"fake audio data")
+
+        result = executor_mod.execute_variant(
+            variant=variant,
+            audio_path=str(audio_file),
+            preset="et-large",
+            language="et",
+            diarize=True,
+            num_speakers=3,
+        )
+
+        assert result["status"] == "success"
+        assert captured.get("diarize") is True
+        assert captured.get("num_speakers") == 3
+
 
 class TestVariantFiltering:
     """Tests for variant filtering functionality."""
