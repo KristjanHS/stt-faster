@@ -36,7 +36,11 @@ services:
       # backend/__init__.py → preload_bundled_cudnn → import torch (~3s),
       # which blows past any reasonable healthcheck timeout on every probe.
       # The `--healthcheck` shim is still exercised by test_healthcheck_command.
-      test: ["CMD-SHELL", "grep -q backend.main /proc/1/cmdline"]
+      # Assumes the app runs as PID 1 (no `init: true` / `--init` here).
+      # `-a` forces text mode so grep matches across the null-separated cmdline
+      # on any grep build (GNU grep ≥3.8 in slim-bookworm does it without -a,
+      # but -a is portable insurance).
+      test: ["CMD-SHELL", "grep -qa backend.main /proc/1/cmdline"]
       interval: 5s
       timeout: 3s
       retries: 10
