@@ -63,7 +63,7 @@ class RecordingModelFactory:
     def __init__(self, side_effects: list[Any] | None = None, return_value: object | None = None):
         self.side_effects = side_effects or []
         self.return_value = return_value or object()
-        self.calls: list[tuple[str, str, str]] = []
+        self.calls: list[tuple[str, DeviceType, ComputeType]] = []
 
     def __call__(self, model_path: str, device: DeviceType, compute_type: ComputeType) -> WhisperModel:
         self.calls.append((model_path, device, compute_type))
