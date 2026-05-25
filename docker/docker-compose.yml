@@ -31,7 +31,12 @@ services:
     # Start minimal keepalive for testing
     command: ["python", "-m", "backend.main"]
     healthcheck:
-      test: ["CMD", "python", "-m", "backend.main", "--healthcheck"]
+      # Liveness probe only — checks PID 1 is the keepalive process.
+      # Why not `python -m backend.main --healthcheck`: that triggers
+      # backend/__init__.py → preload_bundled_cudnn → import torch (~3s),
+      # which blows past any reasonable healthcheck timeout on every probe.
+      # The `--healthcheck` shim is still exercised by test_healthcheck_command.
+      test: ["CMD-SHELL", "grep -q backend.main /proc/1/cmdline"]
       interval: 5s
       timeout: 3s
       retries: 10
