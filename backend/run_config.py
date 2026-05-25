@@ -85,8 +85,8 @@ class RunConfig:
 
     def _validate_diarization_config(self) -> None:
         """Validate diarization configuration."""
-        if self.num_speakers < 1:
-            raise ValueError(f"num_speakers must be >= 1, got {self.num_speakers}")
+        if self.num_speakers < 2:
+            raise ValueError(f"num_speakers must be >= 2, got {self.num_speakers}")
 
     def _validate_preprocess_config(self) -> None:
         """Validate preprocess configuration."""

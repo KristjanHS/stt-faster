@@ -47,3 +47,8 @@ class TestDiarizeValidation:
         config = RunConfig(input_folder=Path("/tmp"), num_speakers=0)
         with pytest.raises(ValueError, match="num_speakers"):
             config.validate()
+
+    def test_num_speakers_one_raises_value_error(self) -> None:
+        config = RunConfig(input_folder=Path("/tmp"), num_speakers=1)
+        with pytest.raises(ValueError, match="num_speakers"):
+            config.validate()
