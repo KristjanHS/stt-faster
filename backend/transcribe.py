@@ -827,11 +827,21 @@ def transcribe_to_json(
     preset: str = "et-large",
     language: str | None = None,
     *,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
     transcribe_fn: Callable[..., Dict[str, Any]] = transcribe,
     json_dumper: Callable[..., None] = json.dump,
     opener: Callable[..., Any] = open,
 ) -> None:
-    payload = transcribe_fn(audio_path, preset, language=language)
+    payload = transcribe_fn(
+        audio_path,
+        preset,
+        language=language,
+        diarize=diarize,
+        num_speakers=num_speakers,
+        diarize_runner=diarize_runner,
+    )
     with opener(json_path, "w", encoding="utf-8") as json_file:
         json_dumper(payload, json_file, ensure_ascii=False, indent=2)
 
@@ -842,6 +852,9 @@ def transcribe_to_text(
     preset: str = "et-large",
     language: str | None = None,
     *,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
     transcribe_fn: Callable[..., Dict[str, Any]] = transcribe,
     opener: Callable[..., Any] = open,
 ) -> None:
@@ -852,10 +865,20 @@ def transcribe_to_text(
         text_path: Path to output text file
         preset: Model preset name
         language: Optional language code
+        diarize: When True, run pyannote diarization and emit speaker-labeled text.
+        num_speakers: Expected speaker count when ``diarize`` is True (>=2).
+        diarize_runner: Optional diarization runner override (test seam).
         transcribe_fn: Transcription function to use
         opener: File opener function (for testing)
     """
-    payload = transcribe_fn(audio_path, preset, language=language)
+    payload = transcribe_fn(
+        audio_path,
+        preset,
+        language=language,
+        diarize=diarize,
+        num_speakers=num_speakers,
+        diarize_runner=diarize_runner,
+    )
     segments = payload.get("segments", [])
 
     with opener(text_path, "w", encoding="utf-8") as text_file:
@@ -869,6 +892,9 @@ def transcribe_and_save(
     language: str | None = None,
     output_format: str = DEFAULT_OUTPUT_FORMAT,
     *,
+    diarize: bool = False,
+    num_speakers: int = 2,
+    diarize_runner: Any = None,
     transcribe_fn: Callable[..., Dict[str, Any]] = transcribe,
     json_dumper: Callable[..., None] = json.dump,
     opener: Callable[..., Any] = open,
@@ -881,6 +907,9 @@ def transcribe_and_save(
         preset: Model preset name
         language: Optional language code
         output_format: Output format - "txt", "json", or "both" (default: "txt")
+        diarize: When True, run pyannote diarization and emit speaker labels.
+        num_speakers: Expected speaker count when ``diarize`` is True (>=2).
+        diarize_runner: Optional diarization runner override (test seam).
         transcribe_fn: Transcription function to use
         json_dumper: JSON dump function (for testing)
         opener: File opener function (for testing)
@@ -888,6 +917,11 @@ def transcribe_and_save(
     Raises:
         ValueError: If output_format is not "txt", "json", or "both"
     """
+    diarize_kwargs: Dict[str, Any] = {
+        "diarize": diarize,
+        "num_speakers": num_speakers,
+        "diarize_runner": diarize_runner,
+    }
     if output_format == "txt":
         transcribe_to_text(
             audio_path,
@@ -896,6 +930,7 @@ def transcribe_and_save(
             language,
             transcribe_fn=transcribe_fn,
             opener=opener,
+            **diarize_kwargs,
         )
     elif output_format == "json":
         transcribe_to_json(
@@ -906,6 +941,7 @@ def transcribe_and_save(
             transcribe_fn=transcribe_fn,
             json_dumper=json_dumper,
             opener=opener,
+            **diarize_kwargs,
         )
     elif output_format == "both":
         # Generate both txt and json files
@@ -920,6 +956,7 @@ def transcribe_and_save(
             language,
             transcribe_fn=transcribe_fn,
             opener=opener,
+            **diarize_kwargs,
         )
         transcribe_to_json(
             audio_path,
@@ -929,6 +966,7 @@ def transcribe_and_save(
             transcribe_fn=transcribe_fn,
             json_dumper=json_dumper,
             opener=opener,
+            **diarize_kwargs,
         )
     else:
         raise ValueError(f"Invalid output_format: {output_format}. Must be 'txt', 'json', or 'both'")
@@ -941,5 +979,17 @@ if __name__ == "__main__":
     input_audio_path = project_root / "UserData" / "RelMan.wav"
     output_text_path = input_audio_path.with_suffix(".txt")
 
-    transcribe_to_text(str(input_audio_path), str(output_text_path), preset="et-large")
+    # Honor STT_DIARIZE / STT_NUM_SPEAKERS env vars (already exported by
+    # scripts/windows/_runtime.bat). This is a dev shim, not a CLI entry
+    # point — use scripts/transcribe_manager.py for real invocations.
+    _diarize_env = os.getenv("STT_DIARIZE", "0") == "1"
+    _num_speakers_env = int(os.getenv("STT_NUM_SPEAKERS", "2"))
+
+    transcribe_to_text(
+        str(input_audio_path),
+        str(output_text_path),
+        preset="et-large",
+        diarize=_diarize_env,
+        num_speakers=_num_speakers_env,
+    )
     LOGGER.info("Wrote text transcript to %s", output_text_path)
