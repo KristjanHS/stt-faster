@@ -727,6 +727,12 @@ def transcribe(
         )
 
         if diarize:
+            # Single point of truth: callers that bypass RunConfig (execute_variant,
+            # transcribe_and_save, the __main__ shim) still hit this guard, because
+            # pyannote silently produces garbage output for num_speakers < 2.
+            if num_speakers < 2:
+                raise ValueError(f"num_speakers must be >= 2 when diarize=True, got {num_speakers}")
+
             from backend.diarize import annotate as diarize_annotate  # noqa: PLC0415
 
             audio_minutes = (total_audio_duration or 0) / 60
@@ -983,7 +989,8 @@ if __name__ == "__main__":
     # scripts/windows/_runtime.bat). This is a dev shim, not a CLI entry
     # point — use scripts/transcribe_manager.py for real invocations.
     _diarize_env = os.getenv("STT_DIARIZE", "0") == "1"
-    _num_speakers_env = int(os.getenv("STT_NUM_SPEAKERS", "2"))
+    # `or "2"` collapses the common blank-string env-var case to the default.
+    _num_speakers_env = int(os.getenv("STT_NUM_SPEAKERS") or "2")
 
     transcribe_to_text(
         str(input_audio_path),
