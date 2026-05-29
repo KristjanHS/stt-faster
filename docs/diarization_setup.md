@@ -1,6 +1,6 @@
 # Diarization Setup
 
-stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-community-1`) to attribute each transcribed segment to a speaker. This is the default for the 1:1-meeting Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`.
+stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-community-1`) to attribute each transcribed segment to a speaker. This is the default for the Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`.
 
 The model is HuggingFace-gated, so first-time setup is a one-time HF account + token + license-accept dance. After that the model is cached at `~/.cache/hf/` (WSL/Linux) or `%USERPROFILE%\.cache\hf\` (Windows) and reused across runs.
 
@@ -9,8 +9,8 @@ The model is HuggingFace-gated, so first-time setup is a one-time HF account + t
 - **TXT output** gains per-segment range timestamps **and** speaker labels:
 
   ```
-  [00:00:00.40 --> 00:00:03.05] SPEAKER_00: Tere, kuidas läheb?
-  [00:00:03.10 --> 00:00:05.70] SPEAKER_01: Aitäh, hästi. Ja sinul?
+  [00:00:00.40 --> 00:00:03.05] SPEAKER_00: Tere, kas sa kuuled mind?
+  [00:00:03.10 --> 00:00:05.70] SPEAKER_01: Jah kuulen hästi.
   ```
 
   With `--no-diarize`, timestamps stay but speaker labels are omitted.
