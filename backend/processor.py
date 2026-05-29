@@ -204,7 +204,7 @@ class TranscriptionProcessor:
             Dictionary with processing results
         """
         LOGGER.debug("Starting folder processing")
-        run_start = time.time()
+        run_start = time.monotonic()
 
         # Use the effective config snapshot from run_config
         config_snapshot = self.effective_config.preprocess
@@ -215,7 +215,7 @@ class TranscriptionProcessor:
         # Process them all
         results = self.process_all_files(files_to_process)
         results["files_found"] = len(files_to_process)
-        total_processing_time = time.time() - run_start
+        total_processing_time = time.monotonic() - run_start
         results["run_statistics"] = summarize_run(
             run_log=self._run_log,
             results=results,
