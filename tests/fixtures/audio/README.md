@@ -39,9 +39,9 @@ License: MIT (same as the pyannote-audio repo).
 - **LibriSpeech** (CC BY 4.0): concatenate two short utterances from
   different speakers in `dev-clean/`. Trim to ≤ 10s with `ffmpeg`.
 - **VoxConverse** (CC BY 4.0): excerpt a 10s span from a diarized
-  meeting clip — pick one that the supplied RTTM marks as two-speaker.
+  clip — pick one that the supplied RTTM marks as two-speaker.
 - **Public-domain podcast**: extract a 10s window from a
-  CC0/public-domain interview.
+  CC0/public-domain two-speaker recording.
 
 ### Running the test
 
