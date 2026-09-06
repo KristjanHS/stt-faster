@@ -24,7 +24,7 @@ Diarization currently uses model `pyannote/speaker-diarization-3.1`. On 2025-09-
 | AISHELL-4 | 12.2 | 11.7 | −4% |
 | VoxConverse | 11.2 | 11.2 | 0% |
 
-No Estonian benchmark exists; the closest analogues for our 1:1-meeting workload are AMI (English meetings) and AliMeeting (Mandarin meetings), both of which show consistent gains. We accept the model-card numbers and validate qualitatively in real use post-merge.
+No Estonian benchmark exists; the closest analogues for our two-speaker dialogue workload are AMI and AliMeeting, both of which show consistent gains. We accept the model-card numbers and validate qualitatively in real use post-merge.
 
 ## 2. Decision
 
@@ -129,7 +129,7 @@ If both pass: proceed with §4. If (1) fails: switch to Option A (bundle FFmpeg 
 
 - `pyannote/speaker-diarization-precision-2` (paid/enterprise)
 - NeMo Sortformer, Reverb, speechbrain, diart (alternative diarizers — deferred)
-- Estonian-labeled DER benchmark spike (intentionally skipped per decision in `/mybrain` session 2026-05-21: model-card gains across multiple meeting corpora are sufficient evidence)
+- Estonian-labeled DER benchmark spike (intentionally skipped per decision in `/mybrain` session 2026-05-21: model-card gains across multiple diarization corpora are sufficient evidence)
 - Option A's Windows FFmpeg bundling work (only built if §6.1 forces fallback)
 
 ## 8. Decision log

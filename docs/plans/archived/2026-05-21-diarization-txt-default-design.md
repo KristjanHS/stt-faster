@@ -9,11 +9,11 @@ Produce a readable, speaker-attributed, time-anchored transcript as the default 
 
 Three user-stated asks, bundled because they converge on the same output surface:
 
-1. Generate only `.txt` by default (no `.json` in 1:1-meeting workflows).
+1. Generate only `.txt` by default (no `.json` in production workflows).
 2. `.txt` output always contains timestamps.
 3. Use diarization with `2` speakers as the default; user-overridable.
 
-**Count correction (post-review)**: there are 8 bats invoking `transcribe_manager.py process`, not 10. Verified via `grep -l 'transcribe_manager.py process' scripts/windows/*.bat` (2026-05-21). 1 variant-sweep bat (`compare_variants.bat`) + 7 production 1:1-meeting bats. All sections of this doc use these counts.
+**Count correction (post-review)**: there are 8 bats invoking `transcribe_manager.py process`, not 10. Verified via `grep -l 'transcribe_manager.py process' scripts/windows/*.bat` (2026-05-21). 1 variant-sweep bat (`compare_variants.bat`) + 7 production transcribe bats. All sections of this doc use these counts.
 
 ## §1 Decisions log
 
@@ -31,7 +31,7 @@ Each numbered decision is load-bearing. Re-opening any of these requires a corre
 10. **Sequential model loading mechanism**: after whisper finishes producing segments, before instantiating the pyannote pipeline: `del model` on the whisper reference held by the runner, then `gc.collect()`, then (CUDA path only) `torch.cuda.empty_cache()`. The pyannote pipeline is created in a local scope inside `pyannote_runner.run_pyannote()` and goes out of scope at function return; the same `del` + `empty_cache()` triplet runs on exit. Local-scope GC alone is insufficient because PyTorch caches CUDA allocations until `empty_cache()` is called — without the explicit empty_cache, the VRAM bound claim does not hold. Both loads go through `model_loader.py`'s existing GPU→CPU fallback banner pattern.
 11. **Re-work audit outcome (per /mybrain step 7.5, adapted to code)**: `backend/transcribe.py` is touched by exactly one step (step 4), combining the `annotate()` call site and the `transcribe_to_text()` format change. Tests for the new TXT format land in the same step (step 4), not in a separate test-only step.
 
-12. **Bat classification rule** (resolves §5's earlier punt-row): a bat goes in the **variant-sweep profile** (`--output-format both` + `--no-diarize`) iff it currently passes `--output-format both` AND its purpose is variant comparison (consumed by `generate_variant_report.py` / `generate_variant_diffs.py`). All other bats invoking `transcribe_manager.py process` go in the **1:1-meeting profile** (`--output-format txt` + `--diarize` + `--num-speakers 2`). With the 2026-05-21 grep this resolves to: `compare_variants.bat` → variant-sweep; the 7 other bats → 1:1-meeting. The rule, not the enumeration, is load-bearing — a future bat just gets classified by it.
+12. **Bat classification rule** (resolves §5's earlier punt-row): a bat goes in the **variant-sweep profile** (`--output-format both` + `--no-diarize`) iff it currently passes `--output-format both` AND its purpose is variant comparison (consumed by `generate_variant_report.py` / `generate_variant_diffs.py`). All other bats invoking `transcribe_manager.py process` go in the **production profile** (`--output-format txt` + `--diarize` + `--num-speakers 2`). With the 2026-05-21 grep this resolves to: `compare_variants.bat` → variant-sweep; the 7 other bats → production. The rule, not the enumeration, is load-bearing — a future bat just gets classified by it.
 
 ## §2 Scope
 
@@ -228,13 +228,13 @@ Enumeration verified 2026-05-21 via `grep -l 'transcribe_manager.py process' scr
 
 | Bat | `--output-format` | Diarize flag | `--num-speakers` | Profile |
 |-----|-------------------|--------------|------------------|---------|
-| `transcribe_estonian_Online.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
-| `transcribe_estonian_Teams.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
-| `transcribe_estonian_Desk.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
-| `transcribe_estonian_32bit_cpu.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
-| `transcribe_english_Online.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
-| `transcribe_english_Teams.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
-| `transcribe_english_Desk.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | 1:1 meeting |
+| `transcribe_estonian_Online.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
+| `transcribe_estonian_Teams.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
+| `transcribe_estonian_Desk.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
+| `transcribe_estonian_32bit_cpu.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
+| `transcribe_english_Online.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
+| `transcribe_english_Teams.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
+| `transcribe_english_Desk.bat` | **txt** (was `both`) | `--diarize` | `--num-speakers 2` | Production |
 | `compare_variants.bat` | **both** (unchanged) | `--no-diarize` | *(omitted — irrelevant when diarize off)* | Variant sweep |
 
 7 production bats + 1 variant-sweep bat = 8 total. No "any other" punt row; if a new bat lands before this design ships, apply the Decision §1.12 rule and add it to the appropriate row.

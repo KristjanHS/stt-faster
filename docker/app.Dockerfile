@@ -117,9 +117,13 @@ COPY --chown=appuser:appgroup frontend/ /app/frontend/
 
 USER appuser
 
-# Minimal healthcheck via backend.main (fast import + exit 0)
+# Liveness probe: PID 1's cmdline contains backend.main. Cannot use
+# `python -m backend.main --healthcheck` because backend/__init__.py runs
+# preload_bundled_cudnn → import torch (~3s) before argv parsing, exceeding
+# any reasonable HEALTHCHECK timeout. Compose overrides this stanza with
+# the same probe; keeping them aligned avoids dev/prod divergence.
 HEALTHCHECK --interval=5s --timeout=3s --start-period=30s --retries=30 \
-  CMD ["python", "-m", "backend.main", "--healthcheck"]
+  CMD ["sh", "-c", "grep -qa backend.main /proc/1/cmdline"]
 
 # NB! ENV variables like ${VENV_PATH} are NOT expanded inside JSON-array CMD or ENTRYPOINT.
 CMD ["python", "-m", "backend.main"]
