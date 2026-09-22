@@ -28,7 +28,6 @@
       "Read(**/models/**)",
       "Read(**/.cache/**)",
       "Read(**/model_cache/**)",
-      "Read(./docs/plans/archived/**)",
       "Read(./docs/analysis/**)",
       "Read(**/*.bat)",
       "Read(**/*.cmd)",
