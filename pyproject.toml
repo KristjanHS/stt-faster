@@ -64,6 +64,10 @@ cu130 = [
     "torch>=2.11.0,<3.0.0",
     "torchaudio>=2.11.0,<3.0.0",
 ]
+# Independent of cpu/cu130: drag-drop for the tkinter GUI (backend/gui.py).
+gui = [
+    "tkinterdnd2>=0.4.2,<1.0.0",
+]
 
 [dependency-groups]
 dev = [
@@ -116,6 +120,9 @@ explicit = true
 
 [project.scripts]
 stt-faster = "backend.cli.main:main"
+
+[project.gui-scripts]
+stt-faster-gui = "backend.gui:main"
 
 [build-system]
 requires = ["setuptools"]

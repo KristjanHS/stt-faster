@@ -258,7 +258,7 @@ def _process_single_variant(
         )
         run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
-        output_writer = ServiceFactory.create_output_writer()
+        output_writer = ServiceFactory.create_output_writer(include_timestamps=getattr(args, "timestamps", True))
 
         processor = TranscriptionProcessor(
             transcription_service=transcription_service,
@@ -322,7 +322,7 @@ def _run_single_variant(
         )
         run_log = ServiceFactory.create_run_log()
         file_mover = ServiceFactory.create_file_mover()
-        output_writer = ServiceFactory.create_output_writer()
+        output_writer = ServiceFactory.create_output_writer(include_timestamps=getattr(args, "timestamps", True))
 
         processor = TranscriptionProcessor(
             transcription_service=transcription_service,
@@ -505,6 +505,9 @@ def process(
         bool, typer.Option("--diarize/--no-diarize", help="Run pyannote speaker diarization (default: enabled)")
     ] = True,
     num_speakers: Annotated[int, typer.Option("--num-speakers", help="Number of speakers to diarize")] = 2,
+    timestamps: Annotated[
+        bool, typer.Option("--timestamps/--no-timestamps", help="Prefix TXT lines with segment times (default: on)")
+    ] = True,
 ) -> None:
     """Process audio files in the specified folder."""
 
@@ -519,6 +522,7 @@ def process(
     args.verbose = verbose
     args.diarize = diarize
     args.num_speakers = num_speakers
+    args.timestamps = timestamps
 
     exit_code = cmd_process(args)
     if exit_code != 0:

@@ -10,6 +10,9 @@ from backend.transcribe import format_segments_as_text
 class JsonOutputWriter:
     """Concrete implementation for writing transcription output."""
 
+    def __init__(self, *, include_timestamps: bool = True) -> None:
+        self._include_timestamps = include_timestamps
+
     def write(self, output_path: str, payload: dict[str, Any], format: str) -> list[Path]:
         """Write transcription output in specified format. Returns list of created files."""
         created_files: list[Path] = []
@@ -20,7 +23,7 @@ class JsonOutputWriter:
             txt_path.parent.mkdir(parents=True, exist_ok=True)
             segments: list[dict[str, Any]] = payload.get("segments", [])
             with open(txt_path, "w", encoding="utf-8") as f:
-                f.write(format_segments_as_text(segments))
+                f.write(format_segments_as_text(segments, include_timestamps=self._include_timestamps))
             created_files.append(txt_path)
 
         if format in ("json", "both"):

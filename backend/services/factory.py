@@ -78,6 +78,6 @@ class ServiceFactory:
         return ShutilFileMover()
 
     @staticmethod
-    def create_output_writer() -> OutputWriter:
+    def create_output_writer(*, include_timestamps: bool = True) -> OutputWriter:
         """Create output writer with default implementation."""
-        return JsonOutputWriter()
+        return JsonOutputWriter(include_timestamps=include_timestamps)

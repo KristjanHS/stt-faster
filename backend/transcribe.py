@@ -414,17 +414,20 @@ def _fmt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d}.{cs:02d}"
 
 
-def format_segments_as_text(segments: list[dict[str, Any]]) -> str:
+def format_segments_as_text(segments: list[dict[str, Any]], *, include_timestamps: bool = True) -> str:
     """Render segments as `[hh:mm:ss.ff --> hh:mm:ss.ff] SPEAKER_NN: text` lines.
 
     Single source of truth for the TXT line format — used by transcribe_to_text
-    and by the variant-aware output writers.
+    and by the variant-aware output writers. ``include_timestamps=False`` drops the
+    `[... --> ...] ` prefix, keeping one line per segment.
     """
     lines: list[str] = []
     for segment in segments:
-        ts = f"[{_fmt_time(segment['start'])} --> {_fmt_time(segment['end'])}]"
-        speaker = f" {segment['speaker']}:" if "speaker" in segment else ""
-        lines.append(f"{ts}{speaker} {segment['text'].lstrip()}\n")
+        speaker = f"{segment['speaker']}: " if "speaker" in segment else ""
+        line = f"{speaker}{segment['text'].lstrip()}"
+        if include_timestamps:
+            line = f"[{_fmt_time(segment['start'])} --> {_fmt_time(segment['end'])}] {line}"
+        lines.append(f"{line}\n")
     return "".join(lines)
 
 
