@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); next: slice 4b (self-contained install + uninstall), then 5; slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b code shipped (`c5eab3a` + review fixes), its headless Linux e2e snapshot guard still owed; then 5; slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
