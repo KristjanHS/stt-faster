@@ -355,6 +355,8 @@ def classify_source(source: str) -> str:
 
 
 def deps_command(paths: InstallPaths) -> list[str]:
+    pin = paths.app_dir / ".python-version"  # UV_NO_CONFIG also skips .python-version discovery
+    python = pin.read_text(encoding="utf-8").strip() if pin.is_file() else PYTHON_VERSION
     return [
         str(paths.uv_exe),
         "sync",
@@ -362,6 +364,8 @@ def deps_command(paths: InstallPaths) -> list[str]:
         "--no-dev",
         "--extra",
         "gui",
+        "--python",
+        python,
         "--python-preference",
         "only-managed",  # never pick a stray system/Store Python
         "--project",
@@ -491,7 +495,7 @@ def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
 def is_installed(paths: InstallPaths) -> bool:
     """Anything but setup logs in the install dir, so a partial uninstall's leftovers stay retryable."""
     try:
-        return any(child.name != "logs" for child in paths.install_dir.iterdir())
+        return any(child.name not in {"logs", paths.tmp_dir.name} for child in paths.install_dir.iterdir())
     except OSError:
         return False
 
