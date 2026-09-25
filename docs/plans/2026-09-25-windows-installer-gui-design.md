@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** approved design, not started. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); next: slice 2. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
