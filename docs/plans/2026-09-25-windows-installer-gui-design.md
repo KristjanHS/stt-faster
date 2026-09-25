@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); next: slice 5. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); next: slice 4b (self-contained install + uninstall), then 5. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
@@ -114,6 +114,10 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
    Rulings: source = latest release (none yet → clear error) + `--source url|zip|dir` override; existing install → user picks Repair (default) / Clean reinstall; uv `0.12.19` + GyanD ffmpeg `9.0.2` essentials pinned; writes `device=cpu` if unset; done = unit tests + a headless Linux e2e into a scratch dir.
 4. **Build + release**: `build_installer.bat` + `make release`. First release attaches the `.exe`.
    Rulings: `make release V=X.Y.Z` → `scripts/release.sh`: preflight (main, clean, tag absent local+origin, exe = `dist/` else latest-release asset) before any change → bump `pyproject` version + `uv lock` + commit → tag → push main + tag → `gh release create`; first release v1.1.0; bat self-fetches pinned uv + PyInstaller into `%TEMP%`; guard = pytest with fake git/gh/uv on `PATH`.
+4b. **Self-contained install + uninstall** (before 5 — Extras installs into the same caches). Everything lives under `%LOCALAPPDATA%\stt-faster\`; nothing shared is touched.
+   Moves: `deps_env` + `model_command` env set `UV_CACHE_DIR=<install>\uv-cache`, `UV_PYTHON_INSTALL_DIR=<install>\python`, `HF_HUB_CACHE=<install>\models`; `gui.build_env` sets the same `HF_HUB_CACHE`. A v1.1.0 install's old `~/.cache/huggingface` models are left in place (possibly shared).
+   Uninstall: third mode beside Repair/Clean + `--uninstall`; removes install dir, `%APPDATA%\stt-faster`, both shortcuts, and the `HKCU\…\CurrentVersion\Uninstall\stt-faster` key (`winreg`, no admin) that install writes for Apps & features (`UninstallString = <install>\Transcribe-Setup.exe --uninstall`). The running setup exe can't delete itself → re-launch from a `%TEMP%` copy first.
+   Guard: headless Linux e2e into a scratch `HOME` with a pre-seeded `~/.cache/huggingface` + uv dirs → install → assert no new path outside install + config dirs → `--uninstall` → assert the tree equals the pre-install snapshot.
 5. **Extras / diarization** panel + `--extras` installer mode.
 6. **GPU mode**: start with a spike on the Windows host with an NVIDIA GPU. Confirm the CUDA major version the ctranslate2 4.6.2 Windows wheel links against (`cublas64_12.dll` vs `_13`) and pin the matching `nvidia-*` wheels. Then add change #2b, `nvidia-smi` detection in the installer, and the GUI's one-shot CPU retry. CPU-only installs work without this slice.
 
@@ -130,4 +134,4 @@ Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter
 
 ## Out of scope
 
-Code signing · GPU diarization on Windows · AMD/Intel GPUs · a fat frozen app · uninstaller beyond "delete folder + shortcut" · Mac/Linux installers.
+Code signing · GPU diarization on Windows · AMD/Intel GPUs · a fat frozen app · Mac/Linux installers.
