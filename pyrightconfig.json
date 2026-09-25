@@ -7,11 +7,13 @@
     ],
     "include": [
         "backend",
-        "scripts"
+        "scripts",
+        "installer"
     ],
     "typeCheckingMode": "standard",
     "strict": [
-        "backend/**"
+        "backend/**",
+        "installer/**"
     ],
     "pythonVersion": "3.12",
     "pythonPlatform": "Linux",
