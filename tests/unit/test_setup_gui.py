@@ -31,6 +31,7 @@ from installer.setup_gui import (
     Installer,
     InstallError,
     InstallPaths,
+    PYTHON_VERSION,
     ModelSpec,
     SetupWindow,
     Task,
@@ -288,6 +289,11 @@ def test_deps_command_uses_lean_gui_install(paths: InstallPaths) -> None:
     assert cmd[:4] == [str(paths.uv_exe), "sync", "--frozen", "--no-dev"]
     assert "--extra" in cmd and cmd[cmd.index("--extra") + 1] == "gui"
     assert cmd.count("--extra") == 1  # no cpu/cu130: diarization stays out of the lean install
+    assert cmd[cmd.index("--python") + 1] == PYTHON_VERSION
+    paths.app_dir.mkdir(parents=True)
+    (paths.app_dir / ".python-version").write_text("3.12.11\n", encoding="utf-8")
+    pinned = deps_command(paths)
+    assert pinned[pinned.index("--python") + 1] == "3.12.11"  # the repo pin, not uv's newest 3.12
     assert deps_env({"A": "1"}, paths) == {
         **isolated_env({"A": "1"}, paths),
         "UV_PROJECT_ENVIRONMENT": str(paths.venv_dir),
@@ -398,6 +404,7 @@ def test_partial_uninstall_still_unregisters_and_stays_retryable(
 def test_is_installed_ignores_setup_logs(paths: InstallPaths) -> None:
     assert is_installed(paths) is False
     paths.log_file.parent.mkdir(parents=True)  # the window's own log exists before any install
+    paths.tmp_dir.mkdir()  # created before the first task; an aborted first install is not an install
     assert is_installed(paths) is False
     paths.setup_copy.write_bytes(b"exe")
     assert is_installed(paths) is True
