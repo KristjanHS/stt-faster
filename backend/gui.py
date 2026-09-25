@@ -13,6 +13,7 @@ import queue
 import shutil
 import subprocess  # nosec B404 - runs our own CLI with a fixed argument list
 import sys
+import tempfile
 import threading
 import time
 import tkinter as tk
@@ -62,12 +63,17 @@ def default_app_paths(env: Mapping[str, str] | None = None) -> AppPaths:
     """%LOCALAPPDATA% / %APPDATA% on Windows, XDG dirs elsewhere."""
     env = os.environ if env is None else env
     home = Path.home()
+
+    def env_dir(key: str, default: Path) -> Path:
+        value = env.get(key, "")  # an empty value counts as unset (else Path("") → cwd-relative)
+        return Path(value) if value else default
+
     if sys.platform == "win32":
-        install = Path(env.get("LOCALAPPDATA", home / "AppData" / "Local")) / APP_NAME
-        config_dir = Path(env.get("APPDATA", home / "AppData" / "Roaming")) / APP_NAME
+        install = env_dir("LOCALAPPDATA", home / "AppData" / "Local") / APP_NAME
+        config_dir = env_dir("APPDATA", home / "AppData" / "Roaming") / APP_NAME
     else:
-        install = Path(env.get("XDG_DATA_HOME", home / ".local" / "share")) / APP_NAME
-        config_dir = Path(env.get("XDG_CONFIG_HOME", home / ".config")) / APP_NAME
+        install = env_dir("XDG_DATA_HOME", home / ".local" / "share") / APP_NAME
+        config_dir = env_dir("XDG_CONFIG_HOME", home / ".config") / APP_NAME
     return AppPaths(install_dir=install, config_file=config_dir / "config")
 
 
@@ -90,8 +96,8 @@ def write_config_value(config_file: Path, key: str, value: str) -> None:
 
 
 def read_device(config_file: Path) -> str | None:
-    """Configured device (``cpu``/``cuda``), or None to let the CLI auto-detect."""
-    return read_config(config_file).get("device") or None
+    """Configured device (``cpu``/``cuda``, normalised), or None to let the CLI auto-detect."""
+    return read_config(config_file).get("device", "").strip().lower() or None
 
 
 @cache
@@ -106,16 +112,19 @@ def stage_files(files: Iterable[Path], work_dir: Path) -> dict[str, Path]:
     """Copy ``files`` into ``work_dir`` under unique stems; return staged stem → original.
 
     Extensions are lower-cased (the CLI globs ``*.mp3`` case-sensitively) and clashing
-    stems (``a.mp3`` + ``a.wav``) get a ``__N`` suffix so their outputs don't collide.
+    stems (``a.mp3`` + ``a.wav``, or ``Meeting.mp3`` + ``meeting.MP3`` — NTFS is
+    case-insensitive) get a ``__N`` suffix so their outputs don't collide.
     """
     work_dir.mkdir(parents=True, exist_ok=True)
     staged: dict[str, Path] = {}
+    taken: set[str] = set()
     for original in files:
         stem = original.stem
         n = 2
-        while stem in staged:
+        while stem.casefold() in taken:
             stem = f"{original.stem}__{n}"
             n += 1
+        taken.add(stem.casefold())
         shutil.copy2(original, work_dir / f"{stem}{original.suffix.lower()}")
         staged[stem] = original
     return staged
@@ -146,6 +155,7 @@ def build_command(work_dir: Path, profile: GuiProfile, *, timestamps: bool) -> l
 def build_env(base: Mapping[str, str], *, device: str | None, ffmpeg_bin: Path | None) -> dict[str, str]:
     env = dict(base)
     env["PYTHONIOENCODING"] = "utf-8"
+    env["PYTHONUNBUFFERED"] = "1"
     if device:
         env["STT_DEVICE"] = device
     if ffmpeg_bin is not None and ffmpeg_bin.is_dir():
@@ -154,11 +164,18 @@ def build_env(base: Mapping[str, str], *, device: str | None, ffmpeg_bin: Path |
 
 
 def find_outputs(work_dir: Path, staged: Mapping[str, Path]) -> dict[Path, Path | None]:
-    """Map each original file to its produced ``.txt`` in ``work_dir`` (None if missing)."""
-    produced: dict[str, Path] = {}
-    for txt in work_dir.rglob("*.txt"):
-        produced.setdefault(txt.stem, txt)
-    return {original: produced.get(stem) for stem, original in staged.items()}
+    """Map each original file to its produced ``.txt`` in ``work_dir`` (None if missing).
+
+    Outputs land anywhere below ``work_dir`` (the CLI moves them into ``processed/``). A
+    staged stem matches its exact ``.txt`` stem first, then case-insensitively (a Windows
+    filesystem round-trip may change case; staged stems are unique under casefold).
+    """
+    exact: dict[str, Path] = {}
+    folded: dict[str, Path] = {}
+    for txt in sorted(work_dir.rglob("*.txt")):
+        exact.setdefault(txt.stem, txt)
+        folded.setdefault(txt.stem.casefold(), txt)
+    return {original: exact.get(stem) or folded.get(stem.casefold()) for stem, original in staged.items()}
 
 
 def unique_destination(original: Path) -> Path:
@@ -184,11 +201,18 @@ def deliver_outputs(outputs: Mapping[Path, Path | None]) -> list[Path]:
 Runner = Callable[[list[str], dict[str, str], Callable[[str], None]], int]
 
 
-def run_subprocess(cmd: list[str], env: dict[str, str], on_line: Callable[[str], None]) -> int:
+def run_subprocess(
+    cmd: list[str],
+    env: dict[str, str],
+    on_line: Callable[[str], None],
+    on_start: Callable[[subprocess.Popen[str]], None] | None = None,
+) -> int:
+    """Run ``cmd`` streaming merged output lines; ``on_start`` receives the live process."""
     creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     with subprocess.Popen(  # nosec B603 - fixed command list, no shell
         cmd,
         env=env,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
         text=True,
@@ -196,6 +220,8 @@ def run_subprocess(cmd: list[str], env: dict[str, str], on_line: Callable[[str],
         errors="replace",
         creationflags=creationflags,
     ) as proc:
+        if on_start is not None:
+            on_start(proc)
         for line in proc.stdout or ():
             on_line(line.rstrip())
         return proc.wait()
@@ -212,6 +238,34 @@ class JobResult:
         return not self.missing
 
 
+def _run_attempt(
+    files: list[Path],
+    device: str | None,
+    *,
+    profile: GuiProfile,
+    timestamps: bool,
+    paths: AppPaths,
+    runner: Runner,
+    on_line: Callable[[str], None],
+    base_env: Mapping[str, str],
+) -> tuple[list[Path], list[Path]]:
+    """One CLI run over ``files``: deliver every ``.txt`` produced; return (delivered, missing)."""
+    paths.work_root.mkdir(parents=True, exist_ok=True)
+    work_dir = Path(tempfile.mkdtemp(dir=paths.work_root, prefix=f"job-{device or 'auto'}-"))
+    try:
+        staged = stage_files(files, work_dir)
+        env = build_env(base_env, device=device, ffmpeg_bin=paths.ffmpeg_bin)
+        exit_code = runner(build_command(work_dir, profile, timestamps=timestamps), env, on_line)
+        if exit_code != 0:
+            LOGGER.warning("Transcriber exited with code %s on device=%s", exit_code, device or "auto")
+        outputs = find_outputs(work_dir, staged)
+        delivered = deliver_outputs(outputs)
+        missing = [original for original, txt in outputs.items() if txt is None]
+    finally:
+        shutil.rmtree(work_dir, ignore_errors=True)
+    return delivered, missing
+
+
 def run_job(
     files: list[Path],
     profile: GuiProfile,
@@ -222,31 +276,52 @@ def run_job(
     on_line: Callable[[str], None] = lambda _line: None,
     base_env: Mapping[str, str] | None = None,
 ) -> JobResult:
-    """Transcribe ``files``; a non-CPU run that fails is retried once on CPU (persisted)."""
+    """Transcribe ``files``; a file succeeded iff its ``.txt`` was produced (exit code only logged).
+
+    Each attempt delivers its outputs immediately. A non-CPU attempt that produces nothing at
+    all is re-run once on CPU, and ``device=cpu`` is persisted only if that run produced
+    something. A partial failure is reported as-is — never retried, never persisted.
+    """
     device = read_device(paths.config_file)
-    base_env = os.environ if base_env is None else base_env
-    result = JobResult()
-    attempts = [device] if device == "cpu" else [device, "cpu"]
-    for attempt_device in attempts:
-        work_dir = paths.work_root / f"{time.strftime('%Y%m%d-%H%M%S')}-{attempt_device or 'auto'}"
-        try:
-            staged = stage_files(files, work_dir)
-            env = build_env(base_env, device=attempt_device, ffmpeg_bin=paths.ffmpeg_bin)
-            exit_code = runner(build_command(work_dir, profile, timestamps=timestamps), env, on_line)
-            outputs = find_outputs(work_dir, staged)
-            if exit_code == 0 and all(txt is not None for txt in outputs.values()):
-                result.delivered = deliver_outputs(outputs)
-                result.missing = []
-                return result
-            result.missing = [original for original, txt in outputs.items() if txt is None] or list(files)
-        finally:
-            shutil.rmtree(work_dir, ignore_errors=True)
-        if attempt_device != "cpu":
-            LOGGER.warning("Transcription failed on device=%s; retrying once on CPU", attempt_device or "auto")
-            on_line("Retrying on CPU…")
+    env = os.environ if base_env is None else base_env
+
+    def attempt(batch: list[Path], attempt_device: str | None) -> tuple[list[Path], list[Path]]:
+        return _run_attempt(
+            batch,
+            attempt_device,
+            profile=profile,
+            timestamps=timestamps,
+            paths=paths,
+            runner=runner,
+            on_line=on_line,
+            base_env=env,
+        )
+
+    delivered, missing = attempt(files, device)
+    result = JobResult(delivered=delivered, missing=missing)
+    if device != "cpu" and missing and not delivered:
+        LOGGER.warning("No transcripts on device=%s; retrying once on CPU", device or "auto")
+        on_line("Retrying on CPU…")
+        cpu_delivered, result.missing = attempt(missing, "cpu")
+        result.delivered.extend(cpu_delivered)
+        if cpu_delivered:
             write_config_value(paths.config_file, "device", "cpu")
             result.fell_back_to_cpu = True
     return result
+
+
+def sweep_stale_work_dirs(work_root: Path, *, max_age_s: float = 24 * 3600, now: float | None = None) -> None:
+    """Remove work dirs left behind by crashed/killed runs (older than ``max_age_s``)."""
+    if not work_root.is_dir():
+        return
+    now = time.time() if now is None else now
+    for child in work_root.iterdir():
+        try:
+            stale = child.is_dir() and now - child.stat().st_mtime > max_age_s
+        except OSError:
+            continue
+        if stale:
+            shutil.rmtree(child, ignore_errors=True)
 
 
 def open_folder(folder: Path) -> None:
@@ -277,8 +352,13 @@ class TranscribeApp:
         self.files: list[Path] = []
         self.last_output_dir: Path | None = None
         self.events: queue.Queue[tuple[str, object]] = queue.Queue()
+        self.running = False
+        self.closing = False
+        self.proc: subprocess.Popen[str] | None = None
 
+        sweep_stale_work_dirs(paths.work_root)
         root.title("Transcribe")
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
         root.minsize(460, 300)
         frame = ttk.Frame(root, padding=16)
         frame.pack(fill="both", expand=True)
@@ -338,6 +418,7 @@ class TranscribeApp:
         self.start_button.config(state="disabled")
         self.open_button.config(state="disabled")
         self.progress.start(12)
+        self.running = True
         profile = GUI_PROFILES[self.language.get()]
         worker = threading.Thread(
             target=self._work, args=(list(self.files), profile, self.timestamps.get()), daemon=True
@@ -352,12 +433,31 @@ class TranscribeApp:
                 profile,
                 timestamps=timestamps,
                 paths=self.paths,
+                runner=lambda cmd, env, on_line: run_subprocess(cmd, env, on_line, on_start=self._track_process),
                 on_line=lambda line: self.events.put(("line", line)),
             )
             self.events.put(("done", result))
         except Exception as error:  # noqa: BLE001 — surface anything to the user, never crash the window
             LOGGER.exception("Transcription job crashed")
             self.events.put(("error", error))
+
+    def _track_process(self, proc: subprocess.Popen[str]) -> None:
+        # Worker thread. Set proc before reading closing (and _on_close the reverse), so a
+        # retry that starts while the window closes is always terminated by one side.
+        self.proc = proc
+        if self.closing:
+            proc.terminate()
+
+    def _on_close(self) -> None:
+        if self.running and not messagebox.askokcancel(
+            "Transcribe", "A transcription is still running. Stop it and close?", parent=self.root
+        ):
+            return
+        self.closing = True
+        proc = self.proc
+        if self.running and proc is not None and proc.poll() is None:
+            proc.terminate()
+        self.root.destroy()
 
     def _poll(self) -> None:
         while True:
@@ -373,17 +473,22 @@ class TranscribeApp:
                 return
 
     def _finish(self, payload: object) -> None:
+        self.running = False
+        self.proc = None
         self.progress.stop()
         self.start_button.config(state="normal")
         if isinstance(payload, JobResult) and payload.delivered:
             self.last_output_dir = payload.delivered[0].parent
             self.open_button.config(state="normal")
-        if isinstance(payload, JobResult) and payload.ok:
-            self.status.config(text=f"Done — {len(payload.delivered)} transcript(s) saved next to the audio.")
-        elif isinstance(payload, JobResult):
-            names = ", ".join(p.name for p in payload.missing)
-            self.status.config(text=f"Failed: {names}")
-            messagebox.showerror("Transcribe", f"Could not transcribe: {names}")
+        if isinstance(payload, JobResult):
+            cpu_note = " (switched to CPU)" if payload.fell_back_to_cpu else ""
+            saved = f"{len(payload.delivered)} transcript(s) saved next to the audio"
+            if payload.ok:
+                self.status.config(text=f"Done — {saved}.{cpu_note}")
+            else:
+                names = ", ".join(p.name for p in payload.missing)
+                self.status.config(text=f"{saved}; failed: {names}{cpu_note}")
+                messagebox.showerror("Transcribe", f"Could not transcribe: {names}")
         else:
             self.status.config(text="Failed.")
             messagebox.showerror("Transcribe", f"Transcription failed: {payload}")
