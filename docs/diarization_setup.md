@@ -1,6 +1,6 @@
 # Diarization Setup
 
-stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-community-1`) to attribute each transcribed segment to a speaker. This is the default for the Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`.
+stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-community-1`) to attribute each transcribed segment to a speaker. This is the default for the Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`. pyannote ships only with the `cpu`/`cu130` extras; on the lean GUI install `--diarize` warns and is skipped.
 
 The model is HuggingFace-gated, so first-time setup is a one-time HF account + token + license-accept dance. After that the model is cached at `~/.cache/hf/` (WSL/Linux) or `%USERPROFILE%\.cache\hf\` (Windows) and reused across runs.
 

@@ -14,23 +14,29 @@ LOCK = Path(__file__).resolve().parents[2] / "uv.lock"
 TORCH_STACK = {"torch", "torchaudio", "pyannote-audio"}
 
 
-def _base_closure() -> set[str]:
-    packages: list[dict[str, Any]] = tomllib.loads(LOCK.read_text(encoding="utf-8"))["package"]
-    deps_by_name: dict[str, list[str]] = {}
+def _lean_closure(packages: list[dict[str, Any]]) -> set[str]:
+    """Names reachable from `uv sync --no-dev --extra gui`; markers ignored (over-approximates)."""
+    deps: dict[str, list[dict[str, Any]]] = {}
+    extras: dict[str, dict[str, list[dict[str, Any]]]] = {}
     for pkg in packages:
-        deps_by_name.setdefault(pkg["name"], []).extend(d["name"] for d in pkg.get("dependencies", []))
+        deps.setdefault(pkg["name"], []).extend(pkg.get("dependencies", []))
+        for extra, entries in pkg.get("optional-dependencies", {}).items():
+            extras.setdefault(pkg["name"], {}).setdefault(extra, []).extend(entries)
     seen: set[str] = set()
-    todo = list(deps_by_name["stt-faster"])
+    todo = deps["stt-faster"] + extras["stt-faster"]["gui"]
     while todo:
-        name = todo.pop()
+        entry = todo.pop()
+        name = entry["name"]
+        for extra in entry.get("extra", []):
+            todo.extend(extras.get(name, {}).get(extra, []))
         if name not in seen:
             seen.add(name)
-            todo.extend(deps_by_name.get(name, []))
+            todo.extend(deps.get(name, []))
     return seen
 
 
 def test_base_closure_has_no_torch() -> None:
-    closure = _base_closure()
+    closure = _lean_closure(tomllib.loads(LOCK.read_text(encoding="utf-8"))["package"])
     assert "ctranslate2" in closure
     assert TORCH_STACK.isdisjoint(closure), sorted(TORCH_STACK & closure)
 
