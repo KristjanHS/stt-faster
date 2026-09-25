@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import io
+import os
 import sys
 import tarfile
 import threading
+import time
 import tomllib
 import urllib.error
 import zipfile
@@ -19,17 +21,21 @@ from backend.gui import default_app_paths
 from installer.setup_gui import (
     HF_TOOL_PINS,
     MODELS,
+    Cancelled,
     Events,
+    Installer,
     InstallError,
     InstallPaths,
     ModelSpec,
     Task,
+    app_in_use,
     classify_source,
     clean_install,
     default_install_paths,
     deps_command,
     deps_env,
     dir_size,
+    download,
     ensure_device_config,
     expected_model_size,
     extract_named,
@@ -38,10 +44,12 @@ from installer.setup_gui import (
     latest_release_zip,
     model_cache_dir,
     model_command,
+    run_process,
     run_tasks,
     shortcut_script,
     source_ignore,
     swap_in,
+    system_tool,
     uv_asset,
 )
 
@@ -51,9 +59,13 @@ def paths(tmp_path: Path) -> InstallPaths:
     return InstallPaths(install_dir=tmp_path / "inst", config_file=tmp_path / "cfg" / "config", windows=True)
 
 
+@pytest.mark.parametrize("with_env", [True, False], ids=["env", "fallbacks"])
 @pytest.mark.parametrize("plat", ["win32", "linux"])
-def test_install_paths_match_gui_paths(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, plat: str) -> None:
-    env = {k: str(tmp_path / k) for k in ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME", "XDG_CONFIG_HOME")}
+def test_install_paths_match_gui_paths(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, plat: str, with_env: bool
+) -> None:
+    keys = ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME", "XDG_CONFIG_HOME")
+    env = {k: str(tmp_path / k) for k in keys} if with_env else {}
     monkeypatch.setattr(sys, "platform", plat)
     gui = default_app_paths(env)
     ours = default_install_paths(env, plat)
@@ -140,6 +152,19 @@ def test_extract_zip_stripped_rejects_traversal(tmp_path: Path) -> None:
         extract_zip_stripped(archive, tmp_path / "out")
 
 
+@pytest.mark.parametrize(
+    "members",
+    [
+        {"top/C:/x": b"x", "top/ok": b"o"},  # stripped to a drive-relative `C:/x`
+        {"/abs/evil": b"e", "other/ok": b"o"},  # mixed tops, so nothing is stripped
+    ],
+    ids=["drive", "rooted"],
+)
+def test_extract_zip_stripped_rejects_drive_and_rooted(tmp_path: Path, members: dict[str, bytes]) -> None:
+    with pytest.raises(InstallError, match="Unsafe"):
+        extract_zip_stripped(_zip(tmp_path / "s.zip", members), tmp_path / "out")
+
+
 def test_extract_named_zip_flattens_and_requires_all(tmp_path: Path) -> None:
     members = {"ff-9/bin/ffmpeg.exe": b"f", "ff-9/bin/ffprobe.exe": b"p", "ff-9/doc/x": b"d"}
     archive = _zip(tmp_path / "ff.zip", members)
@@ -167,6 +192,46 @@ def test_swap_in_replaces_target(tmp_path: Path) -> None:
     swap_in(tmp_path / "app.new", tmp_path / "app")
     assert [p.name for p in (tmp_path / "app").iterdir()] == ["pyproject.toml"]
     assert not (tmp_path / "app.new").exists() and not (tmp_path / "app.old").exists()
+
+
+def test_swap_in_restores_target_when_rename_fails(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "app").mkdir()
+    (tmp_path / "app" / "main.py").write_text("old")
+    (tmp_path / "app.new").mkdir()
+    real_rename = Path.rename
+
+    def flaky_rename(self: Path, target: Any) -> Path:
+        if self.name == "app.new":
+            raise OSError("locked")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(Path, "rename", flaky_rename)
+    with pytest.raises(OSError, match="locked"):
+        swap_in(tmp_path / "app.new", tmp_path / "app")
+    assert (tmp_path / "app" / "main.py").read_text() == "old"
+    assert not (tmp_path / "app.old").exists()
+
+
+def test_download_file_url(tmp_path: Path) -> None:
+    source = tmp_path / "src.bin"
+    source.write_bytes(b"abc" * 10)
+    dest = tmp_path / "dl" / "out.bin"
+    seen: list[tuple[int, int | None]] = []
+    download(source.as_uri(), dest, lambda done, total: seen.append((done, total)), threading.Event(), chunk=8)
+    assert dest.read_bytes() == b"abc" * 10
+    assert seen[-1] == (30, 30) and len(seen) == 4
+    assert not dest.with_name("out.bin.part").exists()
+
+
+def test_download_cancelled_leaves_no_part(tmp_path: Path) -> None:
+    source = tmp_path / "src.bin"
+    source.write_bytes(b"abc")
+    dest = tmp_path / "out.bin"
+    cancel = threading.Event()
+    cancel.set()
+    with pytest.raises(Cancelled):
+        download(source.as_uri(), dest, lambda _d, _t: None, cancel)
+    assert list(tmp_path.iterdir()) == [source]
 
 
 def test_classify_source(tmp_path: Path) -> None:
@@ -223,6 +288,9 @@ def test_ensure_device_config_writes_cpu_once(tmp_path: Path) -> None:
     config.write_text("token=abc\ndevice=cuda\n")
     ensure_device_config(config)
     assert config.read_text() == "token=abc\ndevice=cuda\n"
+    config.write_text("token=abc\n")
+    ensure_device_config(config)
+    assert config.read_text() == "token=abc\ndevice=cpu\n"
 
 
 def test_clean_install_keeps_setup_copy_and_logs(paths: InstallPaths) -> None:
@@ -231,6 +299,45 @@ def test_clean_install_keeps_setup_copy_and_logs(paths: InstallPaths) -> None:
     paths.setup_copy.write_bytes(b"exe")
     clean_install(paths)
     assert sorted(p.name for p in paths.install_dir.iterdir()) == ["Transcribe-Setup.exe", "logs"]
+    clean_install(paths)  # nothing left to remove is not an error
+
+
+def test_clean_install_surfaces_locked_venv(monkeypatch: pytest.MonkeyPatch, paths: InstallPaths) -> None:
+    def locked(path: Path, *, ignore_errors: bool = False) -> None:
+        if not ignore_errors:
+            raise PermissionError(13, "Access is denied", str(path))
+
+    monkeypatch.setattr("installer.setup_gui.shutil.rmtree", locked)
+    with pytest.raises(InstallError, match="Close Transcribe"):
+        clean_install(paths)
+
+
+def test_app_in_use_only_probes_on_windows(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def locked(*_a: Any) -> None:
+        raise PermissionError(13, "in use")
+
+    win = InstallPaths(tmp_path, tmp_path / "c", windows=True)
+    (win.venv_dir / "Scripts").mkdir(parents=True)
+    (win.venv_dir / "Scripts" / "python.exe").write_bytes(b"")
+    assert app_in_use(win) is False
+    assert (win.venv_dir / "Scripts" / "python.exe").is_file()  # probe renamed it back
+    monkeypatch.setattr("installer.setup_gui.os.rename", locked)
+    assert app_in_use(win) is True
+    assert app_in_use(InstallPaths(tmp_path, tmp_path / "c", windows=False)) is False
+
+
+def test_installer_refuses_while_app_in_use(monkeypatch: pytest.MonkeyPatch, paths: InstallPaths) -> None:
+    monkeypatch.setattr("installer.setup_gui.app_in_use", lambda _p: True)
+    with pytest.raises(InstallError, match="Close Transcribe"):
+        Installer(paths=paths, clean=True).run(_recorder()[0])
+    assert not paths.install_dir.exists()
+
+
+def test_system_tool_prefers_system_root() -> None:
+    assert system_tool({"SYSTEMROOT": "C:/Windows"}, "System32", "taskkill.exe") == str(
+        Path("C:/Windows", "System32", "taskkill.exe")
+    )
+    assert system_tool({}, "System32", "WindowsPowerShell", "v1.0", "powershell.exe") == "powershell"
 
 
 def _recorder() -> tuple[Events, list[tuple[str, str]]]:
@@ -247,12 +354,22 @@ def _recorder() -> tuple[Events, list[tuple[str, str]]]:
 def test_run_tasks_orders_dependencies() -> None:
     order: list[str] = []
     events, _log = _recorder()
+
+    def slow_a(_report: object) -> None:
+        time.sleep(0.2)  # without the dependency wait, b would append first
+        order.append("a")
+
     tasks = [
-        Task("a", "A", lambda _r: order.append("a")),
+        Task("a", "A", slow_a),
         Task("b", "B", lambda _r: order.append("b"), needs=("a",)),
     ]
     assert run_tasks(tasks, events) is True
     assert order == ["a", "b"]
+
+
+def test_run_tasks_rejects_undeclared_dependency() -> None:
+    with pytest.raises(ValueError, match="nope"):
+        run_tasks([Task("a", "A", lambda _r: None, needs=("nope",))], _recorder()[0])
 
 
 def test_run_tasks_skips_dependants_of_failure() -> None:
@@ -268,3 +385,55 @@ def test_run_tasks_skips_dependants_of_failure() -> None:
     assert run_tasks(tasks, events) is False
     assert ("a", "failed") in log and ("b", "skipped") in log and ("c", "done") in log
     assert ("b", "running") not in log
+
+
+def test_run_process_cancel_kills_promptly() -> None:
+    cancel = threading.Event()
+    cancel.set()
+    started = time.monotonic()
+    with pytest.raises(Cancelled):
+        run_process([sys.executable, "-c", "import time; time.sleep(30)"], os.environ, lambda *_a: None, cancel)
+    assert time.monotonic() - started < 5
+
+
+def test_run_process_failure_reports_last_line() -> None:
+    cmd = [sys.executable, "-c", "import sys; print('boom-line'); sys.exit(3)"]
+    with pytest.raises(InstallError) as caught:
+        run_process(cmd, os.environ, lambda *_a: None, threading.Event())
+    assert str(caught.value) == "boom-line"
+
+
+def _gone(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return True
+    stat = Path(f"/proc/{pid}/stat")
+    return stat.is_file() and stat.read_text().split(") ", 1)[1].startswith("Z")  # killed, not yet reaped
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX process groups")
+def test_run_process_cancel_kills_grandchildren(tmp_path: Path) -> None:
+    pid_file = tmp_path / "pid"
+    spawner = (
+        "import subprocess, sys, time; "
+        "p = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        f"open({str(pid_file)!r}, 'w').write(str(p.pid)); time.sleep(30)"
+    )
+    cancel = threading.Event()
+
+    def report(_fraction: float | None, _text: str) -> None:
+        if pid_file.is_file() and pid_file.read_text():
+            cancel.set()
+
+    with pytest.raises(Cancelled):
+        run_process([sys.executable, "-c", spawner], os.environ, report, cancel)
+    grandchild = int(pid_file.read_text())
+    try:
+        deadline = time.monotonic() + 5
+        while not _gone(grandchild) and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert _gone(grandchild)
+    finally:
+        if not _gone(grandchild):
+            os.kill(grandchild, 9)
