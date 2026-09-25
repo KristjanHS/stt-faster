@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import contextlib
 import io
+import logging
 import os
 import sys
 import tarfile
+import tempfile
 import threading
 import time
 import tomllib
@@ -14,7 +16,8 @@ import urllib.error
 import zipfile
 from email.message import Message
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
@@ -22,12 +25,14 @@ from backend.gui import default_app_paths
 from installer.setup_gui import (
     HF_TOOL_PINS,
     MODELS,
+    UNINSTALL_KEY,
     Cancelled,
     Events,
     Installer,
     InstallError,
     InstallPaths,
     ModelSpec,
+    SetupWindow,
     Task,
     app_in_use,
     classify_source,
@@ -42,18 +47,22 @@ from installer.setup_gui import (
     extract_named,
     extract_zip_stripped,
     hf_hub_cache,
+    is_installed,
     isolated_env,
     latest_release_zip,
     model_cache_dir,
     model_command,
     register_uninstall,
+    relaunch_from_temp,
     remove_shortcuts_script,
     run_process,
     run_tasks,
+    schedule_self_delete,
     seed_model_cache,
     self_delete_command,
     shortcut_script,
     uninstall,
+    uninstall_main,
     unregister_uninstall,
     source_ignore,
     swap_in,
@@ -67,6 +76,22 @@ def paths(tmp_path: Path) -> InstallPaths:
     return InstallPaths(install_dir=tmp_path / "inst", config_file=tmp_path / "cfg" / "config", windows=True)
 
 
+@pytest.fixture
+def win_paths(tmp_path: Path) -> InstallPaths:
+    """Windows layout whose folders pass uninstall's ``stt-faster`` name guard."""
+    return InstallPaths(tmp_path / "local" / "stt-faster", tmp_path / "roam" / "stt-faster" / "config", windows=True)
+
+
+@pytest.fixture
+def popen_calls(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> list[tuple[Any, dict[str, Any]]]:
+    """Record Popen calls instead of spawning; %TEMP% moves under tmp_path."""
+    calls: list[tuple[Any, dict[str, Any]]] = []
+    monkeypatch.setattr("installer.setup_gui.subprocess.Popen", lambda args, **kw: calls.append((args, kw)))
+    (tmp_path / "temp").mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(tmp_path / "temp"))
+    return calls
+
+
 @pytest.mark.parametrize("with_env", [True, False], ids=["env", "fallbacks"])
 @pytest.mark.parametrize("plat", ["win32", "linux"])
 def test_install_paths_match_gui_paths(
@@ -78,7 +103,7 @@ def test_install_paths_match_gui_paths(
     gui = default_app_paths(env)
     ours = default_install_paths(env, plat)
     assert (ours.install_dir, ours.config_file) == (gui.install_dir, gui.config_file)
-    assert ours.ffmpeg_bin == gui.ffmpeg_bin
+    assert (ours.ffmpeg_bin, ours.hf_home) == (gui.ffmpeg_bin, gui.hf_home)
 
 
 def test_gui_exe_path_per_platform(tmp_path: Path) -> None:
@@ -273,6 +298,8 @@ def test_isolated_env_overrides_inherited_caches(paths: InstallPaths) -> None:
     env = isolated_env({"HF_HUB_CACHE": "/shared/hub", "HF_HOME": "/shared", "UV_CACHE_DIR": "/shared/uv"}, paths)
     for key in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "HF_HOME", "HF_HUB_CACHE", "HF_XET_CACHE"):
         assert Path(env[key]).is_relative_to(paths.install_dir), key
+    assert isolated_env({"UV_PYTHON_INSTALL_BIN": "1"}, paths)["UV_PYTHON_INSTALL_BIN"] == "0"  # no ~/.local/bin shim
+    assert env["UV_PYTHON_INSTALL_REGISTRY"] == "0"  # no HKCU PEP 514 entry
 
 
 def test_seed_model_cache_copies_once_and_keeps_legacy(tmp_path: Path) -> None:
@@ -295,6 +322,7 @@ def test_seed_model_cache_failed_copy_leaves_nothing(monkeypatch: pytest.MonkeyP
     target.parent.mkdir()
 
     def broken(_src: Path, dst: Path, **_kw: Any) -> None:
+        assert dst.name.endswith(".seed") and not target.exists()  # copies into a staging dir, never the target
         dst.mkdir()
         raise OSError("disk full")
 
@@ -343,6 +371,35 @@ def test_uninstall_removes_install_and_config_only(tmp_path: Path) -> None:
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == ["cfg", "cfg/other", "share"]
 
 
+@pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="read-only dir must block unlink")
+def test_partial_uninstall_still_unregisters_and_stays_retryable(
+    monkeypatch: pytest.MonkeyPatch, win_paths: InstallPaths
+) -> None:
+    locked = win_paths.install_dir / "hf" / "locked"
+    locked.mkdir(parents=True)
+    (locked / "model.bin").write_bytes(b"m")
+    win_paths.config_file.parent.mkdir(parents=True)
+    reg = _FakeReg()
+    register_uninstall(win_paths, reg)
+    monkeypatch.setattr("installer.setup_gui.subprocess.run", lambda *_a, **_kw: None)  # shortcut removal
+    locked.chmod(0o500)
+    try:
+        with pytest.raises(InstallError, match="model.bin"):
+            uninstall(win_paths, {}, reg=reg)
+    finally:
+        locked.chmod(0o700)
+    assert reg.keys == {} and not win_paths.config_file.parent.exists()
+    assert is_installed(win_paths)  # the window offers Uninstall again
+
+
+def test_is_installed_ignores_setup_logs(paths: InstallPaths) -> None:
+    assert is_installed(paths) is False
+    paths.log_file.parent.mkdir(parents=True)  # the window's own log exists before any install
+    assert is_installed(paths) is False
+    paths.setup_copy.write_bytes(b"exe")
+    assert is_installed(paths) is True
+
+
 def test_uninstall_refuses_unexpected_folder_and_open_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     odd = InstallPaths(tmp_path / "home", tmp_path / "cfg" / "stt-faster" / "config", windows=False)
     odd.install_dir.mkdir()
@@ -365,6 +422,24 @@ def test_self_delete_command_removes_only_its_temp_folder() -> None:
     cmd = self_delete_command(exe, {"SYSTEMROOT": "C:/Windows"})
     assert f'rmdir /s /q "{exe.parent}"' in cmd and f'if not exist "{exe.parent}" exit' in cmd
     assert cmd.startswith(f'"{Path("C:/Windows", "System32", "cmd.exe")}" /d /c for /l')
+    assert " %i in (1,1,10) do " in cmd and "%%" not in cmd  # a command line takes %i; %% is batch-file only
+
+
+def test_spawned_processes_never_run_inside_what_they_delete(
+    monkeypatch: pytest.MonkeyPatch, win_paths: InstallPaths, popen_calls: list[tuple[Any, dict[str, Any]]]
+) -> None:
+    exe = win_paths.setup_copy
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"exe")
+    relaunch_from_temp(exe, ["--uninstall"])
+    temp_exe = Path(popen_calls[0][0][0])
+    schedule_self_delete(temp_exe, {})
+    monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *_a, **_kw: True)
+    monkeypatch.setattr(logging.getLogger(), "handlers", [])
+    SetupWindow.uninstall(cast(Any, SimpleNamespace(root=_FakeTk())))
+    cwds = [Path(kw["cwd"]) for _args, kw in popen_calls]
+    assert cwds == [Path(tempfile.gettempdir()), temp_exe.parent.parent, Path(tempfile.gettempdir())]
+    assert not any(cwd.is_relative_to(win_paths.install_dir) or cwd.is_relative_to(temp_exe.parent) for cwd in cwds)
 
 
 def test_model_command_include_and_force(paths: InstallPaths) -> None:
@@ -402,12 +477,13 @@ def test_ensure_device_config_writes_cpu_once(tmp_path: Path) -> None:
     assert config.read_text() == "token=abc\ndevice=cpu\n"
 
 
-def test_clean_install_keeps_setup_copy_and_logs(paths: InstallPaths) -> None:
-    for d in (paths.app_dir, paths.venv_dir, paths.ffmpeg_bin, paths.uv_dir, paths.log_file.parent):
+def test_clean_install_keeps_setup_copy_logs_and_download_caches(paths: InstallPaths) -> None:
+    kept = (paths.log_file.parent, paths.uv_cache, paths.hf_home)
+    for d in (paths.app_dir, paths.venv_dir, paths.ffmpeg_bin, paths.uv_dir, paths.python_dir, *kept):
         d.mkdir(parents=True)
     paths.setup_copy.write_bytes(b"exe")
     clean_install(paths)
-    assert sorted(p.name for p in paths.install_dir.iterdir()) == ["Transcribe-Setup.exe", "logs"]
+    assert sorted(p.name for p in paths.install_dir.iterdir()) == ["Transcribe-Setup.exe", "hf", "logs", "uv-cache"]
     clean_install(paths)  # nothing left to remove is not an error
 
 
@@ -440,6 +516,102 @@ def test_installer_refuses_while_app_in_use(monkeypatch: pytest.MonkeyPatch, pat
     with pytest.raises(InstallError, match="Close Transcribe"):
         Installer(paths=paths, clean=True).run(_recorder()[0])
     assert not paths.install_dir.exists()
+
+
+def test_fetch_model_uses_install_cache_and_seeds_only_without_clean(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, paths: InstallPaths
+) -> None:
+    runs: list[tuple[list[str], dict[str, str]]] = []
+    seeds: list[tuple[Path, Path]] = []
+    monkeypatch.setattr("installer.setup_gui.run_process", lambda cmd, env, *_a: runs.append((list(cmd), dict(env))))
+    monkeypatch.setattr("installer.setup_gui.seed_model_cache", lambda legacy, target: seeds.append((legacy, target)))
+    monkeypatch.setattr("installer.setup_gui.expected_model_size", lambda *_a: None)
+    spec = ModelSpec("Org/name")
+    installer = Installer(paths=paths, env={"HF_HOME": str(tmp_path / "shared")})
+    installer.fetch_model(spec, lambda *_a: None)
+    assert seeds == [(tmp_path / "shared" / "hub" / "models--Org--name", paths.hf_home / "hub" / "models--Org--name")]
+    assert runs[0][1]["HF_HUB_CACHE"] == str(paths.hf_home / "hub")
+    installer.clean = True
+    installer.fetch_model(spec, lambda *_a: None)
+    assert len(seeds) == 1 and runs[1][0][-1] == "--force-download"
+
+
+def test_finish_registers_uninstall_only_with_setup_copy(monkeypatch: pytest.MonkeyPatch, paths: InstallPaths) -> None:
+    reg = _FakeReg()
+    monkeypatch.setattr("installer.setup_gui._winreg", lambda: reg)
+    monkeypatch.setattr("installer.setup_gui.run_process", lambda *_a: None)
+    paths.gui_exe.parent.mkdir(parents=True)
+    paths.gui_exe.write_bytes(b"exe")
+    installer = Installer(paths=paths, env={})
+    installer.finish(lambda *_a: None)
+    assert reg.keys == {}  # no copy to point UninstallString at
+    paths.setup_copy.write_bytes(b"exe")
+    installer.finish(lambda *_a: None)
+    assert list(reg.keys) == [UNINSTALL_KEY]
+
+
+class _FakeTk:
+    def withdraw(self) -> None:
+        pass
+
+    def destroy(self) -> None:
+        pass
+
+
+@pytest.fixture
+def fake_dialogs(monkeypatch: pytest.MonkeyPatch) -> dict[str, bool]:
+    """No real Tk: askyesno answers ``answers["yes"]``."""
+    answers = {"yes": True}
+    monkeypatch.setattr("installer.setup_gui.tk.Tk", _FakeTk)
+    monkeypatch.setattr("tkinter.messagebox.askyesno", lambda *_a, **_kw: answers["yes"])
+    for name in ("showerror", "showinfo"):
+        monkeypatch.setattr(f"tkinter.messagebox.{name}", lambda *_a, **_kw: None)
+    return answers
+
+
+def test_uninstall_main_declined_removes_nothing(
+    monkeypatch: pytest.MonkeyPatch, win_paths: InstallPaths, fake_dialogs: dict[str, bool]
+) -> None:
+    fake_dialogs["yes"] = False
+    win_paths.venv_dir.mkdir(parents=True)
+    monkeypatch.setattr("installer.setup_gui._winreg", _FakeReg)
+    monkeypatch.setattr("installer.setup_gui.uninstall", lambda *_a, **_kw: pytest.fail("removed after a No"))
+    assert uninstall_main(win_paths, {}, headless=False, confirmed=False) == 1
+    assert win_paths.venv_dir.is_dir()
+
+
+def test_uninstall_main_hops_to_temp_copy_when_run_from_install_dir(
+    monkeypatch: pytest.MonkeyPatch, win_paths: InstallPaths, popen_calls: list[tuple[Any, dict[str, Any]]]
+) -> None:
+    exe = win_paths.setup_copy.resolve()
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"exe")
+    monkeypatch.setattr("installer.setup_gui.running_exe", lambda: exe)
+    monkeypatch.setattr("installer.setup_gui._winreg", _FakeReg)
+    monkeypatch.setattr("installer.setup_gui.uninstall", lambda *_a, **_kw: pytest.fail("the temp copy removes"))
+    assert uninstall_main(win_paths, {}, headless=True, confirmed=True) == 0
+    ((args, _kw),) = popen_calls
+    assert not Path(args[0]).is_relative_to(win_paths.install_dir) and {"--uninstall", "--yes"} <= set(args[1:])
+
+
+def test_uninstall_main_self_deletes_only_after_success(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, win_paths: InstallPaths
+) -> None:
+    exe = tmp_path / "temp" / "stt-faster-uninstall-x" / "Transcribe-Setup.exe"
+    deletes: list[Path] = []
+    monkeypatch.setattr("installer.setup_gui.running_exe", lambda: exe)
+    monkeypatch.setattr("installer.setup_gui._winreg", _FakeReg)
+    monkeypatch.setattr("installer.setup_gui.schedule_self_delete", lambda e, _env: deletes.append(e))
+
+    def locked(*_a: Any, **_kw: Any) -> None:
+        raise InstallError("locked")
+
+    monkeypatch.setattr("installer.setup_gui.uninstall", locked)
+    assert uninstall_main(win_paths, {}, headless=True, confirmed=True) == 1
+    assert deletes == []
+    monkeypatch.setattr("installer.setup_gui.uninstall", lambda *_a, **_kw: None)
+    assert uninstall_main(win_paths, {}, headless=True, confirmed=True) == 0
+    assert deletes == [exe]
 
 
 def test_system_tool_prefers_system_root() -> None:
