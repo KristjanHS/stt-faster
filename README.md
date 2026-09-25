@@ -128,6 +128,17 @@ If outbound network is unavailable and required wheels are not already cached, u
   - `Makefile` targets listed above; interpreter selection and `--pythonpath` wiring.
   - `.github/workflows/python-lint-test.yml` environment no longer forces a venv name.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The Windows installer is built from source by the `.github/workflows/release-installer.yml` workflow, which submits it to SignPath for signing (pending approval — until then it is unsigned).
+
+- Committers and reviewers: [KristjanHS](https://github.com/KristjanHS)
+- Approvers: [KristjanHS](https://github.com/KristjanHS)
+
+**Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It only downloads what it needs:
+
+- Installer: github.com (uv, ffmpeg, the app source from the latest release) and huggingface.co (speech models).
+- App: huggingface.co (speech models; the diarization model with your own HF token) and raw.githubusercontent.com (the RNNoise noise-reduction model). No telemetry, no update checks.
 
 ## License
 

@@ -1,0 +1,77 @@
+name: Release installer
+
+# Builds Transcribe-Setup.exe on a published release (scripts/release.sh) and attaches it.
+# SignPath signing runs only once the SIGNPATH_* repo variables exist.
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build and attach (e.g. v1.2.0)
+        required: true
+      skip_signing:
+        description: Falsifier run — skip SignPath so the Authenticode assert must fail
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+      EXE: dist/Transcribe-Setup.exe
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+
+      - name: Build the installer
+        shell: cmd
+        run: call installer\build_installer.bat < NUL
+
+      - id: upload
+        uses: actions/upload-artifact@v7
+        with:
+          name: Transcribe-Setup
+          path: ${{ env.EXE }}
+          if-no-files-found: error
+
+      - name: Sign via SignPath
+        if: vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
+          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
+          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
+          wait-for-completion: true
+          output-artifact-directory: signed
+
+      - name: Use the signed exe
+        if: vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
+        shell: pwsh
+        run: Copy-Item signed/Transcribe-Setup.exe $env:EXE -Force
+
+      - name: Assert a valid Authenticode signature
+        if: vars.SIGNPATH_ORG_ID != ''
+        shell: pwsh
+        run: |
+          $status = (Get-AuthenticodeSignature $env:EXE).Status
+          if ($status -ne 'Valid') { throw "Authenticode status of $env:EXE is $status" }
+
+      - name: Attach to the release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload $env:TAG $env:EXE --clobber
+
+      - name: SmartScreen submission reminder (unsigned)
+        if: vars.SIGNPATH_ORG_ID == ''
+        shell: pwsh
+        run: >-
+          Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned Transcribe-Setup.exe attached to $env:TAG — submit it at https://www.microsoft.com/en-us/wdsi/filesubmission (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)."
