@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b code shipped (`c5eab3a` + review fixes), its headless Linux e2e snapshot guard still owed; then 5; slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); next: monkeypatch-free `test_setup_gui.py` (backlog), then 5; slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
@@ -116,14 +116,14 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
 4. **Build + release**: `build_installer.bat` + `make release`. First release attaches the `.exe`.
    Rulings: `make release V=X.Y.Z` → `scripts/release.sh`: preflight (main, clean, tag absent local+origin, exe = `dist/` else latest-release asset) before any change → bump `pyproject` version + `uv lock` + commit → tag → push main + tag → `gh release create`; first release v1.1.0; bat self-fetches pinned uv + PyInstaller into `%TEMP%`; guard = pytest with fake git/gh/uv on `PATH`.
 4b. **Self-contained install + uninstall** (before 5 — Extras installs into the same caches). Everything lives under `%LOCALAPPDATA%\stt-faster\`; nothing shared is touched.
-   Moves: `deps_env` + `model_command` env set `UV_CACHE_DIR=<install>\uv-cache`, `UV_PYTHON_INSTALL_DIR=<install>\python`, `HF_HOME=<install>\hf` (+ `HF_HUB_CACHE`/`HF_XET_CACHE` pinned under it so inherited values never win); `gui.build_env` sets the same HF vars. Repair copies (never moves) matching model dirs from the user's resolved old hub cache first.
+   Moves: `deps_env` + `model_command` env set `UV_CACHE_DIR=<install>\uv-cache`, `UV_PYTHON_INSTALL_DIR=<install>\python`, `UV_TOOL_DIR=<install>\uv-tools`, `TEMP`/`TMP`/`TMPDIR=<install>\tmp`, `UV_NO_CONFIG=1`, `HF_HOME=<install>\hf` (+ `HF_HUB_CACHE`/`HF_XET_CACHE` pinned under it so inherited values never win); `gui.build_env` sets the same HF vars. Repair copies (never moves) matching model dirs from the user's resolved old hub cache first.
    Uninstall: third mode beside Repair/Clean + `--uninstall`; removes install dir, `%APPDATA%\stt-faster`, both shortcuts, and the `HKCU\…\CurrentVersion\Uninstall\stt-faster` key (`winreg`, no admin) that install writes for Apps & features (`UninstallString = <install>\Transcribe-Setup.exe --uninstall`). The running setup exe can't delete itself → re-launch from a `%TEMP%` copy first; that copy spawns a hidden `cmd` that deletes it after exit.
-   Guard: headless Linux e2e into a scratch `HOME` with a pre-seeded `~/.cache/huggingface` + uv dirs → install → assert no new path outside install + config dirs → `--uninstall` → assert the tree equals the pre-install snapshot.
+   Guard: `pytest tests/e2e/test_installer_e2e.py` (scratch `HOME` + `TMPDIR`, host models hardlinked into `~/.cache/huggingface`; network, ~30 s).
 5. **Extras / diarization** panel + `--extras` installer mode.
 6. **GPU mode**: start with a spike on the Windows host with an NVIDIA GPU. Confirm the CUDA major version the ctranslate2 4.6.2 Windows wheel links against (`cublas64_12.dll` vs `_13`) and pin the matching `nvidia-*` wheels. Then add change #2b, `nvidia-smi` detection in the installer, and the GUI's one-shot CPU retry. CPU-only installs work without this slice.
 7. **Code signing (SignPath Foundation) + SmartScreen todos** → `docs/plans/2026-09-25-smartscreen-code-signing.md` (owns the Store/MSIX backlog item too).
 
-Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter=True` via `config.set(...)` on the variant's config before `ServiceFactory.create_transcription_service`, `transcription_commands.py:250`; `vad_threshold` / `vad_parameters.min_silence_duration_ms` live in `preprocess/config.py:262-276`) · in-app update check · multilingual "Other" profile.
+Backlog (unordered): **next** — replace the ~12 `monkeypatch` uses in `tests/unit/test_setup_gui.py` with injected params/fields (subprocess runner, rmtree, rename, platform, messagebox, tempdir); user ruling: no monkeypatch in tests · VAD sliders (needs a `--vad` override that sets `vad_filter=True` via `config.set(...)` on the variant's config before `ServiceFactory.create_transcription_service`, `transcription_commands.py:250`; `vad_threshold` / `vad_parameters.min_silence_duration_ms` live in `preprocess/config.py:262-276`) · in-app update check · multilingual "Other" profile.
 
 ## Risks / verify-first
 

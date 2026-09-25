@@ -113,6 +113,14 @@ class InstallPaths:
         return self.install_dir / "uv-cache"
 
     @property
+    def uv_tools(self) -> Path:
+        return self.install_dir / "uv-tools"
+
+    @property
+    def tmp_dir(self) -> Path:
+        return self.install_dir / "tmp"
+
+    @property
     def python_dir(self) -> Path:
         return self.install_dir / "python"
 
@@ -131,11 +139,13 @@ class InstallPaths:
         return self.install_dir / "logs" / "setup.log"
 
 
-def default_install_paths(env: Mapping[str, str] | None = None, plat: str | None = None) -> InstallPaths:
+def default_install_paths(
+    env: Mapping[str, str] | None = None, plat: str | None = None, home: Path | None = None
+) -> InstallPaths:
     """Mirror of ``backend.gui.default_app_paths`` (this file cannot import the app)."""
     env = os.environ if env is None else env
     plat = sys.platform if plat is None else plat
-    home = Path.home()
+    home = Path.home() if home is None else home
 
     def env_dir(key: str, default: Path) -> Path:
         value = env.get(key, "")
@@ -368,6 +378,9 @@ def isolated_env(base: Mapping[str, str], paths: InstallPaths) -> dict[str, str]
         "UV_PYTHON_INSTALL_DIR": str(paths.python_dir),
         "UV_PYTHON_INSTALL_BIN": "0",  # no python.exe shim in ~/.local/bin (`uv help python install`)
         "UV_PYTHON_INSTALL_REGISTRY": "0",  # no PEP 514 entry in HKCU
+        "UV_NO_CONFIG": "1",  # a user's %APPDATA%\uv\uv.toml never steers (or breaks) the install
+        "UV_TOOL_DIR": str(paths.uv_tools),  # `uv tool run` otherwise creates %APPDATA%\uv\tools
+        **dict.fromkeys(("TMPDIR", "TEMP", "TMP"), str(paths.tmp_dir)),  # uv's lock files outlive the run
         "HF_HOME": str(hf),
         "HF_HUB_CACHE": str(hf / "hub"),
         "HF_XET_CACHE": str(hf / "xet"),
@@ -857,7 +870,7 @@ class Installer:
     def run(self, events: Events) -> bool:
         if app_in_use(self.paths):
             raise InstallError("Close Transcribe first, then retry.")
-        self.paths.install_dir.mkdir(parents=True, exist_ok=True)
+        self.paths.tmp_dir.mkdir(parents=True, exist_ok=True)
         if self.clean:
             clean_install(self.paths)
         return run_tasks(self.tasks(), events)

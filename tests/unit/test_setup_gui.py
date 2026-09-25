@@ -300,6 +300,9 @@ def test_isolated_env_overrides_inherited_caches(paths: InstallPaths) -> None:
         assert Path(env[key]).is_relative_to(paths.install_dir), key
     assert isolated_env({"UV_PYTHON_INSTALL_BIN": "1"}, paths)["UV_PYTHON_INSTALL_BIN"] == "0"  # no ~/.local/bin shim
     assert env["UV_PYTHON_INSTALL_REGISTRY"] == "0"  # no HKCU PEP 514 entry
+    assert env["UV_NO_CONFIG"] == "1"  # the user's uv.toml is never read
+    for key in ("UV_TOOL_DIR", "TMPDIR", "TEMP", "TMP"):
+        assert Path(env[key]).is_relative_to(paths.install_dir), key
 
 
 def test_seed_model_cache_copies_once_and_keeps_legacy(tmp_path: Path) -> None:
