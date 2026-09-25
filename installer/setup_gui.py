@@ -14,6 +14,7 @@ import os
 import platform
 import queue
 import shutil
+import signal
 import subprocess  # nosec B404 - runs uv / powershell with fixed argument lists
 import sys
 import tarfile
@@ -254,13 +255,16 @@ def extract_zip_stripped(archive: Path, dest: Path) -> None:
         names = [n for n in zf.namelist() if n.strip("/")]
         tops = {n.split("/", 1)[0] for n in names}
         strip = len(tops) == 1 and all("/" in n for n in names)
+        root = dest.resolve()
         for info in zf.infolist():
             parts = Path(info.filename).parts[1:] if strip else Path(info.filename).parts
             if not parts or info.is_dir():
                 continue
-            if ".." in parts or Path(info.filename).is_absolute():
-                raise InstallError(f"Unsafe path in archive: {info.filename}")
+            # Drive (`C:`) and rooted (`/`, `\`) parts escape dest on Windows even when not is_absolute().
+            unsafe = any(p == ".." or ":" in p or p.startswith(("/", "\\")) for p in parts)
             target = dest.joinpath(*parts)
+            if unsafe or not target.resolve().is_relative_to(root):
+                raise InstallError(f"Unsafe path in archive: {info.filename}")
             target.parent.mkdir(parents=True, exist_ok=True)
             with zf.open(info) as src, target.open("wb") as out:
                 shutil.copyfileobj(src, out)
@@ -299,7 +303,12 @@ def swap_in(staged: Path, target: Path) -> None:
     shutil.rmtree(old, ignore_errors=True)
     if target.exists():
         target.rename(old)
-    staged.rename(target)
+    try:
+        staged.rename(target)
+    except OSError:
+        if old.exists():  # put the working install back
+            old.rename(target)
+        raise
     shutil.rmtree(old, ignore_errors=True)
 
 
@@ -385,9 +394,35 @@ def is_installed(paths: InstallPaths) -> bool:
     return paths.app_dir.is_dir() or paths.venv_dir.is_dir()
 
 
+def app_in_use(paths: InstallPaths) -> bool:
+    """Windows refuses to rename a folder holding a running exe: a rename-and-back probe fails while the app is open."""
+    scripts = paths.venv_dir / "Scripts"
+    if not paths.windows or not scripts.is_dir():
+        return False
+    probe = scripts.with_name("Scripts.inuse-probe")
+    try:
+        os.rename(scripts, probe)
+    except OSError:
+        return True
+    os.rename(probe, scripts)
+    return False
+
+
+def system_tool(env: Mapping[str, str], *parts: str) -> str:
+    """``%SystemRoot%\\<parts>`` so a same-named exe on PATH is never run; the bare name without SystemRoot."""
+    root = next((v for k, v in env.items() if k.upper() == "SYSTEMROOT" and v), "")  # a dict copy loses case-folding
+    return str(Path(root, *parts)) if root else parts[-1].removesuffix(".exe")
+
+
 def clean_install(paths: InstallPaths) -> None:
     """Remove everything the installer put in the install dir, except the running setup copy and logs."""
-    for child in (paths.uv_dir, paths.app_dir, paths.venv_dir, paths.ffmpeg_bin.parent, paths.install_dir / "work"):
+    try:  # the venv first and strictly: a half-deleted venv under a running app is the worst outcome
+        shutil.rmtree(paths.venv_dir)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise InstallError(f"Could not remove {paths.venv_dir} ({error}). Close Transcribe, then retry.") from None
+    for child in (paths.uv_dir, paths.app_dir, paths.ffmpeg_bin.parent, paths.install_dir / "work"):
         shutil.rmtree(child, ignore_errors=True)
 
 
@@ -412,6 +447,11 @@ class Events:
 
 def run_tasks(tasks: Sequence[Task], events: Events) -> bool:
     """Run tasks concurrently, each after its ``needs``; a failed dependency skips its dependants."""
+    declared: set[str] = set()
+    for task in tasks:
+        if unknown := [dep for dep in task.needs if dep not in declared]:
+            raise ValueError(f"Task {task.key} needs {unknown}, which are not declared before it")
+        declared.add(task.key)
     futures: dict[str, Future[None]] = {}
 
     def execute(task: Task) -> None:
@@ -436,6 +476,20 @@ def run_tasks(tasks: Sequence[Task], events: Events) -> bool:
     return all(f.exception() is None for f in futures.values())
 
 
+def kill_tree(proc: subprocess.Popen[str], env: Mapping[str, str]) -> None:
+    """Kill ``proc`` and its children (uv spawns python / hf), not just the direct child."""
+    if sys.platform == "win32":
+        taskkill = [system_tool(env, "System32", "taskkill.exe"), "/T", "/F", "/PID", str(proc.pid)]
+        subprocess.run(taskkill, capture_output=True, check=False, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        proc.kill()
+    else:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)  # start_new_session made the child a group leader
+        except ProcessLookupError:
+            pass
+    proc.wait()
+
+
 def run_process(
     cmd: Sequence[str],
     env: Mapping[str, str],
@@ -454,6 +508,7 @@ def run_process(
         encoding="utf-8",
         errors="replace",
         creationflags=NO_WINDOW,
+        start_new_session=sys.platform != "win32",  # own process group, so cancel can kill the tree
     )
     lines: queue.Queue[str] = queue.Queue()
     tail: list[str] = []
@@ -468,8 +523,7 @@ def run_process(
     last = ""
     while proc.poll() is None:
         if cancel.is_set():
-            proc.kill()
-            proc.wait()
+            kill_tree(proc, env)
             raise Cancelled("Cancelled")
         while not lines.empty():
             last = lines.get()
@@ -561,7 +615,8 @@ class Installer:
                 shutil.copy2(exe, self.paths.setup_copy)
         if self.paths.windows:
             report(None, "creating shortcuts")
-            cmd = ["powershell", "-NoProfile", "-NonInteractive", "-Command", shortcut_script(self.paths.gui_exe)]
+            powershell = system_tool(self.env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+            cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", shortcut_script(self.paths.gui_exe)]
             run_process(cmd, self.env, report, self.cancel)
 
     def tasks(self) -> list[Task]:
@@ -579,6 +634,8 @@ class Installer:
         return tasks
 
     def run(self, events: Events) -> bool:
+        if app_in_use(self.paths):
+            raise InstallError("Close Transcribe first, then retry.")
         self.paths.install_dir.mkdir(parents=True, exist_ok=True)
         if self.clean:
             clean_install(self.paths)
@@ -733,7 +790,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             line = f"{text} ({fraction:.0%})" if fraction is not None else text
             if last.get(key) != line:
                 last[key] = line
-                LOGGER.debug("%s: %s", key, line)
+                LOGGER.info("%s: %s", key, line)
 
         def state(key: str, value: str, message: str) -> None:
             LOGGER.info("%s: %s %s", key, value, message)
