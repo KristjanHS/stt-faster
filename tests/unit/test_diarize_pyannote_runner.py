@@ -229,3 +229,13 @@ class TestDiarizeProgressHook:
 
         msgs = [r.getMessage() for r in caplog.records if r.name == pyannote_runner.LOGGER.name]
         assert msgs == ["⌛ Diarization progress: segmentation, elapsed 0.0 min"]
+
+
+def test_import_opts_out_of_pyannote_metrics(monkeypatch: pytest.MonkeyPatch) -> None:
+    import importlib
+
+    import backend.diarize.pyannote_runner as runner
+
+    monkeypatch.delenv("PYANNOTE_METRICS_ENABLED", raising=False)
+    importlib.reload(runner)
+    assert runner.os.environ["PYANNOTE_METRICS_ENABLED"] == "0"

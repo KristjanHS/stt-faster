@@ -137,8 +137,8 @@ Free code signing provided by [SignPath.io](https://about.signpath.io), certific
 
 **Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It only downloads what it needs:
 
-- Installer: github.com (uv, ffmpeg, the app source from the latest release) and huggingface.co (speech models).
-- App: huggingface.co (speech models; the diarization model with your own HF token) and raw.githubusercontent.com (the RNNoise noise-reduction model). No telemetry, no update checks.
+- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages) and huggingface.co (speech models); enabling diarization also downloads torch from download.pytorch.org.
+- App: huggingface.co (speech models; the diarization model with your own HF token) and raw.githubusercontent.com (the RNNoise noise-reduction model). No telemetry (pyannote's usage metrics are switched off), no update checks.
 
 ## License
 

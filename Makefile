@@ -94,7 +94,7 @@ help:
 	@echo "  -- CI helpers & Git --"
 	@echo "  uv-sync-test       - uv sync test group (frozen) + pip check"
 	@echo "  pre-push           - Run pre-push checks with all SKIP=0"
-	@echo "  release V=X.Y.Z    - Bump version, tag, push main + tag, GitHub release with Transcribe-Setup.exe"
+	@echo "  release V=X.Y.Z    - Bump version, tag, push main + tag, GitHub release (CI attaches Transcribe-Setup.exe)"
 	@echo ""
 	@echo "  -- Worktree (shared, from ~/.config/make/worktree.mk) --"
 	@echo "  syncwt             - Rebase linked worktree onto main, run 'check', ff-merge back (WT=<name> if several)"
