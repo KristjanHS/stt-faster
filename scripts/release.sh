@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Cut a GitHub release: bump version, tag, push main + tag, attach Transcribe-Setup.exe.
+# Cut a GitHub release: bump version, tag, push main + tag, publish. The release-installer workflow attaches the exe.
 # Usage: make release V=X.Y.Z   (or scripts/release.sh X.Y.Z)
 
 set -euo pipefail
@@ -8,7 +8,6 @@ EXE_NAME="Transcribe-Setup.exe"
 NOTES="Download **${EXE_NAME}** and run it — no admin rights needed. The app is not code-signed yet, so Windows warns twice:
 1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
 2. *Windows protected your PC*: click **More info → Run anyway**."
-SUBMIT_URL="https://www.microsoft.com/en-us/wdsi/filesubmission"
 
 die() {
     echo "release: $*" >&2
@@ -36,27 +35,12 @@ git fetch -q origin main
 [[ "$(git rev-list --count HEAD..origin/main)" == "0" ]] || die "main is behind origin/main — pull first"
 gh auth status >/dev/null 2>&1 || die "gh is not logged in — run: gh auth login"
 
-tmp=""
 hint=""
 cleanup() {
     local status=$?
-    [[ -z "$tmp" ]] || rm -rf "$tmp"
     [[ "$status" -eq 0 || -z "$hint" ]] || echo "release: stopped part-way — to recover: ${hint}" >&2
 }
 trap cleanup EXIT
-
-rebuilt=""
-if [[ -f "dist/${EXE_NAME}" ]]; then
-    exe="dist/${EXE_NAME}"
-    rebuilt=1
-    echo "release: attaching rebuilt ${exe}"
-else
-    tmp="$(mktemp -d)"
-    gh release download --pattern "$EXE_NAME" --dir "$tmp" ||
-        die "no dist/${EXE_NAME} and none on the latest release — build it with installer/build_installer.bat"
-    exe="${tmp}/${EXE_NAME}"
-    echo "release: re-attaching ${EXE_NAME} from the latest release"
-fi
 
 # --- Bump the project version (skipped when a previous run already did it) ---
 current="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
@@ -70,9 +54,7 @@ fi
 hint="git tag -d ${tag}, then re-run make release V=${version} (the version commit is kept)"
 git tag -a "$tag" -m "$tag"
 git push --atomic origin main "$tag"
-hint="gh release create ${tag} <path to ${EXE_NAME}> --title ${tag} --generate-notes --latest --verify-tag"
-gh release create "$tag" "$exe" --title "$tag" --generate-notes --notes "$NOTES" --latest --verify-tag
+hint="gh release create ${tag} --title ${tag} --generate-notes --latest --verify-tag"
+gh release create "$tag" --title "$tag" --generate-notes --notes "$NOTES" --latest --verify-tag
 hint=""
-echo "release: ${tag} published"
-# A re-attached exe keeps its hash, so only a rebuild needs a new SmartScreen submission.
-[[ -z "$rebuilt" ]] || echo "release: new exe hash — submit ${EXE_NAME} to ${SUBMIT_URL} (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)"
+echo "release: ${tag} published — the release-installer workflow builds and attaches ${EXE_NAME}"

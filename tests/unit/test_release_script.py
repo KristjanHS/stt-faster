@@ -30,15 +30,8 @@ exit 0
 FAKE_GH = r"""#!/usr/bin/env bash
 all="$*"
 echo "gh ${all//$'\n'/ }" >> "$FAKE_LOG"
-if [[ "$1 $2" == "release download" ]]; then
-  [[ "${FAKE_GH_HAS_ASSET:-0}" == 1 ]] || exit 1
-  touch "${@: -1}/Transcribe-Setup.exe"
-fi
 [[ "$1 $2" != "auth status" ]] || exit "${FAKE_GH_AUTH_RC:-0}"
-if [[ "$1 $2" == "release create" ]]; then
-  [[ -f "$4" ]] || exit 3  # the asset must still exist at upload time
-  exit "${FAKE_GH_CREATE_RC:-0}"
-fi
+[[ "$1 $2" != "release create" ]] || exit "${FAKE_GH_CREATE_RC:-0}"
 exit 0
 """
 
@@ -47,7 +40,7 @@ echo "uv $*" >> "$FAKE_LOG"
 """
 
 
-def _run(tmp_path: Path, *, version: str = "1.1.0", with_dist_exe: bool = True, fake_env: dict[str, str] | None = None):
+def _run(tmp_path: Path, *, version: str = "1.1.0", fake_env: dict[str, str] | None = None):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     for name, body in (("git", FAKE_GIT), ("gh", FAKE_GH), ("uv", FAKE_UV)):
@@ -58,9 +51,8 @@ def _run(tmp_path: Path, *, version: str = "1.1.0", with_dist_exe: bool = True, 
     root.mkdir()
     pyproject = '[project]\nname = "stt-faster"\nversion = "0.1.0"\n\n[tool.x]\nversion = "9.9.9"\n'
     (root / "pyproject.toml").write_text(pyproject)
-    if with_dist_exe:
-        (root / "dist").mkdir()
-        (root / "dist" / "Transcribe-Setup.exe").write_bytes(b"MZ")
+    (root / "dist").mkdir()  # a leftover local build must not be attached
+    (root / "dist" / "Transcribe-Setup.exe").write_bytes(b"MZ")
     log = tmp_path / "calls.log"
     log.touch()
     env = {**os.environ, "PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}
@@ -96,14 +88,7 @@ def test_preflight_aborts_before_any_change(
     assert 'version = "0.1.0"' in (root / "pyproject.toml").read_text()
 
 
-def test_no_exe_anywhere_aborts_before_any_change(tmp_path: Path) -> None:
-    result, calls, _ = _run(tmp_path, with_dist_exe=False)
-    assert result.returncode != 0
-    assert "build_installer.bat" in result.stderr
-    assert _mutations(calls) == []
-
-
-def test_happy_path_with_rebuilt_exe(tmp_path: Path) -> None:
+def test_happy_path_publishes_without_an_exe(tmp_path: Path) -> None:
     result, calls, root = _run(tmp_path)
     assert result.returncode == 0, result.stderr
     pyproject = (root / "pyproject.toml").read_text()
@@ -117,23 +102,11 @@ def test_happy_path_with_rebuilt_exe(tmp_path: Path) -> None:
         "git push --atomic origin main v1.1.0",
     ]
     create = mutations[4]
-    assert create.startswith("gh release create v1.1.0 dist/Transcribe-Setup.exe --title v1.1.0 --generate-notes")
+    assert create.startswith("gh release create v1.1.0 --title v1.1.0 --generate-notes")  # no asset argument
     assert "--verify-tag" in create
     assert "Run anyway" in create
     assert "Keep anyway" in create
-    assert "wdsi/filesubmission" in result.stdout
-    assert not any(c.startswith("gh release download") for c in calls)
-
-
-def test_happy_path_reattaches_latest_release_asset(tmp_path: Path) -> None:
-    result, calls, _ = _run(tmp_path, with_dist_exe=False, fake_env={"FAKE_GH_HAS_ASSET": "1"})
-    assert result.returncode == 0, result.stderr
-    download = next(i for i, c in enumerate(calls) if c.startswith("gh release download"))
-    create = next(i for i, c in enumerate(calls) if c.startswith("gh release create"))
-    assert download < next(i for i, c in enumerate(calls) if c == "uv lock")
-    assert "/Transcribe-Setup.exe" in calls[create]
-    assert "dist/" not in calls[create]
-    assert "wdsi/filesubmission" not in result.stdout
+    assert not any(c.startswith(("gh release download", "gh release upload")) for c in calls)
 
 
 def test_rerun_after_bump_skips_commit(tmp_path: Path) -> None:
@@ -147,7 +120,7 @@ def test_rerun_after_bump_skips_commit(tmp_path: Path) -> None:
     ("fake_env", "hint"),
     [
         ({"FAKE_PUSH_RC": "1"}, "git tag -d v1.1.0"),
-        ({"FAKE_GH_CREATE_RC": "1"}, "gh release create v1.1.0 <path to Transcribe-Setup.exe>"),
+        ({"FAKE_GH_CREATE_RC": "1"}, "gh release create v1.1.0 --title v1.1.0"),
     ],
 )
 def test_failure_after_first_change_prints_recovery(tmp_path: Path, fake_env: dict[str, str], hint: str) -> None:

@@ -1,6 +1,6 @@
 # SmartScreen + code signing — plan
 
-**Status:** A shipped; B + C are owner actions (no code), and C gates D; E is folded into the owed fresh-Windows smoke test. Parent: `2026-09-25-windows-installer-gui-design.md` (slice 7).
+**Status:** A shipped; C's repo commit + D's CI build shipped with signing dormant; left: B/C owner steps, D's after-approval steps, E. Parent: `2026-09-25-windows-installer-gui-design.md` (slice 7).
 
 ## Rulings (owner, 2026-09-25)
 
@@ -10,6 +10,8 @@
 | Signing | **SignPath Foundation** (free for OSS; publisher shows "SignPath Foundation"). No paid OV/EV certificate. |
 | Build | The exe gets built + signed on a `windows-latest` Actions job (free on a public repo). This replaces the local `build_installer.bat` build for releases. |
 | Store / MSIX | Backlog; reconsider after D. |
+| CI build before approval | Move the build to CI now; SignPath steps run only once `vars.SIGNPATH_ORG_ID` is set; the Microsoft submission reminder moves to the job summary while dormant. |
+| Privacy text | SignPath's verbatim sentence + the host list (the app downloads models at runtime, so "sends nothing" was wrong). |
 
 ## A. Click-through instructions + submit reminder — shipped
 
@@ -24,28 +26,19 @@ The README has a *Windows app* section with the two warnings (browser *Keep anyw
 
 Check the current terms on signpath.org first; the items below reflect my information and may have changed.
 
-- [ ] **Repo (code, one commit):** add `## Code signing policy` to the README:
-  - "Free code signing provided by SignPath.io, certificate by SignPath Foundation."
-  - Roles: committers/reviewers and approvers = owner.
-  - Privacy line: the installer contacts only GitHub (uv + app source), Hugging Face (models) and the ffmpeg zip host, and the app sends nothing anywhere.
+- [x] **Repo:** README `## Code signing policy` (attribution, roles, privacy sentence + hosts) and the `LICENSE` holder.
 - [ ] **Owner:** turn on MFA for GitHub and for the SignPath account.
 - [ ] **Owner:** apply at signpath.org. List every pinned download (uv `0.12.19`, GyanD ffmpeg `9.0.2` essentials, HF model repos, the release source zip), because reviewers may question an installer that downloads and runs third-party binaries.
 - [ ] **Owner, after approval:** add repo secret `SIGNPATH_API_TOKEN` and variables `SIGNPATH_ORG_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_POLICY_SLUG`.
 
-## D. Sign in CI (after approval, one `/qimpag` session)
+## D. Build + sign in CI
 
-- [ ] `.github/workflows/release-installer.yml`, run `on: release: types: [published]` on `windows-latest`:
-  1. Build the exe using the same uv + PyInstaller pins as `installer/build_installer.bat`. Reuse the bat if it runs non-interactively; otherwise single-source the pins.
-  2. `actions/upload-artifact`.
-  3. `signpath/github-action-submit-signing-request` (`wait-for-completion: true`, `output-artifact-directory`).
-  4. Assert `(Get-AuthenticodeSignature <exe>).Status -eq 'Valid'`.
-  5. `gh release upload <tag> <exe> --clobber`.
-- [ ] `scripts/release.sh`: stop attaching an exe. Drop the `dist/` / `gh release download` branch, `SUBMIT_URL` and the reminder. Rewrite the matching tests: the no-exe preflight test and both happy-path exe assertions.
-- [ ] Remove the "not code-signed yet … warns twice" text from the README and `NOTES`. Keep a one-line fallback ("if Windows still warns: More info → Run anyway") until the signed exe has built reputation.
-- [ ] Update `2026-09-25-windows-installer-gui-design.md`: the *Build / release* ruling (no more local build for releases) and the slice-4 wording on attaching `dist/`.
-- **Falsifier:** once, run the job with the signing step skipped and confirm the Authenticode assert fails the job.
+- [x] `.github/workflows/release-installer.yml` (`release: published` + `workflow_dispatch tag`): `build_installer.bat < NUL` → upload-artifact → SignPath v3 + Authenticode assert (only if `vars.SIGNPATH_ORG_ID`) → `gh release upload --clobber`.
+- [x] `scripts/release.sh` attaches no exe; tests rewritten; design doc updated. The publish→upload gap is accepted.
+- [ ] **Owner, first push:** watch the first release's job go green (`installer/` was permission-blocked, so the bat's CI behaviour is untested).
+- [ ] **After approval:** set the SignPath secret + vars, then run the falsifier: `gh workflow run release-installer.yml -f tag=<tag> -f skip_signing=true` must fail at the Authenticode assert.
+- [ ] **After the first signed release:** replace the "not code-signed yet … warns twice" text in the README and `NOTES` with a one-line fallback ("if Windows still warns: More info → Run anyway").
 - **Done when:** a fresh download from `releases/latest/download/Transcribe-Setup.exe` on a Windows box shows publisher *SignPath Foundation* in Properties → Digital Signatures.
-- **Open:** the link returns the old asset (or 404) for the few minutes between publish and upload. Accept that, or keep re-attaching the previous exe and let the job overwrite it with `--clobber` (proposed: accept).
 
 ## E. Fresh-Windows smoke test (fold into the owed smoke test)
 
