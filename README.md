@@ -2,6 +2,13 @@
 
  repo for speech to text using faster-whisper HF model
 
+## Windows app (no technical setup)
+
+Download [Transcribe-Setup.exe](https://github.com/KristjanHS/stt-faster/releases/latest/download/Transcribe-Setup.exe) and double-click it — no admin rights needed. The app is not code-signed yet, so Windows warns twice:
+
+1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
+2. Blue *Windows protected your PC* screen: click **More info → Run anyway**.
+
 ---
 
 ## Prerequisites

@@ -5,8 +5,10 @@
 set -euo pipefail
 
 EXE_NAME="Transcribe-Setup.exe"
-NOTES="Download **${EXE_NAME}** and run it — no admin rights needed.
-Windows SmartScreen warns about unsigned apps: click **More info → Run anyway**."
+NOTES="Download **${EXE_NAME}** and run it — no admin rights needed. The app is not code-signed yet, so Windows warns twice:
+1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
+2. *Windows protected your PC*: click **More info → Run anyway**."
+SUBMIT_URL="https://www.microsoft.com/en-us/wdsi/filesubmission"
 
 die() {
     echo "release: $*" >&2
@@ -43,8 +45,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
+rebuilt=""
 if [[ -f "dist/${EXE_NAME}" ]]; then
     exe="dist/${EXE_NAME}"
+    rebuilt=1
     echo "release: attaching rebuilt ${exe}"
 else
     tmp="$(mktemp -d)"
@@ -70,3 +74,5 @@ hint="gh release create ${tag} <path to ${EXE_NAME}> --title ${tag} --generate-n
 gh release create "$tag" "$exe" --title "$tag" --generate-notes --notes "$NOTES" --latest --verify-tag
 hint=""
 echo "release: ${tag} published"
+# A re-attached exe keeps its hash, so only a rebuild needs a new SmartScreen submission.
+[[ -z "$rebuilt" ]] || echo "release: new exe hash — submit ${EXE_NAME} to ${SUBMIT_URL} (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)"

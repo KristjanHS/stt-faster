@@ -119,7 +119,9 @@ def test_happy_path_with_rebuilt_exe(tmp_path: Path) -> None:
     create = mutations[4]
     assert create.startswith("gh release create v1.1.0 dist/Transcribe-Setup.exe --title v1.1.0 --generate-notes")
     assert "--verify-tag" in create
-    assert "SmartScreen" in create
+    assert "Run anyway" in create
+    assert "Keep anyway" in create
+    assert "wdsi/filesubmission" in result.stdout
     assert not any(c.startswith("gh release download") for c in calls)
 
 
@@ -131,6 +133,7 @@ def test_happy_path_reattaches_latest_release_asset(tmp_path: Path) -> None:
     assert download < next(i for i, c in enumerate(calls) if c == "uv lock")
     assert "/Transcribe-Setup.exe" in calls[create]
     assert "dist/" not in calls[create]
+    assert "wdsi/filesubmission" not in result.stdout
 
 
 def test_rerun_after_bump_skips_commit(tmp_path: Path) -> None:
