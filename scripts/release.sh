@@ -28,14 +28,26 @@ if git rev-parse -q --verify "refs/tags/${tag}" >/dev/null; then
 fi
 rc=0
 git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null || rc=$?
-[[ "$rc" -eq 2 ]] || die "tag ${tag} already on origin (or origin unreachable, rc=${rc})"
+[[ "$rc" -ne 0 ]] || die "tag ${tag} already on origin"
+[[ "$rc" -eq 2 ]] || die "origin unreachable (git ls-remote rc=${rc})"
+git fetch -q origin main
+[[ "$(git rev-list --count HEAD..origin/main)" == "0" ]] || die "main is behind origin/main — pull first"
+gh auth status >/dev/null 2>&1 || die "gh is not logged in — run: gh auth login"
+
+tmp=""
+hint=""
+cleanup() {
+    local status=$?
+    [[ -z "$tmp" ]] || rm -rf "$tmp"
+    [[ "$status" -eq 0 || -z "$hint" ]] || echo "release: stopped part-way — to recover: ${hint}" >&2
+}
+trap cleanup EXIT
 
 if [[ -f "dist/${EXE_NAME}" ]]; then
     exe="dist/${EXE_NAME}"
     echo "release: attaching rebuilt ${exe}"
 else
     tmp="$(mktemp -d)"
-    trap 'rm -rf "$tmp"' EXIT
     gh release download --pattern "$EXE_NAME" --dir "$tmp" ||
         die "no dist/${EXE_NAME} and none on the latest release — build it with installer/build_installer.bat"
     exe="${tmp}/${EXE_NAME}"
@@ -45,13 +57,16 @@ fi
 # --- Bump the project version (skipped when a previous run already did it) ---
 current="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
 if [[ "$current" != "$version" ]]; then
+    hint="git checkout -- pyproject.toml uv.lock, then re-run make release V=${version}"
     sed -i "0,/^version = \".*\"\$/s//version = \"${version}\"/" pyproject.toml
     uv lock
     git commit -m "chore(release): ${tag}" -- pyproject.toml uv.lock
 fi
 
+hint="git tag -d ${tag}, then re-run make release V=${version} (the version commit is kept)"
 git tag -a "$tag" -m "$tag"
-git push origin main
-git push origin "$tag"
+git push --atomic origin main "$tag"
+hint="gh release create ${tag} <path to ${EXE_NAME}> --title ${tag} --generate-notes --latest --verify-tag"
 gh release create "$tag" "$exe" --title "$tag" --generate-notes --notes "$NOTES" --latest --verify-tag
+hint=""
 echo "release: ${tag} published"
