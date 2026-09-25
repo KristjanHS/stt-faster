@@ -359,10 +359,10 @@ pre-commit:
 	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv sync --extra "$$(./scripts/select_variant.sh)" --group dev --group test --frozen
 	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv run pre-commit run --all-files
 
-# Run the same checks as the Git pre-push hook, forcing all SKIP flags to 0
 release:
 	./scripts/release.sh "$(V)"
 
+# Run the same checks as the Git pre-push hook, forcing all SKIP flags to 0
 pre-push:
 	SKIP_LOCAL_SEC_SCANS=0 SKIP_LINT=0 SKIP_PYRIGHT=0 SKIP_TESTS=0 scripts/git-hooks/pre-push
 

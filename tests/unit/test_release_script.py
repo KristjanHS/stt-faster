@@ -21,6 +21,8 @@ case "$*" in
   "status --porcelain") printf '%s' "${FAKE_STATUS:-}" ;;
   "rev-parse -q --verify refs/tags/"*) exit "${FAKE_TAG_LOCAL_RC:-1}" ;;
   "ls-remote "*) exit "${FAKE_LS_REMOTE_RC:-2}" ;;
+  "rev-list --count HEAD..origin/main") echo "${FAKE_BEHIND:-0}" ;;
+  "push "*) exit "${FAKE_PUSH_RC:-0}" ;;
 esac
 exit 0
 """
@@ -31,6 +33,11 @@ echo "gh ${all//$'\n'/ }" >> "$FAKE_LOG"
 if [[ "$1 $2" == "release download" ]]; then
   [[ "${FAKE_GH_HAS_ASSET:-0}" == 1 ]] || exit 1
   touch "${@: -1}/Transcribe-Setup.exe"
+fi
+[[ "$1 $2" != "auth status" ]] || exit "${FAKE_GH_AUTH_RC:-0}"
+if [[ "$1 $2" == "release create" ]]; then
+  [[ -f "$4" ]] || exit 3  # the asset must still exist at upload time
+  exit "${FAKE_GH_CREATE_RC:-0}"
 fi
 exit 0
 """
@@ -75,6 +82,8 @@ def _mutations(calls: list[str]) -> list[str]:
         ("1.1.0", {"FAKE_TAG_LOCAL_RC": "0"}, "exists locally"),
         ("1.1.0", {"FAKE_LS_REMOTE_RC": "0"}, "already on origin"),
         ("1.1.0", {"FAKE_LS_REMOTE_RC": "128"}, "unreachable"),
+        ("1.1.0", {"FAKE_BEHIND": "2"}, "behind origin/main"),
+        ("1.1.0", {"FAKE_GH_AUTH_RC": "1"}, "gh auth login"),
     ],
 )
 def test_preflight_aborts_before_any_change(
@@ -101,14 +110,13 @@ def test_happy_path_with_rebuilt_exe(tmp_path: Path) -> None:
     assert 'version = "1.1.0"' in pyproject
     assert 'version = "9.9.9"' in pyproject  # only the first `version =` line is bumped
     mutations = _mutations(calls)
-    assert mutations[:5] == [
+    assert mutations[:4] == [
         "uv lock",
         "git commit -m chore(release): v1.1.0 -- pyproject.toml uv.lock",
         "git tag -a v1.1.0 -m v1.1.0",
-        "git push origin main",
-        "git push origin v1.1.0",
+        "git push --atomic origin main v1.1.0",
     ]
-    create = mutations[5]
+    create = mutations[4]
     assert create.startswith("gh release create v1.1.0 dist/Transcribe-Setup.exe --title v1.1.0 --generate-notes")
     assert "--verify-tag" in create
     assert "SmartScreen" in create
@@ -130,3 +138,16 @@ def test_rerun_after_bump_skips_commit(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr
     assert not any(c.startswith(("uv lock", "git commit")) for c in calls)
     assert "git tag -a v0.1.0 -m v0.1.0" in calls
+
+
+@pytest.mark.parametrize(
+    ("fake_env", "hint"),
+    [
+        ({"FAKE_PUSH_RC": "1"}, "git tag -d v1.1.0"),
+        ({"FAKE_GH_CREATE_RC": "1"}, "gh release create v1.1.0 <path to Transcribe-Setup.exe>"),
+    ],
+)
+def test_failure_after_first_change_prints_recovery(tmp_path: Path, fake_env: dict[str, str], hint: str) -> None:
+    result, _, _ = _run(tmp_path, fake_env=fake_env)
+    assert result.returncode != 0
+    assert f"to recover: {hint}" in result.stderr
