@@ -151,6 +151,19 @@ def test_build_env_leaves_device_unset_without_config() -> None:
     assert "STT_DEVICE" not in build_env({}, device=None, ffmpeg_bin=None)
 
 
+def test_build_env_points_hf_caches_at_installed_models_over_inherited(tmp_path: Path) -> None:
+    hf = tmp_path / "hf"
+    inherited = {"HF_HUB_CACHE": "/shared/hub", "HF_HOME": "/shared"}
+    assert build_env(inherited, device=None, ffmpeg_bin=None, hf_home=hf) == {**inherited, **_py_env()}  # no dir yet
+    hf.mkdir()
+    env = build_env(inherited, device=None, ffmpeg_bin=None, hf_home=hf)
+    assert (env["HF_HOME"], env["HF_HUB_CACHE"], env["HF_XET_CACHE"]) == (str(hf), str(hf / "hub"), str(hf / "xet"))
+
+
+def _py_env() -> dict[str, str]:
+    return {"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+
+
 @pytest.mark.skipif(sys.platform == "win32", reason="exercises the XDG branch")
 def test_default_app_paths_treats_empty_xdg_as_unset() -> None:
     paths = default_app_paths({"XDG_DATA_HOME": "", "XDG_CONFIG_HOME": ""})
