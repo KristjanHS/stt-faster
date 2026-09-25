@@ -1,0 +1,2 @@
+# Bash scripts run on the Windows release runner too (core.autocrlf=true would add CRs).
+*.sh text eol=lf

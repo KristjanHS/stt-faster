@@ -19,7 +19,7 @@
 | No admin rights | **Hard requirement: nothing may trigger a UAC prompt.** Install to `%LOCALAPPDATA%\stt-faster`. Put shortcuts in the per-user Desktop and Start menu (`%APPDATA%\Microsoft\Windows\Start Menu`). Keep settings and token in `%APPDATA%\stt-faster`. uv, Python, the models, ffmpeg and the NVIDIA DLL wheels are all user-space downloads. No drivers, services, registry HKLM or system PATH changes. GPU mode uses the NVIDIA driver only if one is already installed. The `.exe` is built with an `asInvoker` manifest (PyInstaller's default; keep `--uac-admin` off). This matters because Windows' installer-detection heuristic auto-elevates un-manifested exes named `*Setup*`/`*Install*`. Verify with `sigcheck -m` or by running as a standard user. |
 | CPU / GPU | **Auto-detect, no question.** The installer runs `nvidia-smi` (it ships with every NVIDIA driver). A capable NVIDIA GPU → GPU mode; anything else, or any doubt → **CPU (default)**. The result shows on screen with a one-click **"Use CPU instead"** override. See *GPU mode*. |
 | Diarization | **Off in the lean install.** Enabled later from a collapsed **"Extras"** section: HF token + how-to-get-a-token hint → on-demand install of torch/pyannote. |
-| Build / release | **Release via GitHub** (`gh release`), tag-driven; `.github/workflows/release-installer.yml` builds the exe on `windows-latest` on release publish, signs it once SignPath is set up, and attaches it. |
+| Build / release | **Release via GitHub** (`gh release`), tag-driven; `.github/workflows/release-installer.yml` on release publish rebuilds the exe on `windows-latest` only if `installer/` changed since the previous release (else re-attaches that exe, keeping its hash and SmartScreen reputation), signs it once SignPath is set up, and attaches it. |
 | SmartScreen (ruled 2026-09-25) | Click-through text + Microsoft submission now, SignPath Foundation next, Store/MSIX later → `2026-09-25-smartscreen-code-signing.md`. |
 | Delivery | Public repo `KristjanHS/stt-faster` → stable link `releases/latest/download/Transcribe-Setup.exe`. |
 
@@ -100,7 +100,7 @@ Diarization stays on CPU torch (the `cpu` extra) in both modes. GPU diarization 
 | 3 | GUI | `backend/gui.py` (new) |
 | 4 | Bootstrap installer (stdlib only, incl. `--extras` mode) | `installer/setup_gui.py` (new) |
 | 5 | Build the installer: `uvx pyinstaller --onefile --windowed installer/setup_gui.py` (locally for testing; releases build in CI) | `installer/build_installer.bat` (new) |
-| 6 | Release: `make release V=x.y.z` → tag + push + `gh release create --generate-notes`; the `release-installer.yml` job then builds and attaches `Transcribe-Setup.exe` | `Makefile` |
+| 6 | Release: `make release V=x.y.z` → tag + push + `gh release create --generate-notes`; the `release-installer.yml` job then attaches `Transcribe-Setup.exe` (rebuilt only if `installer/` changed) | `Makefile` |
 
 The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouched.
 
