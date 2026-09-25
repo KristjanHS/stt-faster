@@ -58,6 +58,10 @@ class AppPaths:
     def ffmpeg_bin(self) -> Path:
         return self.install_dir / "ffmpeg" / "bin"
 
+    @property
+    def hf_home(self) -> Path:
+        return self.install_dir / "hf"  # the installer's models; mirrors installer.setup_gui.InstallPaths
+
 
 def default_app_paths(env: Mapping[str, str] | None = None) -> AppPaths:
     """%LOCALAPPDATA% / %APPDATA% on Windows, XDG dirs elsewhere."""
@@ -152,7 +156,9 @@ def build_command(work_dir: Path, profile: GuiProfile, *, timestamps: bool) -> l
     ]
 
 
-def build_env(base: Mapping[str, str], *, device: str | None, ffmpeg_bin: Path | None) -> dict[str, str]:
+def build_env(
+    base: Mapping[str, str], *, device: str | None, ffmpeg_bin: Path | None, hf_home: Path | None = None
+) -> dict[str, str]:
     env = dict(base)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
@@ -160,6 +166,8 @@ def build_env(base: Mapping[str, str], *, device: str | None, ffmpeg_bin: Path |
         env["STT_DEVICE"] = device
     if ffmpeg_bin is not None and ffmpeg_bin.is_dir():
         env["PATH"] = os.pathsep.join([str(ffmpeg_bin), env.get("PATH", "")])
+    if hf_home is not None and hf_home.is_dir():  # absent in a dev checkout: keep the user's own HF cache
+        env.update(HF_HOME=str(hf_home), HF_HUB_CACHE=str(hf_home / "hub"), HF_XET_CACHE=str(hf_home / "xet"))
     return env
 
 
@@ -254,7 +262,7 @@ def _run_attempt(
     work_dir = Path(tempfile.mkdtemp(dir=paths.work_root, prefix=f"job-{device or 'auto'}-"))
     try:
         staged = stage_files(files, work_dir)
-        env = build_env(base_env, device=device, ffmpeg_bin=paths.ffmpeg_bin)
+        env = build_env(base_env, device=device, ffmpeg_bin=paths.ffmpeg_bin, hf_home=paths.hf_home)
         exit_code = runner(build_command(work_dir, profile, timestamps=timestamps), env, on_line)
         if exit_code != 0:
             LOGGER.warning("Transcriber exited with code %s on device=%s", exit_code, device or "auto")

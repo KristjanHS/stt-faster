@@ -22,6 +22,7 @@ import tempfile
 import threading
 import time
 import tkinter as tk
+import tomllib
 import urllib.error
 import urllib.request
 import zipfile
@@ -51,6 +52,9 @@ FFMPEG_BINARIES = ("ffmpeg.exe", "ffprobe.exe")  # inspect_audio needs ffprobe e
 USER_AGENT = f"{APP_NAME}-setup"
 SOURCE_IGNORE_DIRS = frozenset({"__pycache__", "node_modules", "logs", "reports", "build", "dist"})
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash from a --windowed exe
+UNINSTALL_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"  # HKCU: Apps & features, no admin
+UNINSTALL_TEMP_PREFIX = f"{APP_NAME}-uninstall-"
+SHORTCUT_DIRS_PS = "@([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))"
 
 
 class InstallError(RuntimeError):
@@ -99,6 +103,18 @@ class InstallPaths:
     @property
     def ffmpeg_bin(self) -> Path:
         return self.install_dir / "ffmpeg" / "bin"
+
+    @property
+    def hf_home(self) -> Path:
+        return self.install_dir / "hf"
+
+    @property
+    def uv_cache(self) -> Path:
+        return self.install_dir / "uv-cache"
+
+    @property
+    def python_dir(self) -> Path:
+        return self.install_dir / "python"
 
     @property
     def gui_exe(self) -> Path:
@@ -343,9 +359,38 @@ def deps_command(paths: InstallPaths) -> list[str]:
     ]
 
 
+def isolated_env(base: Mapping[str, str], paths: InstallPaths) -> dict[str, str]:
+    """uv's cache + Pythons and every HF cache inside the install dir; inherited values never win."""
+    hf = paths.hf_home
+    return {
+        **base,
+        "UV_CACHE_DIR": str(paths.uv_cache),
+        "UV_PYTHON_INSTALL_DIR": str(paths.python_dir),
+        "HF_HOME": str(hf),
+        "HF_HUB_CACHE": str(hf / "hub"),
+        "HF_XET_CACHE": str(hf / "xet"),
+    }
+
+
 def deps_env(base: Mapping[str, str], paths: InstallPaths) -> dict[str, str]:
     # The venv lives beside app/ so a repair can replace the source without touching it.
-    return {**base, "UV_PROJECT_ENVIRONMENT": str(paths.venv_dir)}
+    return {**isolated_env(base, paths), "UV_PROJECT_ENVIRONMENT": str(paths.venv_dir)}
+
+
+def seed_model_cache(legacy: Path, target: Path) -> bool:
+    """Copy (never move) a model an older install left in the shared HF cache; ``hf download`` then verifies it."""
+    if target.exists() or not legacy.is_dir() or legacy.resolve() == target.resolve():
+        return False
+    staged = target.with_name(target.name + ".seed")
+    shutil.rmtree(staged, ignore_errors=True)
+    try:  # staged + rename: an interrupted copy must never pass for a complete snapshot
+        shutil.copytree(legacy, staged, symlinks=True)
+        staged.rename(target)
+    except OSError as error:
+        LOGGER.info("Could not reuse %s (%s); downloading instead", legacy, error)
+        shutil.rmtree(staged, ignore_errors=True)
+        return False
+    return True
 
 
 def model_command(paths: InstallPaths, spec: ModelSpec, *, force: bool) -> list[str]:
@@ -367,12 +412,50 @@ def shortcut_script(target: Path, name: str = SHORTCUT_NAME) -> str:
     """PowerShell creating per-user Desktop + Start-menu shortcuts (WScript.Shell; no admin)."""
     return (
         "$s = New-Object -ComObject WScript.Shell; "
-        "foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) { "
+        f"foreach ($d in {SHORTCUT_DIRS_PS}) {{ "
         f"$l = $s.CreateShortcut((Join-Path $d {_ps_quote(name + '.lnk')})); "
         f"$l.TargetPath = {_ps_quote(str(target))}; "
         f"$l.WorkingDirectory = {_ps_quote(str(target.parent))}; "
         "$l.Save() }"
     )
+
+
+def remove_shortcuts_script(name: str = SHORTCUT_NAME) -> str:
+    return (
+        f"foreach ($d in {SHORTCUT_DIRS_PS}) {{ "
+        f"Remove-Item -LiteralPath (Join-Path $d {_ps_quote(name + '.lnk')}) -Force -ErrorAction SilentlyContinue }}"
+    )
+
+
+def app_version(app_dir: Path) -> str:
+    try:
+        return str(tomllib.loads((app_dir / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"])
+    except (OSError, KeyError, ValueError):
+        return ""
+
+
+def register_uninstall(paths: InstallPaths, reg: Any) -> None:
+    """Apps & features entry under HKCU (``reg`` = the ``winreg`` module; injected for tests)."""
+    values = {
+        "DisplayName": SHORTCUT_NAME,
+        "DisplayVersion": app_version(paths.app_dir),
+        "Publisher": APP_NAME,
+        "InstallLocation": str(paths.install_dir),
+        "DisplayIcon": str(paths.setup_copy),
+        "UninstallString": f'"{paths.setup_copy}" --uninstall',
+    }
+    with reg.CreateKey(reg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
+        for name, value in values.items():
+            reg.SetValueEx(key, name, 0, reg.REG_SZ, value)
+        for name in ("NoModify", "NoRepair"):
+            reg.SetValueEx(key, name, 0, reg.REG_DWORD, 1)
+
+
+def unregister_uninstall(reg: Any) -> None:
+    try:
+        reg.DeleteKey(reg.HKEY_CURRENT_USER, UNINSTALL_KEY)
+    except FileNotFoundError:
+        pass
 
 
 def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
@@ -424,6 +507,107 @@ def clean_install(paths: InstallPaths) -> None:
         raise InstallError(f"Could not remove {paths.venv_dir} ({error}). Close Transcribe, then retry.") from None
     for child in (paths.uv_dir, paths.app_dir, paths.ffmpeg_bin.parent, paths.install_dir / "work"):
         shutil.rmtree(child, ignore_errors=True)
+
+
+def _rmtree_strict(path: Path) -> None:
+    try:
+        shutil.rmtree(path)
+    except FileNotFoundError:
+        pass
+    except OSError as error:
+        raise InstallError(f"Could not remove {path} ({error}). Close Transcribe, then retry.") from None
+
+
+def uninstall(paths: InstallPaths, env: Mapping[str, str], reg: Any = None) -> None:
+    """Remove the install dir, the config dir, both shortcuts and the Apps & features entry."""
+    if app_in_use(paths):
+        raise InstallError("Close Transcribe first, then retry.")
+    for target in (paths.install_dir, paths.config_file.parent):
+        if target.name != APP_NAME:  # both are <base>\stt-faster by construction; never rmtree anything else
+            raise InstallError(f"Refusing to remove unexpected folder {target}")
+    _rmtree_strict(paths.venv_dir)  # first, like clean_install: never leave a half-deleted venv
+    _rmtree_strict(paths.install_dir)
+    _rmtree_strict(paths.config_file.parent)
+    if paths.windows:
+        powershell = system_tool(env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+        cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", remove_shortcuts_script()]
+        subprocess.run(cmd, capture_output=True, check=False, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        if reg is not None:
+            unregister_uninstall(reg)
+
+
+def running_exe() -> Path | None:
+    """The frozen Transcribe-Setup.exe running now; None when run as a script."""
+    return Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
+
+
+def relaunch_from_temp(exe: Path, args: Sequence[str]) -> None:
+    """Windows can't delete a running exe: continue the uninstall from a %TEMP% copy of it."""
+    copy = Path(tempfile.mkdtemp(prefix=UNINSTALL_TEMP_PREFIX)) / exe.name
+    shutil.copy2(exe, copy)
+    subprocess.Popen([str(copy), *args], creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+
+
+def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
+    """Hidden cmd that retries deleting ``exe`` (and its temp folder) for ~20 s, once this process has exited."""
+    cmd = system_tool(env, "System32", "cmd.exe")
+    ping = system_tool(env, "System32", "PING.EXE")
+    folder = exe.parent
+    return (
+        f'"{cmd}" /d /c for /l %i in (1,1,10) do '
+        f'(("{ping}" -n 3 127.0.0.1 >nul) & rmdir /s /q "{folder}" 2>nul & if not exist "{folder}" exit)'
+    )
+
+
+def schedule_self_delete(exe: Path, env: Mapping[str, str]) -> None:
+    if exe.parent.name.startswith(UNINSTALL_TEMP_PREFIX):  # only ever our own relaunch copy
+        subprocess.Popen(self_delete_command(exe, env), creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+
+
+def self_command() -> list[str]:
+    exe = running_exe()
+    return [str(exe)] if exe else [sys.executable, str(Path(__file__).resolve())]
+
+
+UNINSTALL_PROMPT = (
+    "Remove Transcribe, its downloaded models and its settings?\n\nYour audio files and transcripts are not touched."
+)
+
+
+def uninstall_main(paths: InstallPaths, env: Mapping[str, str], *, headless: bool, confirmed: bool) -> int:
+    """``--uninstall``: confirm, hop to a %TEMP% copy when running from the install dir, remove, self-delete."""
+    from tkinter import messagebox  # noqa: PLC0415 - windowed mode only
+
+    root = None
+    if not headless:
+        root = tk.Tk()
+        root.withdraw()
+    if root is not None and not confirmed:
+        if not messagebox.askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=root):
+            return 1
+    exe = running_exe()
+    if exe is not None and paths.windows and exe.is_relative_to(paths.install_dir.resolve()):
+        relaunch_from_temp(exe, ["--uninstall", "--yes", *(["--headless"] if headless else [])])
+        return 0
+    try:
+        uninstall(paths, env, reg=_winreg() if paths.windows else None)
+    except InstallError as error:
+        LOGGER.error("Uninstall failed: %s", error)
+        if root is not None:
+            messagebox.showerror("Uninstall Transcribe", f"Uninstall did not finish:\n{error}", parent=root)
+        return 1
+    LOGGER.info("Removed %s and %s", paths.install_dir, paths.config_file.parent)
+    if root is not None:
+        messagebox.showinfo("Uninstall Transcribe", "Transcribe was removed.", parent=root)
+    if exe is not None and paths.windows:
+        schedule_self_delete(exe, env)
+    return 0
+
+
+def _winreg() -> Any:
+    import winreg  # noqa: PLC0415 - Windows-only module
+
+    return winreg
 
 
 # --- task runner ---------------------------------------------------------------------------------
@@ -588,13 +772,19 @@ class Installer:
         run_process(deps_command(self.paths), deps_env(self.env, self.paths), report, self.cancel)
 
     def fetch_model(self, spec: ModelSpec, report: Report) -> None:
-        cache = model_cache_dir(hf_hub_cache(self.env, Path.home()), spec.repo_id)
+        cache = model_cache_dir(self.paths.hf_home / "hub", spec.repo_id)
+        if not self.clean:  # a v1.1.0 install downloaded into the user's shared HF cache
+            legacy = model_cache_dir(hf_hub_cache(self.env, Path.home()), spec.repo_id)
+            report(None, "reusing earlier download")
+            if seed_model_cache(legacy, cache):
+                LOGGER.info("Copied %s from %s", spec.repo_id, legacy)
         total = expected_model_size(spec, fetch_json)
 
         def poll() -> float | None:
             return min(dir_size(cache) / total, 1.0) if total else None
 
-        run_process(model_command(self.paths, spec, force=self.clean), self.env, report, self.cancel, poll)
+        env = isolated_env(self.env, self.paths)
+        run_process(model_command(self.paths, spec, force=self.clean), env, report, self.cancel, poll)
 
     def fetch_ffmpeg(self, report: Report) -> None:
         if all((self.paths.ffmpeg_bin / name).is_file() for name in FFMPEG_BINARIES) and not self.clean:
@@ -618,6 +808,8 @@ class Installer:
             powershell = system_tool(self.env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
             cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", shortcut_script(self.paths.gui_exe)]
             run_process(cmd, self.env, report, self.cancel)
+            if self.paths.setup_copy.is_file():  # the entry's UninstallString runs that copy
+                register_uninstall(self.paths, _winreg())
 
     def tasks(self) -> list[Task]:
         tasks = [
@@ -671,6 +863,7 @@ class SetupWindow:
             ttk.Radiobutton(mode_row, text="Clean reinstall", value="clean", variable=self.mode).pack(
                 side="left", padx=8
             )
+            ttk.Radiobutton(mode_row, text="Uninstall", value="uninstall", variable=self.mode).pack(side="left")
 
         grid = ttk.Frame(frame)
         grid.pack(fill="x", pady=12)
@@ -691,8 +884,27 @@ class SetupWindow:
         self.launch_button.pack(side="right")
         self.summary = ttk.Label(frame, text="", foreground="gray", wraplength=480)
         self.summary.pack(anchor="w", pady=(8, 0))
+        self.mode.trace_add("write", self._on_mode)
+
+    def _on_mode(self, *_: object) -> None:
+        self.install_button.config(text="Uninstall" if self.mode.get() == "uninstall" else "Install")
+
+    def uninstall(self) -> None:
+        from tkinter import messagebox  # noqa: PLC0415
+
+        if not messagebox.askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=self.root):
+            return
+        for handler in logging.getLogger().handlers[:]:  # release logs\setup.log so the install dir can go
+            handler.close()
+            logging.getLogger().removeHandler(handler)
+        cmd = [*self_command(), "--uninstall", "--yes"]
+        subprocess.Popen(cmd, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        self.root.destroy()
 
     def start(self) -> None:
+        if self.mode.get() == "uninstall":
+            self.uninstall()
+            return
         self.running = True
         self.installer.clean = self.mode.get() == "clean"
         self.installer.cancel.clear()
@@ -765,9 +977,11 @@ class SetupWindow:
         self.root.destroy()
 
 
-def _setup_logging(log_file: Path, *, console: bool) -> None:
-    log_file.parent.mkdir(parents=True, exist_ok=True)
-    handlers: list[logging.Handler] = [logging.FileHandler(log_file, encoding="utf-8")]
+def _setup_logging(log_file: Path | None, *, console: bool) -> None:
+    handlers: list[logging.Handler] = [logging.NullHandler()]
+    if log_file is not None:  # None while uninstalling: an open log would lock the install dir
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        handlers.append(logging.FileHandler(log_file, encoding="utf-8"))
     if console:  # a --windowed exe has no stderr
         handlers.append(logging.StreamHandler())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=handlers)
@@ -778,9 +992,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--source", help="app source: URL of a zip, a local .zip or a folder (default: latest release)")
     parser.add_argument("--clean", action="store_true", help="clean reinstall (headless; the window asks)")
     parser.add_argument("--headless", action="store_true", help="no window; log progress to the console")
+    parser.add_argument("--uninstall", action="store_true", help="remove the app, its models, settings and shortcuts")
+    parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # already confirmed (relaunch)
     args = parser.parse_args(argv)
 
     paths = default_install_paths()
+    if args.uninstall:
+        _setup_logging(None, console=args.headless)
+        return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes)
     _setup_logging(paths.log_file, console=args.headless)
     installer = Installer(paths=paths, source=args.source, clean=args.clean)
     if args.headless:

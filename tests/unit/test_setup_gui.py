@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import io
 import os
 import sys
@@ -41,12 +42,19 @@ from installer.setup_gui import (
     extract_named,
     extract_zip_stripped,
     hf_hub_cache,
+    isolated_env,
     latest_release_zip,
     model_cache_dir,
     model_command,
+    register_uninstall,
+    remove_shortcuts_script,
     run_process,
     run_tasks,
+    seed_model_cache,
+    self_delete_command,
     shortcut_script,
+    uninstall,
+    unregister_uninstall,
     source_ignore,
     swap_in,
     system_tool,
@@ -255,7 +263,108 @@ def test_deps_command_uses_lean_gui_install(paths: InstallPaths) -> None:
     assert cmd[:4] == [str(paths.uv_exe), "sync", "--frozen", "--no-dev"]
     assert "--extra" in cmd and cmd[cmd.index("--extra") + 1] == "gui"
     assert cmd.count("--extra") == 1  # no cpu/cu130: diarization stays out of the lean install
-    assert deps_env({"A": "1"}, paths) == {"A": "1", "UV_PROJECT_ENVIRONMENT": str(paths.venv_dir)}
+    assert deps_env({"A": "1"}, paths) == {
+        **isolated_env({"A": "1"}, paths),
+        "UV_PROJECT_ENVIRONMENT": str(paths.venv_dir),
+    }
+
+
+def test_isolated_env_overrides_inherited_caches(paths: InstallPaths) -> None:
+    env = isolated_env({"HF_HUB_CACHE": "/shared/hub", "HF_HOME": "/shared", "UV_CACHE_DIR": "/shared/uv"}, paths)
+    for key in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "HF_HOME", "HF_HUB_CACHE", "HF_XET_CACHE"):
+        assert Path(env[key]).is_relative_to(paths.install_dir), key
+
+
+def test_seed_model_cache_copies_once_and_keeps_legacy(tmp_path: Path) -> None:
+    legacy, target = tmp_path / "old" / "models--a--b", tmp_path / "new" / "models--a--b"
+    (legacy / "blobs").mkdir(parents=True)
+    (legacy / "blobs" / "x").write_bytes(b"model")
+    (legacy / "snapshots").mkdir()
+    (legacy / "snapshots" / "x").symlink_to("../blobs/x")
+    target.parent.mkdir()
+    assert seed_model_cache(legacy, target) is True
+    assert (target / "snapshots" / "x").read_bytes() == b"model" and (legacy / "blobs" / "x").is_file()
+    assert not target.with_name(target.name + ".seed").exists()
+    assert seed_model_cache(legacy, target) is False  # never overwrites an existing install copy
+    assert seed_model_cache(tmp_path / "missing", tmp_path / "new" / "other") is False
+
+
+def test_seed_model_cache_failed_copy_leaves_nothing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    legacy, target = tmp_path / "old", tmp_path / "new" / "models--a--b"
+    legacy.mkdir()
+    target.parent.mkdir()
+
+    def broken(_src: Path, dst: Path, **_kw: Any) -> None:
+        dst.mkdir()
+        raise OSError("disk full")
+
+    monkeypatch.setattr("installer.setup_gui.shutil.copytree", broken)
+    assert seed_model_cache(legacy, target) is False
+    assert list(target.parent.iterdir()) == []
+
+
+class _FakeReg:
+    HKEY_CURRENT_USER, REG_SZ, REG_DWORD = "HKCU", 1, 4
+
+    def __init__(self) -> None:
+        self.keys: dict[str, dict[str, Any]] = {}
+
+    def CreateKey(self, _root: str, name: str) -> Any:  # noqa: N802 - winreg's API
+        self.keys.setdefault(name, {})
+        return contextlib.nullcontext(name)
+
+    def SetValueEx(self, key: str, name: str, _reserved: int, _kind: int, value: Any) -> None:  # noqa: N802
+        self.keys[key][name] = value
+
+    def DeleteKey(self, _root: str, name: str) -> None:  # noqa: N802
+        if name not in self.keys:
+            raise FileNotFoundError(name)
+        del self.keys[name]
+
+
+def test_uninstall_registry_entry_roundtrip(paths: InstallPaths) -> None:
+    reg = _FakeReg()
+    register_uninstall(paths, reg)
+    ((key, values),) = reg.keys.items()
+    assert key.endswith(r"CurrentVersion\Uninstall\stt-faster")
+    assert values["UninstallString"] == f'"{paths.setup_copy}" --uninstall'
+    unregister_uninstall(reg)
+    unregister_uninstall(reg)  # already gone is not an error
+    assert reg.keys == {}
+
+
+def test_uninstall_removes_install_and_config_only(tmp_path: Path) -> None:
+    linux = InstallPaths(tmp_path / "share" / "stt-faster", tmp_path / "cfg" / "stt-faster" / "config", windows=False)
+    for d in (linux.venv_dir, linux.hf_home / "hub", linux.config_file.parent):
+        d.mkdir(parents=True)
+    linux.config_file.write_text("device=cpu\n")
+    (tmp_path / "cfg" / "other").mkdir()
+    uninstall(linux, {})
+    assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == ["cfg", "cfg/other", "share"]
+
+
+def test_uninstall_refuses_unexpected_folder_and_open_app(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    odd = InstallPaths(tmp_path / "home", tmp_path / "cfg" / "stt-faster" / "config", windows=False)
+    odd.install_dir.mkdir()
+    with pytest.raises(InstallError, match="unexpected folder"):
+        uninstall(odd, {})
+    assert odd.install_dir.is_dir()
+    monkeypatch.setattr("installer.setup_gui.app_in_use", lambda _p: True)
+    with pytest.raises(InstallError, match="Close Transcribe"):
+        uninstall(odd, {})
+
+
+def test_remove_shortcuts_script_targets_both_folders() -> None:
+    script = remove_shortcuts_script()
+    assert "GetFolderPath('Desktop')" in script and "GetFolderPath('Programs')" in script
+    assert "'Transcribe.lnk'" in script
+
+
+def test_self_delete_command_removes_only_its_temp_folder() -> None:
+    exe = Path("C:/Temp/stt-faster-uninstall-ab12/Transcribe-Setup.exe")
+    cmd = self_delete_command(exe, {"SYSTEMROOT": "C:/Windows"})
+    assert f'rmdir /s /q "{exe.parent}"' in cmd and f'if not exist "{exe.parent}" exit' in cmd
+    assert cmd.startswith(f'"{Path("C:/Windows", "System32", "cmd.exe")}" /d /c for /l')
 
 
 def test_model_command_include_and_force(paths: InstallPaths) -> None:
