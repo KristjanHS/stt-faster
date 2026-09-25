@@ -366,6 +366,8 @@ def isolated_env(base: Mapping[str, str], paths: InstallPaths) -> dict[str, str]
         **base,
         "UV_CACHE_DIR": str(paths.uv_cache),
         "UV_PYTHON_INSTALL_DIR": str(paths.python_dir),
+        "UV_PYTHON_INSTALL_BIN": "0",  # no python.exe shim in ~/.local/bin (`uv help python install`)
+        "UV_PYTHON_INSTALL_REGISTRY": "0",  # no PEP 514 entry in HKCU
         "HF_HOME": str(hf),
         "HF_HUB_CACHE": str(hf / "hub"),
         "HF_XET_CACHE": str(hf / "xet"),
@@ -474,7 +476,11 @@ def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
 
 
 def is_installed(paths: InstallPaths) -> bool:
-    return paths.app_dir.is_dir() or paths.venv_dir.is_dir()
+    """Anything but setup logs in the install dir, so a partial uninstall's leftovers stay retryable."""
+    try:
+        return any(child.name != "logs" for child in paths.install_dir.iterdir())
+    except OSError:
+        return False
 
 
 def app_in_use(paths: InstallPaths) -> bool:
@@ -498,14 +504,17 @@ def system_tool(env: Mapping[str, str], *parts: str) -> str:
 
 
 def clean_install(paths: InstallPaths) -> None:
-    """Remove everything the installer put in the install dir, except the running setup copy and logs."""
+    """Remove what the installer put in the install dir; keep the setup copy, logs and the uv / HF download caches.
+
+    Kept models are not trusted: a clean install re-fetches them with ``--force-download``.
+    """
     try:  # the venv first and strictly: a half-deleted venv under a running app is the worst outcome
         shutil.rmtree(paths.venv_dir)
     except FileNotFoundError:
         pass
     except OSError as error:
         raise InstallError(f"Could not remove {paths.venv_dir} ({error}). Close Transcribe, then retry.") from None
-    for child in (paths.uv_dir, paths.app_dir, paths.ffmpeg_bin.parent, paths.install_dir / "work"):
+    for child in (paths.uv_dir, paths.app_dir, paths.python_dir, paths.ffmpeg_bin.parent, paths.install_dir / "work"):
         shutil.rmtree(child, ignore_errors=True)
 
 
@@ -518,22 +527,40 @@ def _rmtree_strict(path: Path) -> None:
         raise InstallError(f"Could not remove {path} ({error}). Close Transcribe, then retry.") from None
 
 
+def _rmtree_best_effort(path: Path, left: list[str]) -> None:
+    """Remove what can be removed under ``path``, appending ``"<path> (<error>)"`` for each failure to ``left``."""
+
+    def onexc(_func: Callable[..., Any], failed: str, error: BaseException) -> None:
+        if not isinstance(error, FileNotFoundError):
+            left.append(f"{failed} ({error})")
+
+    shutil.rmtree(path, onexc=onexc)
+
+
 def uninstall(paths: InstallPaths, env: Mapping[str, str], reg: Any = None) -> None:
-    """Remove the install dir, the config dir, both shortcuts and the Apps & features entry."""
+    """Remove the install dir, the config dir, both shortcuts and the Apps & features entry.
+
+    Past the venv, removal is best effort: shortcuts, entry and config go even when a locked file keeps part of
+    the install dir, and the InstallError then lists what was left (a rerun of setup offers Uninstall again).
+    """
     if app_in_use(paths):
         raise InstallError("Close Transcribe first, then retry.")
     for target in (paths.install_dir, paths.config_file.parent):
         if target.name != APP_NAME:  # both are <base>\stt-faster by construction; never rmtree anything else
             raise InstallError(f"Refusing to remove unexpected folder {target}")
     _rmtree_strict(paths.venv_dir)  # first, like clean_install: never leave a half-deleted venv
-    _rmtree_strict(paths.install_dir)
-    _rmtree_strict(paths.config_file.parent)
+    left: list[str] = []
+    for target in (paths.install_dir, paths.config_file.parent):
+        _rmtree_best_effort(target, left)
     if paths.windows:
         powershell = system_tool(env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
         cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", remove_shortcuts_script()]
         subprocess.run(cmd, capture_output=True, check=False, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
         if reg is not None:
             unregister_uninstall(reg)
+    if left:
+        more = f"\n… and {len(left) - 5} more" if len(left) > 5 else ""
+        raise InstallError("Could not remove:\n" + "\n".join(left[:5]) + more + "\nClose Transcribe, then retry.")
 
 
 def running_exe() -> Path | None:
@@ -545,7 +572,8 @@ def relaunch_from_temp(exe: Path, args: Sequence[str]) -> None:
     """Windows can't delete a running exe: continue the uninstall from a %TEMP% copy of it."""
     copy = Path(tempfile.mkdtemp(prefix=UNINSTALL_TEMP_PREFIX)) / exe.name
     shutil.copy2(exe, copy)
-    subprocess.Popen([str(copy), *args], creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+    # cwd outside the install dir: Explorer starts us there, and Windows won't remove a process's cwd.
+    subprocess.Popen([str(copy), *args], cwd=tempfile.gettempdir(), creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
 
 
 def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
@@ -561,7 +589,8 @@ def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
 
 def schedule_self_delete(exe: Path, env: Mapping[str, str]) -> None:
     if exe.parent.name.startswith(UNINSTALL_TEMP_PREFIX):  # only ever our own relaunch copy
-        subprocess.Popen(self_delete_command(exe, env), creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        cmd = self_delete_command(exe, env)
+        subprocess.Popen(cmd, cwd=exe.parent.parent, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603 - never cwd in what it deletes
 
 
 def self_command() -> list[str]:
@@ -898,7 +927,7 @@ class SetupWindow:
             handler.close()
             logging.getLogger().removeHandler(handler)
         cmd = [*self_command(), "--uninstall", "--yes"]
-        subprocess.Popen(cmd, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        subprocess.Popen(cmd, cwd=tempfile.gettempdir(), creationflags=NO_WINDOW)  # noqa: S603  # nosec B603 - not the install dir
         self.root.destroy()
 
     def start(self) -> None:
