@@ -6,7 +6,7 @@
 # Lint / Type Check
 .PHONY: ruff-format ruff-fix yamlfmt pyright pre-commit
 # Tests
-.PHONY: unit integration e2e verify-variants
+.PHONY: check unit integration e2e verify-variants
 # Audio
 .PHONY: preprocess-audio
 # Run log
@@ -57,6 +57,7 @@ help:
 	@echo "  pre-commit         - Run all pre-commit hooks on all files"
 	@echo ""
 	@echo "  -- Tests --"
+	@echo "  check        - Gate used by 'make syncwt' (currently: unit)"
 	@echo "  unit         - Run unit tests (local) and write reports"
 	@echo "  integration  - Run integration tests (uv preferred)"
 	@echo "  e2e          - Run e2e tests (sequential, Docker-based) and write reports"
@@ -94,6 +95,11 @@ help:
 	@echo "  uv-sync-test       - uv sync test group (frozen) + pip check"
 	@echo "  pre-push           - Run pre-push checks with all SKIP=0"
 	@echo "  release V=X.Y.Z    - Bump version, tag, push main + tag, GitHub release with Transcribe-Setup.exe"
+	@echo ""
+	@echo "  -- Worktree (shared, from ~/.config/make/worktree.mk) --"
+	@echo "  syncwt             - Rebase linked worktree onto main, run 'check', ff-merge back (WT=<name> if several)"
+	@echo "  commit <msg...>    - git add -A + commit on the current branch"
+	@echo "  commitwt <msg...>  - Same, in the linked worktree"
 
 setup-hooks:
 	@echo "Configuring Git hooks path..."
@@ -231,6 +237,9 @@ pip-audit-gpu: export-reqs-cu130
 uv-sync-test:
 	uv sync --extra "$$(./scripts/select_variant.sh)" --group test --frozen
 	uv pip check
+
+# Gate for `make syncwt` (auto-detected by ~/bin/syncwt; override per run with GATE=...)
+check: unit
 
 # New canonical unit test target
 unit:
@@ -499,3 +508,7 @@ docker-unit:
 	docker compose -f docker/docker-compose.yml exec -T app \
 	  /opt/venv/bin/python -m pytest tests/unit -vv --maxfail=1 \
 	  --html reports/unit.html --self-contained-html ${PYTEST_ARGS}
+
+# Shared worktree/commit targets (syncwt, commit, commitwt) — keep at the BOTTOM so it
+# cannot become the default goal; `-include` so clones without dotfiles still work.
+-include $(HOME)/.config/make/worktree.mk
