@@ -1,13 +1,13 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); next: slice 4b (self-contained install + uninstall), then 5. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); next: slice 4b (self-contained install + uninstall), then 5; slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
 1. A non-IT person on a **fresh Windows PC** (no admin, no WSL, no Docker, no git, no Python) installs by downloading **one small `.exe`** and clicking through.
 2. They transcribe through a **simple native window** modelled on the owner's reference screenshot (drop zone, language toggle, timestamps checkbox).
 3. **Nothing changes for the owner's workflow:** the CLI, `scripts/windows/*.bat`, `run_uv.sh`, Docker and WSL paths keep working as they do now.
-4. Keep build time and token spend minimal: **reuse the CLI instead of re-implementing it**, spend no GitHub Actions minutes, and rebuild the installer `.exe` only rarely.
+4. Keep build time and token spend minimal: **reuse the CLI instead of re-implementing it**, spend no paid GitHub Actions minutes, and rebuild the installer `.exe` only rarely.
 
 ## Decisions (user-ruled 2026-09-25)
 
@@ -19,7 +19,8 @@
 | No admin rights | **Hard requirement: nothing may trigger a UAC prompt.** Install to `%LOCALAPPDATA%\stt-faster`. Put shortcuts in the per-user Desktop and Start menu (`%APPDATA%\Microsoft\Windows\Start Menu`). Keep settings and token in `%APPDATA%\stt-faster`. uv, Python, the models, ffmpeg and the NVIDIA DLL wheels are all user-space downloads. No drivers, services, registry HKLM or system PATH changes. GPU mode uses the NVIDIA driver only if one is already installed. The `.exe` is built with an `asInvoker` manifest (PyInstaller's default; keep `--uac-admin` off). This matters because Windows' installer-detection heuristic auto-elevates un-manifested exes named `*Setup*`/`*Install*`. Verify with `sigcheck -m` or by running as a standard user. |
 | CPU / GPU | **Auto-detect, no question.** The installer runs `nvidia-smi` (it ships with every NVIDIA driver). A capable NVIDIA GPU → GPU mode; anything else, or any doubt → **CPU (default)**. The result shows on screen with a one-click **"Use CPU instead"** override. See *GPU mode*. |
 | Diarization | **Off in the lean install.** Enabled later from a collapsed **"Extras"** section: HF token + how-to-get-a-token hint → on-demand install of torch/pyannote. |
-| Build / release | **Build locally, release via GitHub** (`gh release`), tag-driven, **zero Actions minutes**. |
+| Build / release | **Build locally, release via GitHub** (`gh release`), tag-driven. From slice 7 the exe is built + signed on a `windows-latest` Actions job (free on a public repo). |
+| SmartScreen (ruled 2026-09-25) | Click-through text + Microsoft submission now, SignPath Foundation next, Store/MSIX later → `2026-09-25-smartscreen-code-signing.md`. |
 | Delivery | Public repo `KristjanHS/stt-faster` → stable link `releases/latest/download/Transcribe-Setup.exe`. |
 
 ## Architecture
@@ -120,6 +121,7 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
    Guard: headless Linux e2e into a scratch `HOME` with a pre-seeded `~/.cache/huggingface` + uv dirs → install → assert no new path outside install + config dirs → `--uninstall` → assert the tree equals the pre-install snapshot.
 5. **Extras / diarization** panel + `--extras` installer mode.
 6. **GPU mode**: start with a spike on the Windows host with an NVIDIA GPU. Confirm the CUDA major version the ctranslate2 4.6.2 Windows wheel links against (`cublas64_12.dll` vs `_13`) and pin the matching `nvidia-*` wheels. Then add change #2b, `nvidia-smi` detection in the installer, and the GUI's one-shot CPU retry. CPU-only installs work without this slice.
+7. **Code signing (SignPath Foundation) + SmartScreen todos** → `docs/plans/2026-09-25-smartscreen-code-signing.md` (owns the Store/MSIX backlog item too).
 
 Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter=True` via `config.set(...)` on the variant's config before `ServiceFactory.create_transcription_service`, `transcription_commands.py:250`; `vad_threshold` / `vad_parameters.min_silence_duration_ms` live in `preprocess/config.py:262-276`) · in-app update check · multilingual "Other" profile.
 
@@ -130,8 +132,8 @@ Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter
 - **CPU fallback banner:** both presets say `device="cuda"`. In CPU mode the GUI sets `STT_DEVICE=cpu` to skip the probe and the warning banner.
 - **GPU DLL mismatch (unverified):** the Windows ctranslate2 wheel's CUDA major version is unknown, and a missing cuBLAS often fails only at the *first inference*, not at model load. That is why the GUI's CPU retry wraps the whole job instead of relying on `model_loader.py`'s load-time fallback. Slice 6's spike settles both points.
 - **CLI details:** the command is `stt-faster transcribe process` (`cli/main.py:19`). Use `--variant`, never `-v`, which is bound to both `--variant` and `--verbose` (`transcription_commands.py:501,503`). The CLI default is `--diarize` (`:504-506`), so the GUI must pass `--no-diarize` unless Extras is set up.
-- **SmartScreen** warns on an unsigned `.exe` ("More info → Run anyway"). Put this in the release notes; code signing is out of scope.
+- **Smart App Control** can hard-block unsigned binaries; the fresh-Windows smoke-test check lives in `2026-09-25-smartscreen-code-signing.md` §E.
 
 ## Out of scope
 
-Code signing · GPU diarization on Windows · AMD/Intel GPUs · a fat frozen app · Mac/Linux installers.
+Paid code-signing certificates · GPU diarization on Windows · AMD/Intel GPUs · a fat frozen app · Mac/Linux installers.
