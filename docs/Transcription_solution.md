@@ -174,7 +174,7 @@ Core dependencies (in `pyproject.toml`):
 
 **Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch` and `torchaudio` live **in the extras, not in base deps** — this is the only way to keep a base `uv sync` from pulling transitive CUDA wheels via `pyannote.audio`. A single `uv.lock` holds both resolutions.
 
-**Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **Bare `uv sync` with no extra is undefined behaviour by policy** — direct users get the PyPI-default torch resolution (CUDA-y, via pyannote transitive). Always go through a wrapper.
+**Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **A sync with no `cpu`/`cu130` extra is the lean install** (Windows GUI: `--extra gui`) — no torch, no pyannote; `--diarize` warns and is skipped.
 
 **Why not the rejected alternatives** (load-bearing — surfaces when reconsidering the layout):
 

@@ -35,34 +35,26 @@ dependencies = [
     # Core app
     "python-dotenv>=1.1.1,<2.0.0",
     "rich>=14.1.0,<15.0.0",
-    # Diarization (pyannote.audio + PyAV-decoded tensor input).
-    # pyannote.audio 4.0.4 hosts the pyannote/speaker-diarization-community-1
-    # successor model (DER -4..-17% across AMI / AliMeeting / MSDWild vs the legacy 3.1).
-    # The library declares torchcodec>=0.7 as a dep, but pyannote.audio/core/io.py
-    # wraps that import in try/except and documents a tensor-input API
-    # (`pipeline({"waveform": ..., "sample_rate": ...})`) that bypasses torchcodec
-    # at runtime. We decode audio in-process with PyAV (av==16.0.1, already vendored)
-    # which bundles its own FFmpeg — no system FFmpeg-6 dependency on Win + WSL + Docker.
-    # Design: docs/plans/archived/2026-05-21-pyannote-community-1-migration-design.md §2.
-    # Requires HF_TOKEN at runtime; see docs/diarization_setup.md.
-    "pyannote.audio==4.0.4",
-    # torch + torchaudio moved to [project.optional-dependencies] (cpu / cu130 extras)
-    # to keep base `uv sync` from pulling CUDA wheels transitively via pyannote.
-    # See docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
+    # No torch here: tests/unit/test_lean_deps.py fails if the base closure pulls it.
 ]
 
 [project.optional-dependencies]
-# Mutually exclusive (see [tool.uv.conflicts]). Wrappers (run_uv.sh, _runtime.bat,
-# Make targets) always pass `--extra cpu` or `--extra cu130` based on the
-# gitignored `.stt-variant.local` file. Bare `uv sync` with no extra is undefined
-# behaviour by policy — see design §8 decision 8.
+# cpu / cu130 are mutually exclusive (see [tool.uv.conflicts]); each carries
+# torch + pyannote.audio (diarization). Wrappers (run_uv.sh, _runtime.bat, Make
+# targets) pick one from the gitignored `.stt-variant.local`. A sync with NO
+# cpu/cu130 extra (`--extra gui`) is the lean Windows GUI install: transcription
+# only; `--diarize` warns and is skipped.
+# pyannote 4.0.4 = community-1 model; audio fed as PyAV-decoded tensors, bypassing
+# torchcodec. Design: docs/plans/archived/2026-05-21-pyannote-community-1-migration-design.md §2.
 cpu = [
     "torch>=2.8.0,<3.0.0",
     "torchaudio>=2.8.0,<3.0.0",
+    "pyannote.audio==4.0.4",
 ]
 cu130 = [
     "torch>=2.11.0,<3.0.0",
     "torchaudio>=2.11.0,<3.0.0",
+    "pyannote.audio==4.0.4",
 ]
 # Independent of cpu/cu130: drag-drop for the tkinter GUI (backend/gui.py).
 gui = [

@@ -197,7 +197,9 @@ def run_pyannote(
         from huggingface_hub.errors import HfHubHTTPError
         from pyannote.audio import Pipeline  # type: ignore[import-untyped]
     except ImportError as exc:
-        raise DiarizationConfigError(f"pyannote.audio is not installed: {exc}. Run `uv sync` to install.") from exc
+        raise DiarizationConfigError(
+            f"pyannote.audio is not installed: {exc}. Re-sync with `--extra cpu` or `--extra cu130`."
+        ) from exc
 
     try:
         pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL, token=token)  # type: ignore[reportUnknownMemberType]
