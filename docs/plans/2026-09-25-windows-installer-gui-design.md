@@ -16,6 +16,8 @@
 | UI toolkit | **tkinter** (native, offline, no browser/server). Drag-drop via `tkinterdnd2`. No HTML exists to reuse. |
 | Install channel | **Tiny bootstrap installer `.exe`** (PyInstaller, stdlib-only script, ~10 MB). It downloads the dependencies and the models **in parallel during install**, showing **one progress bar per download**. No fat frozen app, and no model is bundled. |
 | Settings exposed | **Language only.** No Desk/Teams/Online choice: settings always follow the Teams bats (see *GUI profiles*). |
+| No admin rights | **Hard requirement: nothing may trigger a UAC prompt.** Install to `%LOCALAPPDATA%\stt-faster`. Put shortcuts in the per-user Desktop and Start menu (`%APPDATA%\Microsoft\Windows\Start Menu`). Keep settings and token in `%APPDATA%\stt-faster`. uv, Python, the models, ffmpeg and the NVIDIA DLL wheels are all user-space downloads. No drivers, services, registry HKLM or system PATH changes. GPU mode uses the NVIDIA driver only if one is already installed. The `.exe` is built with an `asInvoker` manifest (PyInstaller's default; keep `--uac-admin` off). This matters because Windows' installer-detection heuristic auto-elevates un-manifested exes named `*Setup*`/`*Install*`. Verify with `sigcheck -m` or by running as a standard user. |
+| CPU / GPU | **Auto-detect, no question.** The installer runs `nvidia-smi` (it ships with every NVIDIA driver). A capable NVIDIA GPU → GPU mode; anything else, or any doubt → **CPU (default)**. The result shows on screen with a one-click **"Use CPU instead"** override. See *GPU mode*. |
 | Diarization | **Off in the lean install.** Enabled later from a collapsed **"Extras"** section: HF token + how-to-get-a-token hint → on-demand install of torch/pyannote. |
 | Build / release | **Build locally, release via GitHub** (`gh release`), tag-driven, **zero Actions minutes**. |
 | Delivery | Public repo `KristjanHS/stt-faster` → stable link `releases/latest/download/Transcribe-Setup.exe`. |
@@ -29,7 +31,7 @@ Transcribe-Setup.exe  (stdlib tkinter, PyInstaller --onefile --windowed; rebuilt
   2. fetch uv.exe (pinned astral-sh/uv release zip)
   3. fetch app source = latest GitHub Release source zip  ← app updates need NO installer rebuild
   4. in parallel, one bar each:
-       [deps  ]  uv sync --frozen --no-dev --extra gui           (uv also fetches Python 3.12)
+       [deps  ]  uv sync --frozen --no-dev --extra gui [--extra gpu-win]   (uv also fetches Python 3.12)
        [models]  uvx --from huggingface_hub hf download
                    TalTechNLP/whisper-large-v3-turbo-et-verbatim --include "ct2/*"   (Estonian)
                    Systran/faster-distil-whisper-large-v3                              (English)
@@ -43,7 +45,7 @@ stt-faster-gui  (backend/gui.py, tkinter)
   selected files ─copy─► <install>\work\<run-id>\          (the user's originals are never moved)
       └► subprocess: stt-faster transcribe process <work dir> --preset P --variant 61
                      --language L --no-diarize [--no-timestamps]
-         env: STT_DEVICE=cpu, PATH += <install>\ffmpeg\bin
+         env: STT_DEVICE=cpu|cuda (from %APPDATA%\stt-faster\config), PATH += <install>\ffmpeg\bin
       ◄── log lines → progress text/bar
   result .txt copied next to each original audio file; [Open result] opens that folder
 ```
@@ -60,6 +62,19 @@ Per `scripts/windows/README.md` (the owner confirms the bats' `VARIANTS=` still 
 | **English** | `transcribe_english_Teams.bat` | `turbo` | 61 | `en` |
 
 Keep both profiles in one `GUI_PROFILES` constant. Label the second toggle **English**, not "English/Other": the `turbo` preset is `Systran/faster-distil-whisper-large-v3` (`model_config.py:47-48`), which as far as we know handles English only.
+
+### GPU mode (NVIDIA only)
+**Transcription on GPU doesn't need torch.** faster-whisper runs on ctranslate2, which only needs the CUDA **cuBLAS + cuDNN DLLs**. On Linux the `cu130` extra supplies them through torch's bundled `nvidia/*` wheels plus `_cudnn_preload.py`. On Windows, skip torch: a new `gpu-win` extra installs the NVIDIA DLL wheels directly (`nvidia-cublas-cu12`, `nvidia-cudnn-cu12`, marker `sys_platform == 'win32'`, about 1 GB). That is smaller than a CUDA torch (about 2.5 GB) and doesn't touch the existing `cpu`/`cu130` conflict set.
+
+Detection in the installer:
+```
+nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
+  missing / error / VRAM < 4 GB / driver < CUDA-12 minimum   → CPU   (default)
+  otherwise                                                  → GPU   "Found NVIDIA RTX 3060 (12 GB) – using GPU  [Use CPU instead]"
+```
+The choice is saved as `device=cpu|cuda` in `%APPDATA%\stt-faster\config`. The GUI passes it as `STT_DEVICE`. If GPU inference fails at runtime, the GUI re-runs the same job once with `STT_DEVICE=cpu` and writes `device=cpu`. The user never sees a CUDA error, and a wrong detection fixes itself.
+
+Diarization stays on CPU torch (the `cpu` extra) in both modes. GPU diarization on Windows is out of scope.
 
 ### Progress reporting (kept simple)
 - **models / ffmpeg:** poll the target directory size against the expected total (HF API file sizes or HTTP `Content-Length`), shown as "1.4 / 3.1 GB".
@@ -80,6 +95,7 @@ Keep both profiles in one `GUI_PROFILES` constant. Label the second toggle **Eng
 |---|---|---|
 | 1 | Move `pyannote.audio` from base `dependencies` into **both** `cpu` and `cu130` extras. uv.lock confirms only pyannote and the packages under it pull torch. Every owner install path already passes an extra (`run_uv.sh:26`, `Makefile:140,212,217,231,337,358`, `Dockerfile:35,41`, `docker/app.Dockerfile:35,44`, `export-reqs`), so nothing there changes. Add a `gui` extra = `tkinterdnd2`. Add gui-script `stt-faster-gui = "backend.gui:main"`. Rewrite the policy comment at `pyproject.toml:57-60` ("bare sync = undefined behaviour"): a bare sync + `gui` extra is now the supported lean Windows install. | `pyproject.toml`, `uv.lock` |
 | 2 | CLI `transcribe process`: add `--timestamps/--no-timestamps` (default on). It's a new output option: today the TXT always has timestamps (`transcribe.py:417-428`); don't confuse it with the unrelated `word_timestamps`. Add `.mp4`/`.mkv` to `SUPPORTED_AUDIO_EXTENSIONS` (`components.py:27`). Owner can use both too. | `backend/cli/transcription_commands.py`, `backend/transcribe.py`, `backend/components.py` |
+| 2b | `gpu-win` extra (see *GPU mode*). Add a Windows branch to `preload_bundled_cudnn()`: `os.add_dll_directory()` for each `site-packages/nvidia/*/bin` before ctranslate2 loads. It's a no-op when those dirs are absent, and the Linux `.so` path is unchanged. | `pyproject.toml`, `uv.lock`, `backend/_cudnn_preload.py` |
 | 3 | GUI | `backend/gui.py` (new) |
 | 4 | Bootstrap installer (stdlib only, incl. `--extras` mode) | `installer/setup_gui.py` (new) |
 | 5 | Build the installer: manual, on the Windows host, rare: `uvx pyinstaller --onefile --windowed installer/setup_gui.py` | `installer/build_installer.bat` (new) |
@@ -94,6 +110,7 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
 3. **Installer**: `installer/setup_gui.py`. The logic is testable on Linux (paths are parameterized); the real run is on the Windows host.
 4. **Build + release**: `build_installer.bat` + `make release`. First release attaches the `.exe`.
 5. **Extras / diarization** panel + `--extras` installer mode.
+6. **GPU mode**: start with a spike on the Windows host with an NVIDIA GPU. Confirm the CUDA major version the ctranslate2 4.6.2 Windows wheel links against (`cublas64_12.dll` vs `_13`) and pin the matching `nvidia-*` wheels. Then add change #2b, `nvidia-smi` detection in the installer, and the GUI's one-shot CPU retry. CPU-only installs work without this slice.
 
 Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter=True` via `config.set(...)` on the variant's config before `ServiceFactory.create_transcription_service`, `transcription_commands.py:250`; `vad_threshold` / `vad_parameters.min_silence_duration_ms` live in `preprocess/config.py:262-276`) · in-app update check · multilingual "Other" profile.
 
@@ -101,10 +118,11 @@ Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter
 
 - **Native Windows has never been run.** ctranslate2, av and onnxruntime ship Windows wheels; confirm on first install. The Windows-specific `torchcodec` problem is already sidestepped (`pyannote_runner.py` feeds waveforms directly).
 - **External binary:** variant 61 has no preprocess steps (`registry.py:252`), but `inspect_audio` always calls **`ffprobe`** (`preprocess/io.py:30,44`). The installer's ffmpeg zip must include `ffprobe.exe`, and the GUI prepends its `bin` dir to `PATH`.
-- **CPU fallback banner:** both presets say `device="cuda"`. The GUI sets `STT_DEVICE=cpu` to skip the probe and the warning banner.
+- **CPU fallback banner:** both presets say `device="cuda"`. In CPU mode the GUI sets `STT_DEVICE=cpu` to skip the probe and the warning banner.
+- **GPU DLL mismatch (unverified):** the Windows ctranslate2 wheel's CUDA major version is unknown, and a missing cuBLAS often fails only at the *first inference*, not at model load. That is why the GUI's CPU retry wraps the whole job instead of relying on `model_loader.py`'s load-time fallback. Slice 6's spike settles both points.
 - **CLI details:** the command is `stt-faster transcribe process` (`cli/main.py:19`). Use `--variant`, never `-v`, which is bound to both `--variant` and `--verbose` (`transcription_commands.py:501,503`). The CLI default is `--diarize` (`:504-506`), so the GUI must pass `--no-diarize` unless Extras is set up.
 - **SmartScreen** warns on an unsigned `.exe` ("More info → Run anyway"). Put this in the release notes; code signing is out of scope.
 
 ## Out of scope
 
-Code signing · GPU on the target PC · a fat frozen app · uninstaller beyond "delete folder + shortcut" · Mac/Linux installers.
+Code signing · GPU diarization on Windows · AMD/Intel GPUs · a fat frozen app · uninstaller beyond "delete folder + shortcut" · Mac/Linux installers.
