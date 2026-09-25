@@ -113,6 +113,7 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
 3. **Installer**: `installer/setup_gui.py`. The logic is testable on Linux (paths are parameterized); the real run is on the Windows host.
    Rulings: source = latest release (none yet → clear error) + `--source url|zip|dir` override; existing install → user picks Repair (default) / Clean reinstall; uv `0.12.19` + GyanD ffmpeg `9.0.2` essentials pinned; writes `device=cpu` if unset; done = unit tests + a headless Linux e2e into a scratch dir.
 4. **Build + release**: `build_installer.bat` + `make release`. First release attaches the `.exe`.
+   Rulings: `make release V=X.Y.Z` → `scripts/release.sh`: preflight (main, clean, tag absent local+origin, exe = `dist/` else latest-release asset) before any change → bump `pyproject` version + `uv lock` + commit → tag → push main + tag → `gh release create`; first release v1.1.0; bat self-fetches pinned uv + PyInstaller into `%TEMP%`; guard = pytest with fake git/gh/uv on `PATH`.
 5. **Extras / diarization** panel + `--extras` installer mode.
 6. **GPU mode**: start with a spike on the Windows host with an NVIDIA GPU. Confirm the CUDA major version the ctranslate2 4.6.2 Windows wheel links against (`cublas64_12.dll` vs `_13`) and pin the matching `nvidia-*` wheels. Then add change #2b, `nvidia-smi` detection in the installer, and the GUI's one-shot CPU retry. CPU-only installs work without this slice.
 

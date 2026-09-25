@@ -18,7 +18,7 @@
 # Security / CI linters
 .PHONY: pip-audit pip-audit-gpu semgrep actionlint bandit ci-bandit detect-secrets ci-detect-secrets
 # CI helpers and Git
-.PHONY: uv-sync-test pre-push
+.PHONY: uv-sync-test pre-push release
 
 # Use bash with strict flags for recipes
 SHELL := bash
@@ -93,6 +93,7 @@ help:
 	@echo "  -- CI helpers & Git --"
 	@echo "  uv-sync-test       - uv sync test group (frozen) + pip check"
 	@echo "  pre-push           - Run pre-push checks with all SKIP=0"
+	@echo "  release V=X.Y.Z    - Bump version, tag, push main + tag, GitHub release with Transcribe-Setup.exe"
 
 setup-hooks:
 	@echo "Configuring Git hooks path..."
@@ -359,6 +360,9 @@ pre-commit:
 	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv run pre-commit run --all-files
 
 # Run the same checks as the Git pre-push hook, forcing all SKIP flags to 0
+release:
+	./scripts/release.sh "$(V)"
+
 pre-push:
 	SKIP_LOCAL_SEC_SCANS=0 SKIP_LINT=0 SKIP_PYRIGHT=0 SKIP_TESTS=0 scripts/git-hooks/pre-push
 
