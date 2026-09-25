@@ -1,9 +1,8 @@
 """Guard against the CPU extras silently regressing to GPU torch.
 
 Background: with `--extra cpu`, `uv sync` resolves `torch==X.Y.Z+cpu` and no
-nvidia-* / cuda-* / triton wheels. With no extra (PyPI-default torch via
-pyannote.audio's transitive resolution) the CPU runner ends up with ~3 GB of
-CUDA libraries it never uses.
+nvidia-* / cuda-* / triton wheels; a cu130 torch in a CPU venv would carry
+~3 GB of CUDA libraries it never uses.
 
 This test fails the moment `nvidia-cublas` shows up on a CPU install — which is
 the canary the §5.8 of docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md

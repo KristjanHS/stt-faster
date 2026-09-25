@@ -201,7 +201,7 @@ integration:
 	fi
 
 # Export pip-compatible requirements files from uv.lock, split per uv extra.
-# - requirements.txt    : CPU variant (canonical; matches default `uv sync`)
+# - requirements.txt    : CPU variant (canonical; matches `uv sync --extra cpu`)
 # - requirements-gpu.txt: cu130 GPU variant (sidecar; audited via pip-audit-gpu)
 # See docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.7.
 export-reqs: export-reqs-cpu export-reqs-cu130

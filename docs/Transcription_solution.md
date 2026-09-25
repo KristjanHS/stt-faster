@@ -172,7 +172,7 @@ Core dependencies (in `pyproject.toml`):
 
 `./run_uv.sh` installs CPU torch wheels by default. GPU hosts run `make use-gpu` once per machine to switch to the `cu130` extra (writes the gitignored `.stt-variant.local`); subsequent syncs auto-pick GPU. `make use-cpu` switches back; `make show-variant` prints the current value. Runtime torch/torchaudio floors live in `docs/diarization_setup.md`. Historical design (shipped): `docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`.
 
-**Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch` and `torchaudio` live **in the extras, not in base deps** — this is the only way to keep a base `uv sync` from pulling transitive CUDA wheels via `pyannote.audio`. A single `uv.lock` holds both resolutions.
+**Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch`, `torchaudio` and `pyannote.audio` live **in the extras, not in base deps**; the base closure has no torch (guarded by `tests/unit/test_lean_deps.py`). A single `uv.lock` holds both resolutions.
 
 **Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **A sync with no `cpu`/`cu130` extra is the lean install** (Windows GUI: `--extra gui`) — no torch, no pyannote; `--diarize` warns and is skipped.
 
@@ -182,7 +182,7 @@ Core dependencies (in `pyproject.toml`):
 - *Hardware auto-detect (`nvidia-smi` / `wmic` probe).* Silent miscalibration: can't test the CPU path on a GPU box, CI runner GPU-passthrough misclassifies, Docker base-image variation drifts. Failures are quiet (wrong wheel installed). Explicit per-machine choice is the safer default.
 - *Env-var-only (`STT_VARIANT=gpu uv sync`).* Doesn't persist across shell sessions without `.bashrc` edits; harder to discover from `git status`. The gitignored `.stt-variant.local` file is per-machine, persistent, and visible.
 
-A CPU-isolation canary (`tests/unit/test_no_transitive_cuda.py`) asserts `nvidia-cublas` is not installed in the CPU venv via `importlib.metadata.distribution` — catches accidental regressions to the PyPI-default torch resolution.
+A CPU-isolation canary (`tests/unit/test_no_transitive_cuda.py`) asserts `nvidia-cublas` is not installed in the CPU venv via `importlib.metadata.distribution` — catches a GPU torch leaking into a CPU venv.
 
 ## Output Formats
 
