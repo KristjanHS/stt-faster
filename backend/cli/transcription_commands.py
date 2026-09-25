@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import logging
 import shutil
@@ -449,6 +450,14 @@ def _process_multi_variant(
     return 0 if total_failed == 0 else 1
 
 
+def _pyannote_installed() -> bool:
+    # The lean install (no cpu/cu130 extra) ships without pyannote.audio.
+    try:
+        return importlib.util.find_spec("pyannote.audio") is not None
+    except ModuleNotFoundError:
+        return False
+
+
 def cmd_process(args: argparse.Namespace) -> int:
     """Process audio files in the specified folder.
 
@@ -470,6 +479,13 @@ def cmd_process(args: argparse.Namespace) -> int:
     if not input_folder.is_dir():
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
+
+    if getattr(args, "diarize", False) and not _pyannote_installed():
+        console.print(
+            "[yellow]Warning:[/yellow] pyannote.audio is not installed — continuing WITHOUT speaker "
+            "diarization. Re-sync with `--extra cpu` (or `--extra cu130`) to enable it."
+        )
+        args.diarize = False
 
     # Parse and validate variants
     variant_numbers, error = _parse_variant_numbers(args)

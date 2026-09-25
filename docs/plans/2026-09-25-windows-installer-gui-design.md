@@ -109,6 +109,7 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
    Linux/WSLg: drag-drop off (tkdnd's system libX11 vs uv-Python libtk's embedded Xlib → xcb abort); Windows unaffected.
    Rulings: result `.txt` never overwrites (`name (2).txt`); `--no-timestamps` = one line per segment; no config → `STT_DEVICE` unset; a non-CPU job that fails re-runs once with `cpu` and writes `device=cpu` (pulled forward from slice 6).
 2. **Lean deps**: change #1. Verify: a fresh `uv sync --no-dev --extra gui` (no cpu extra) → `stt-faster transcribe process <dir> --variant 61 --no-diarize` works and `import torch` fails. `backend/__init__.py:5-7` → `preload_bundled_cudnn()` must swallow the ImportError silently. `./run_uv.sh` still installs pyannote.
+   Rulings: `--diarize` without pyannote installed → warn + continue without speakers (CLI-level `find_spec` gate); guard = `tests/unit/test_lean_deps.py` (uv.lock base closure has no torch) + one scratch-venv real run.
 3. **Installer**: `installer/setup_gui.py`. The logic is testable on Linux (paths are parameterized); the real run is on the Windows host.
 4. **Build + release**: `build_installer.bat` + `make release`. First release attaches the `.exe`.
 5. **Extras / diarization** panel + `--extras` installer mode.
