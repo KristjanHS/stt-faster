@@ -11,6 +11,7 @@
 | Build | The exe gets built + signed on a `windows-latest` Actions job (free on a public repo). This replaces the local `build_installer.bat` build for releases. |
 | Store / MSIX | Backlog; reconsider after D. |
 | CI build before approval | Move the build to CI now; SignPath steps run only once `vars.SIGNPATH_ORG_ID` is set; the Microsoft submission reminder moves to the job summary while dormant. |
+| Rebuild trigger | CI rebuilds the exe only when `installer/` changed since the newest earlier release carrying it; otherwise it re-attaches that exe. Every rebuild changes the hash, which resets SmartScreen reputation and needs a new Microsoft submission while unsigned. |
 | Privacy text | SignPath's verbatim sentence + the host list (the app downloads models at runtime, so "sends nothing" was wrong). |
 
 ## A. Click-through instructions + submit reminder — shipped
@@ -35,8 +36,9 @@ Check the current terms on signpath.org first; the items below reflect my inform
 ## D. Build + sign in CI
 
 - [x] `.github/workflows/release-installer.yml` (`release: published` + `workflow_dispatch tag`): `build_installer.bat < NUL` → upload-artifact → SignPath v3 + Authenticode assert (only if `vars.SIGNPATH_ORG_ID`) → `gh release upload --clobber`.
+- [x] Rebuild gate: `scripts/installer_reuse.sh`, run from the workflow's own commit so older-tag dry-runs work (`git diff --quiet <prev> <tag> -- installer/`) → re-attach the earlier exe, or rebuild. Also rebuilds on `rebuild`/`skip_signing` inputs, when no earlier release has the exe, and when signing is live but the reused exe isn't Valid-signed. Guard: `tests/unit/test_installer_reuse.py`.
 - [x] `scripts/release.sh` attaches no exe; tests rewritten; design doc updated. The publish→upload gap is accepted.
-- [ ] **Owner, before the next release:** dry-run the untested bat in CI: `gh workflow run release-installer.yml -f tag=v1.1.0 -f attach=false` must go green.
+- [ ] **Owner, before the next release:** dry-run the untested bat in CI: `gh workflow run release-installer.yml -f tag=v1.1.0 -f rebuild=true -f attach=false` must go green.
 - [ ] **After approval:** set the SignPath secret + vars, then run the falsifier: `gh workflow run release-installer.yml -f tag=<tag> -f skip_signing=true` must fail at the Authenticode assert.
 - [ ] **After the first signed release:** replace the "not code-signed yet … warns twice" text in the README and `NOTES` with a one-line fallback ("if Windows still warns: More info → Run anyway").
 - **Done when:** a fresh download from `releases/latest/download/Transcribe-Setup.exe` on a Windows box shows publisher *SignPath Foundation* in Properties → Digital Signatures.

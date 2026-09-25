@@ -57,4 +57,4 @@ git push --atomic origin main "$tag"
 hint="gh release create ${tag} --title ${tag} --generate-notes --latest --verify-tag"
 gh release create "$tag" --title "$tag" --generate-notes --notes "$NOTES" --latest --verify-tag
 hint=""
-echo "release: ${tag} published — the release-installer workflow builds and attaches ${EXE_NAME}"
+echo "release: ${tag} published — the release-installer workflow attaches ${EXE_NAME} (rebuilt only if installer/ changed)"

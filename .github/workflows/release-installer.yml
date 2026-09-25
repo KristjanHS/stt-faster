@@ -1,7 +1,8 @@
 name: Release installer
 
-# Builds Transcribe-Setup.exe on a published release (scripts/release.sh) and attaches it.
-# SignPath signing runs only once the SIGNPATH_* repo variables exist.
+# Attaches Transcribe-Setup.exe to a published release (scripts/release.sh). The exe is rebuilt only when
+# installer/ changed since the newest earlier release carrying it; otherwise that exe is re-attached, so its
+# hash (and SmartScreen reputation) carries over. SignPath signing runs only once the SIGNPATH_* repo variables exist.
 on:
   release:
     types: [published]
@@ -12,6 +13,10 @@ on:
         required: true
       skip_signing:
         description: Falsifier run — skip SignPath so the Authenticode assert must fail
+        type: boolean
+        default: false
+      rebuild:
+        description: Rebuild even if installer/ is unchanged since the previous release
         type: boolean
         default: false
       attach:
@@ -34,12 +39,41 @@ jobs:
         with:
           ref: ${{ env.TAG }}
           persist-credentials: false
+          fetch-depth: 0 # the earlier release's tag for the installer/ diff
+
+      # The workflow's own commit, not the tag's tree: a dry-run of an older tag predates the script.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .ci
+          sparse-checkout: scripts/installer_reuse.sh
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Rebuild or reuse the previous exe
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          FORCE_REBUILD: ${{ inputs.rebuild == true || inputs.skip_signing == true }}
+        run: bash .ci/scripts/installer_reuse.sh "$TAG" dist
+
+      - name: Rebuild if signing is live but the reused exe is unsigned
+        if: env.REBUILD == 'false' && vars.SIGNPATH_ORG_ID != ''
+        shell: pwsh
+        run: |
+          if ((Get-AuthenticodeSignature $env:EXE).Status -ne 'Valid') {
+            Remove-Item $env:EXE
+            Add-Content $env:GITHUB_ENV 'REBUILD=true'
+          }
 
       - name: Build the installer
+        if: env.REBUILD == 'true'
         shell: cmd
         run: call installer\build_installer.bat < NUL
 
       - id: upload
+        if: env.REBUILD == 'true'
         uses: actions/upload-artifact@v7
         with:
           name: Transcribe-Setup
@@ -47,7 +81,7 @@ jobs:
           if-no-files-found: error
 
       - name: Sign via SignPath
-        if: vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
+        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
         uses: signpath/github-action-submit-signing-request@v3
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -59,7 +93,7 @@ jobs:
           output-artifact-directory: signed
 
       - name: Use the signed exe
-        if: vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
+        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
         shell: pwsh
         run: Copy-Item signed/Transcribe-Setup.exe $env:EXE -Force
 
@@ -77,8 +111,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload $env:TAG $env:EXE --clobber
 
-      - name: SmartScreen submission reminder (unsigned)
-        if: vars.SIGNPATH_ORG_ID == ''
+      - name: SmartScreen submission reminder (unsigned rebuild)
+        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID == ''
         shell: pwsh
         run: >-
           Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned Transcribe-Setup.exe attached to $env:TAG — submit it at https://www.microsoft.com/en-us/wdsi/filesubmission (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)."
+
+      - name: Reuse note
+        if: env.REBUILD == 'false'
+        shell: pwsh
+        run: >-
+          Add-Content $env:GITHUB_STEP_SUMMARY "Reused Transcribe-Setup.exe from $env:REUSE_FROM (installer/ unchanged) — same hash, so no new SmartScreen submission is needed."
