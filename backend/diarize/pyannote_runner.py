@@ -28,6 +28,8 @@ warnings.filterwarnings("ignore", message=r".*torchcodec.*", category=UserWarnin
 # pooled window has a single frame — cosmetic upstream artefact, no effect on
 # the returned diarization. Suppress so the bat-driven console stays readable.
 warnings.filterwarnings("ignore", message=r"std\(\): degrees of freedom.*", category=UserWarning)
+# pyannote.audio 4.x sends usage metrics unless opted out; the README privacy policy promises none.
+os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.diarize.pipeline import SpeakerTurn

@@ -14,9 +14,14 @@ on:
         description: Falsifier run — skip SignPath so the Authenticode assert must fail
         type: boolean
         default: false
+      attach:
+        description: Attach the exe to the release (false = dry-run build)
+        type: boolean
+        default: true
 
 permissions:
   contents: write
+  actions: read # SignPath reads the run's artifact with the job token
 
 jobs:
   build:
@@ -28,6 +33,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.TAG }}
+          persist-credentials: false
 
       - name: Build the installer
         shell: cmd
@@ -65,6 +71,7 @@ jobs:
           if ($status -ne 'Valid') { throw "Authenticode status of $env:EXE is $status" }
 
       - name: Attach to the release
+        if: inputs.skip_signing != true && inputs.attach != false
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}

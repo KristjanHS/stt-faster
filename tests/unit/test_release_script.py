@@ -104,6 +104,7 @@ def test_happy_path_publishes_without_an_exe(tmp_path: Path) -> None:
     create = mutations[4]
     assert create.startswith("gh release create v1.1.0 --title v1.1.0 --generate-notes")  # no asset argument
     assert "--verify-tag" in create
+    assert "dist/" not in create
     assert "Run anyway" in create
     assert "Keep anyway" in create
     assert not any(c.startswith(("gh release download", "gh release upload")) for c in calls)

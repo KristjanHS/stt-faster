@@ -29,13 +29,14 @@ Check the current terms on signpath.org first; the items below reflect my inform
 - [x] **Repo:** README `## Code signing policy` (attribution, roles, privacy sentence + hosts) and the `LICENSE` holder.
 - [ ] **Owner:** turn on MFA for GitHub and for the SignPath account.
 - [ ] **Owner:** apply at signpath.org. List every pinned download (uv `0.12.19`, GyanD ffmpeg `9.0.2` essentials, HF model repos, the release source zip), because reviewers may question an installer that downloads and runs third-party binaries.
+- [ ] **Owner, SignPath project:** artifact configuration with a `<zip-file>` root (upload-artifact zips the exe); signing policy must allow `refs/tags/v*`.
 - [ ] **Owner, after approval:** add repo secret `SIGNPATH_API_TOKEN` and variables `SIGNPATH_ORG_ID`, `SIGNPATH_PROJECT_SLUG`, `SIGNPATH_POLICY_SLUG`.
 
 ## D. Build + sign in CI
 
 - [x] `.github/workflows/release-installer.yml` (`release: published` + `workflow_dispatch tag`): `build_installer.bat < NUL` → upload-artifact → SignPath v3 + Authenticode assert (only if `vars.SIGNPATH_ORG_ID`) → `gh release upload --clobber`.
 - [x] `scripts/release.sh` attaches no exe; tests rewritten; design doc updated. The publish→upload gap is accepted.
-- [ ] **Owner, first push:** watch the first release's job go green (`installer/` was permission-blocked, so the bat's CI behaviour is untested).
+- [ ] **Owner, before the next release:** dry-run the untested bat in CI: `gh workflow run release-installer.yml -f tag=v1.1.0 -f attach=false` must go green.
 - [ ] **After approval:** set the SignPath secret + vars, then run the falsifier: `gh workflow run release-installer.yml -f tag=<tag> -f skip_signing=true` must fail at the Authenticode assert.
 - [ ] **After the first signed release:** replace the "not code-signed yet … warns twice" text in the README and `NOTES` with a one-line fallback ("if Windows still warns: More info → Run anyway").
 - **Done when:** a fresh download from `releases/latest/download/Transcribe-Setup.exe` on a Windows box shows publisher *SignPath Foundation* in Properties → Digital Signatures.
