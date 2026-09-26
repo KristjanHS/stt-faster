@@ -28,6 +28,7 @@ from typing import Any
 
 from backend.config import setup_logging
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
+from backend.diarize.model import resolve_model_dir
 from backend.progress import (
     PROGRESS_ENV,
     EtaEstimator,
@@ -43,16 +44,8 @@ LOGGER = logging.getLogger(__name__)
 
 APP_NAME = "stt-faster"
 GUI_VARIANT = 61
-SETUP_LAUNCHER = Path(".venv", "Scripts", "stt-faster-setup.exe")  # mirrors installer InstallPaths.setup_exe
 PYANNOTE_MODULE = "pyannote.audio"
 SPEAKERS_MIN, SPEAKERS_MAX, SPEAKERS_DEFAULT = 2, 10, 2  # CLI rejects --num-speakers < 2
-EXTRAS_HINT = (
-    "Speaker identification needs a free Hugging Face token:\n"
-    "1. Create an account at huggingface.co\n"
-    "2. Accept the pyannote/speaker-diarization-community-1 licence\n"
-    "3. Create a read token at hf.co/settings/tokens and paste it below"
-)
-EXTRAS_NEED_INSTALL_HINT = "Extras need the installed app (stt-faster-setup.exe not found)."
 # components.FileProcessor logs "Failed to process <file>: <ErrorType>: <message>" per failed file.
 _DIARIZATION_FAILURE = re.compile(
     rf"\b(?:{DiarizationConfigError.__name__}|{DiarizationRuntimeError.__name__}): (?P<reason>.+)"
@@ -89,14 +82,6 @@ class AppPaths:
     @property
     def hf_home(self) -> Path:
         return self.install_dir / "hf"  # the installer's models; mirrors installer.setup_gui.InstallPaths
-
-    @property
-    def token_file(self) -> Path:
-        return self.config_file.parent / "hf_token"
-
-    @property
-    def setup_exe(self) -> Path:
-        return self.install_dir / SETUP_LAUNCHER
 
     @property
     def gui_log(self) -> Path:
@@ -155,47 +140,24 @@ def read_device(config_file: Path) -> str | None:
     return read_config(config_file).get("device", "").strip().lower() or None
 
 
-def read_hf_token(token_file: Path) -> str:
-    try:  # utf-8-sig + OSError → "" mirror installer.setup_gui.read_hf_token (Notepad adds a BOM)
-        return token_file.read_text(encoding="utf-8-sig").strip()
-    except OSError:
-        return ""
-
-
 def diarization_available(
-    token_file: Path, *, find_spec: Callable[[str], object | None] = importlib.util.find_spec
+    env: Mapping[str, str],
+    *,
+    find_spec: Callable[[str], object | None] = importlib.util.find_spec,
+    resolve: Callable[[Mapping[str, str]], Path] = resolve_model_dir,
 ) -> bool:
-    """Show "Identify speakers" iff pyannote imports and a non-empty token is saved."""
+    """Show "Identify speakers" iff pyannote imports and the model resolves from ``env`` (the CLI's own env)."""
     try:
         installed = find_spec(PYANNOTE_MODULE) is not None
     except (ImportError, ValueError):  # a dotted name raises when its parent package is missing
         installed = False
-    return installed and bool(read_hf_token(token_file))
-
-
-def extras_install_hint(paths: AppPaths) -> str | None:
-    """None when Save & install can run; else why the button is disabled (dev checkout / WSL)."""
-    return None if paths.setup_exe.is_file() else EXTRAS_NEED_INSTALL_HINT
-
-
-def launch_detached(cmd: list[str], cwd: str) -> None:
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(cmd, cwd=cwd, close_fds=True, creationflags=flags)  # noqa: S603  # nosec B603 - our own setup exe
-
-
-def save_and_install(
-    paths: AppPaths,
-    token: str,
-    *,
-    launch: Callable[[list[str], str], None] = launch_detached,
-    tempdir: Callable[[], str] = tempfile.gettempdir,
-) -> None:
-    """Store the HF token, then hand over to ``stt-faster-setup.exe --extras`` (caller quits)."""
-    paths.token_file.parent.mkdir(parents=True, exist_ok=True)
-    paths.token_file.touch(mode=0o600)
-    paths.token_file.write_text(token.strip(), encoding="utf-8")
-    # The shortcut starts us in venv\Scripts; setup inheriting that cwd would read as "app still open".
-    launch([str(paths.setup_exe), "--extras"], tempdir())
+    if not installed:
+        return False
+    try:
+        resolve(env)
+    except DiarizationConfigError:
+        return False
+    return True
 
 
 def diarization_failure(line: str) -> str | None:
@@ -271,7 +233,6 @@ def build_env(
     device: str | None,
     ffmpeg_bin: Path | None,
     hf_home: Path | None = None,
-    hf_token: str | None = None,
 ) -> dict[str, str]:
     env = dict(base)
     env["PYTHONIOENCODING"] = "utf-8"
@@ -283,9 +244,13 @@ def build_env(
         env["PATH"] = os.pathsep.join([str(ffmpeg_bin), env.get("PATH", "")])
     if hf_home is not None and hf_home.is_dir():  # absent in a dev checkout: keep the user's own HF cache
         env.update(HF_HOME=str(hf_home), HF_HUB_CACHE=str(hf_home / "hub"), HF_XET_CACHE=str(hf_home / "xet"))
-    if hf_token:
-        env["HF_TOKEN"] = hf_token  # secret: never log env
+        env["HF_HUB_OFFLINE"] = "1"
     return env
+
+
+def cli_env(base: Mapping[str, str], paths: AppPaths, device: str | None) -> dict[str, str]:
+    """The env each CLI run gets; the speaker gate resolves the model from this same env."""
+    return build_env(base, device=device, ffmpeg_bin=paths.ffmpeg_bin, hf_home=paths.hf_home)
 
 
 RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
@@ -403,7 +368,6 @@ def _run_attempt(
     *,
     diarize: bool,
     num_speakers: int,
-    hf_token: str | None,
     profile: GuiProfile,
     timestamps: bool,
     paths: AppPaths,
@@ -423,7 +387,7 @@ def _run_attempt(
 
     try:
         staged = stage_files(files, work_dir)
-        env = build_env(base_env, device=device, ffmpeg_bin=paths.ffmpeg_bin, hf_home=paths.hf_home, hf_token=hf_token)
+        env = cli_env(base_env, paths, device)
         cmd = build_command(work_dir, profile, timestamps=timestamps, diarize=diarize, num_speakers=num_speakers)
         exit_code = runner(cmd, env, watch)
         if exit_code != 0:
@@ -457,7 +421,6 @@ def run_job(
     """
     device = read_device(paths.config_file)
     env = os.environ if base_env is None else base_env
-    hf_token = read_hf_token(paths.token_file) if diarize else None
     result = JobResult()
     speakers_on = diarize  # flips off for good after the one --no-diarize retry
 
@@ -470,7 +433,6 @@ def run_job(
                 attempt_device,
                 diarize=diarize_now,
                 num_speakers=num_speakers,
-                hf_token=hf_token,
                 profile=profile,
                 timestamps=timestamps,
                 paths=paths,
@@ -578,7 +540,7 @@ class TranscribeApp:
 
         self.identify = tk.BooleanVar(value=False)
         self.speakers = tk.IntVar(value=SPEAKERS_DEFAULT)
-        self.speakers_shown = diarization_available(paths.token_file)
+        self.speakers_shown = diarization_available(cli_env(os.environ, paths, read_device(paths.config_file)))
         if self.speakers_shown:
             speaker_row = ttk.Frame(frame)
             speaker_row.pack(anchor="w", pady=(0, 8))
@@ -587,8 +549,6 @@ class TranscribeApp:
             ttk.Spinbox(
                 speaker_row, from_=SPEAKERS_MIN, to=SPEAKERS_MAX, width=4, textvariable=self.speakers, state="readonly"
             ).pack(side="left")
-
-        self._build_extras(frame)
 
         action_row = ttk.Frame(frame)
         action_row.pack(fill="x", pady=(4, 0))
@@ -609,47 +569,6 @@ class TranscribeApp:
         self.status.pack(anchor="w", pady=(4, 0))
         self.banner = ttk.Label(frame, text="", foreground="#b35c00", wraplength=420)
         self.banner.pack(anchor="w", pady=(4, 0))
-
-    def _build_extras(self, frame: ttk.Frame) -> None:
-        self.extras_toggle = ttk.Button(frame, text="▸ Extras", command=self._toggle_extras)
-        self.extras_toggle.pack(anchor="w", pady=(0, 8))
-        self.extras_frame = ttk.Frame(frame)
-        ttk.Label(self.extras_frame, text=EXTRAS_HINT, justify="left").pack(anchor="w")
-        self.token = tk.StringVar()
-        ttk.Entry(self.extras_frame, textvariable=self.token, show="•", width=48).pack(anchor="w", pady=4)
-        install_hint = extras_install_hint(self.paths)
-        ttk.Button(
-            self.extras_frame,
-            text="Save & install",
-            command=self.save_and_install,
-            state="disabled" if install_hint else "normal",
-        ).pack(anchor="w")
-        if install_hint:
-            ttk.Label(self.extras_frame, text=install_hint, foreground="gray").pack(anchor="w", pady=(4, 0))
-
-    def _toggle_extras(self) -> None:
-        if self.extras_frame.winfo_ismapped():
-            self.extras_frame.pack_forget()
-            self.extras_toggle.config(text="▸ Extras")
-        else:
-            self.extras_frame.pack(anchor="w", fill="x", pady=(0, 8), after=self.extras_toggle)
-            self.extras_toggle.config(text="▾ Extras")
-
-    def save_and_install(self) -> None:
-        token = self.token.get().strip()
-        if not token:
-            messagebox.showinfo("Transcribe", "Paste your Hugging Face token first.", parent=self.root)
-            return
-        if self.running:
-            messagebox.showinfo("Transcribe", "Wait for the transcription to finish first.", parent=self.root)
-            return
-        try:
-            save_and_install(self.paths, token)
-        except OSError as error:
-            LOGGER.exception("Could not start the Extras install")
-            messagebox.showerror("Transcribe", f"Could not start the Extras install: {error}", parent=self.root)
-            return
-        self.root.destroy()  # setup replaces files in this venv; Windows locks them while we run
 
     def _on_drop(self, event: tk.Event) -> None:  # type: ignore[type-arg]
         self.set_files(Path(p) for p in self.root.tk.splitlist(event.data))  # type: ignore[attr-defined]

@@ -128,13 +128,8 @@ ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")  # tqdm's cursor-up between 
 DOWNLOAD_BAR = re.compile(r"(?P<done>\d+(?:\.\d+)?[kMGT]?)B?(?:/(?P<total>\d+(?:\.\d+)?[kMGT]?)B?)? \[\d+:\d")
 ELAPSED_SUFFIX = re.compile(r" · \d+:\d\d(?= \(|$)")
 BYTE_UNITS = {"k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
-HF_AUTH_ERROR = re.compile(r"\b40[13]\b|gated repo|unauthori[sz]ed|forbidden|invalid credentials", re.IGNORECASE)
-HF_AUTH_HELP = (
-    "Hugging Face refused the speaker model (401/403). To fix: "
-    "1) sign in and accept the licence at https://hf.co/pyannote/speaker-diarization-community-1; "
-    "2) create a read token at https://hf.co/settings/tokens; "
-    "3) paste that token in Transcribe and try again."
-)
+LEGACY_TOKEN_FILE = "hf_token"  # nosec B105 - a file name: the old gated model's saved token, removed by every run
+LEGACY_DIARIZATION_REPO = "pyannote/speaker-diarization-community-1"  # the old gated cache, removed likewise
 
 
 @dataclass(frozen=True)
@@ -191,7 +186,7 @@ class InstallPaths:
 
     @property
     def setup_exe(self) -> Path:
-        """The venv's launcher for this setup: Repair / Uninstall / extras start it like the app starts its own.
+        """The venv's launcher for this setup: Repair / Uninstall start it like the app starts its own.
 
         Smart App Control blocks every later launch of the downloaded setup exe, but not the app's launchers.
         """
@@ -207,10 +202,6 @@ class InstallPaths:
     @property
     def log_file(self) -> Path:
         return self.install_dir / "logs" / "setup.log"
-
-    @property
-    def hf_token_file(self) -> Path:
-        return self.config_file.parent / "hf_token"  # written by the app before it starts --extras
 
 
 def default_install_paths(
@@ -324,22 +315,6 @@ def fetch_json(url: str) -> Any:
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT})
     with urllib.request.urlopen(request, timeout=30) as response:  # noqa: S310  # nosec B310 - fixed https URLs
         return json.loads(response.read().decode("utf-8"))
-
-
-HF_TOKEN_PROBE_URL = f"https://huggingface.co/{DIARIZATION_MODEL.repo_id}/resolve/main/config.yaml"
-
-
-def hf_token_status(token: str, *, urlopen: Callable[..., Any] = urllib.request.urlopen) -> int | None:
-    """HTTP status of an authenticated HEAD on the gated model's config; None when no answer came back."""
-    headers = {"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"}
-    request = urllib.request.Request(HF_TOKEN_PROBE_URL, headers=headers, method="HEAD")
-    try:
-        with urlopen(request, timeout=15) as response:  # noqa: S310  # nosec B310 - fixed https URL
-            return int(response.status)
-    except urllib.error.HTTPError as error:
-        return error.code
-    except OSError:  # URLError, timeouts: offline here says nothing about the token
-        return None
 
 
 def latest_release_zip(fetch: Callable[[str], Any] = fetch_json, repo: str = GITHUB_REPO) -> str:
@@ -467,7 +442,7 @@ def classify_source(source: str) -> str:
 def deps_command(paths: InstallPaths) -> list[str]:
     pin = paths.app_dir / ".python-version"  # UV_NO_CONFIG also skips .python-version discovery
     python = pin.read_text(encoding="utf-8").strip() if pin.is_file() else PYTHON_VERSION
-    # a full sync drops unlisted extras: speaker libraries always, GPU mode once it is on
+    # a full sync drops every optional group it is not given: speaker libraries always, GPU mode once it is on
     config = read_config(paths.config_file)
     return [
         str(paths.uv_exe),
@@ -529,9 +504,9 @@ def seed_model_cache(legacy: Path, target: Path, *, copytree: Callable[..., Any]
 
 
 def model_command(paths: InstallPaths, spec: ModelSpec, *, force: bool) -> list[str]:
-    hub, *extras = HF_TOOL_PINS
+    hub, *with_pins = HF_TOOL_PINS
     cmd = [str(paths.uv_exe), "tool", "run", "--python-preference", "only-managed", "--python", PYTHON_VERSION]
-    cmd += ["--from", hub, *(arg for pin in extras for arg in ("--with", pin)), "hf", "download", spec.repo_id]
+    cmd += ["--from", hub, *(arg for pin in with_pins for arg in ("--with", pin)), "hf", "download", spec.repo_id]
     for pattern in spec.include:
         cmd += ["--include", pattern]
     cmd += ["--revision", spec.revision]
@@ -720,16 +695,13 @@ def gpu_summary(info: GpuInfo | None) -> str:
     return f"{found}, driver {'.'.join(map(str, info.driver))}: GPU mode needs {need}, so the CPU is used."
 
 
-def read_hf_token(token_file: Path) -> str:
+def remove_legacy_speaker_setup(paths: InstallPaths) -> None:
+    """Best effort: drop the saved token and the old gated model cache."""
     try:
-        token = token_file.read_text(encoding="utf-8-sig").strip()
-    except OSError:
-        token = ""  # nosec B105 - empty sentinel, not a credential
-    if not token:
-        raise InstallError(
-            f"No Hugging Face token saved ({token_file}). Paste one in Transcribe's speaker panel, then retry."
-        )
-    return token
+        (paths.config_file.parent / LEGACY_TOKEN_FILE).unlink(missing_ok=True)
+    except OSError as error:
+        LOGGER.warning("Could not remove the old token file: %s", error)
+    shutil.rmtree(model_cache_dir(paths.hf_home / "hub", LEGACY_DIARIZATION_REPO), ignore_errors=True)
 
 
 def is_installed(paths: InstallPaths) -> bool:
@@ -1380,14 +1352,7 @@ class Installer:
     model_size: Callable[[ModelSpec, Callable[[str], Any]], int | None] = expected_model_size
     in_use: Callable[[InstallPaths], bool] = app_in_use
     winreg: Callable[[], Any] = _winreg
-    extras: bool = False
-    launch: Callable[[InstallPaths], None] = launch_gui
-    sleep: Callable[[float], None] = time.sleep
     unlinker: Callable[[Path], None] = unlink_when_released
-    clock: Callable[[], float] = time.monotonic
-    close_timeout: float = 60.0  # the app quits right after starting --extras
-    hf_token: str = field(default="", repr=False)  # read from hf_token_file when an --extras run starts
-    token_status: Callable[[str], int | None] = hf_token_status
     gpu: bool | None = None  # the device to save; None keeps the saved one
     detect: Callable[[Mapping[str, str]], GpuInfo | None] = detect_gpu
     verify: Callable[[Path, Mapping[str, str]], None] = verify_snapshot
@@ -1447,7 +1412,7 @@ class Installer:
 
         env = isolated_env(self.env, self.paths)
         env["TQDM_POSITION"] = "-1"  # hf 1.2.1 then prints its aggregate byte bar through the pipe
-        env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"  # nosec B105 - a flag, not a secret: public repos never get HF_TOKEN/stored login
+        env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"  # nosec B105 - a flag, not a secret: public repos never get an env or stored login
         cmd = model_command(self.paths, spec, force=self.clean)
         try:
             self.runner(cmd, env, report, self.cancel, poll, MODEL_STALL_TIMEOUT)
@@ -1494,36 +1459,13 @@ class Installer:
                 register_uninstall(self.paths, self.winreg())
 
     def fetch_diarization(self, report: Report) -> None:
-        try:
-            self.fetch_model(DIARIZATION_MODEL, report)
-        except CommandFailed as error:
-            if self.extras and HF_AUTH_ERROR.search(error.output):
-                raise InstallError(HF_AUTH_HELP) from None
-            raise
+        self.fetch_model(DIARIZATION_MODEL, report)
         report(None, "verifying")
         cache = model_cache_dir(self.paths.hf_home / "hub", DIARIZATION_MODEL.repo_id)
         self.verify(cache / "snapshots" / DIARIZATION_MODEL.revision, DIARIZATION_SHA256)
 
-    def enable_extras(self, report: Report) -> None:
-        set_config_value(self.paths.config_file, "extras", "diarization")
-        report(None, "opening Transcribe")
-        self.launch(self.paths)
-
-    def wait_closed(self) -> None:
-        deadline = self.clock() + self.close_timeout
-        while self.in_use(self.paths):
-            if self.clock() >= deadline or self.cancel.is_set():
-                raise InstallError("Close Transcribe first, then retry.")
-            self.sleep(0.5)
-
     def tasks(self) -> list[Task]:
         model = DIARIZATION_MODEL.repo_id
-        if self.extras:  # the base install is in place; one deps sync + the speaker model, then the flag
-            return [
-                Task("deps", "Python + speaker libraries", self.install_deps),
-                Task(model, f"Model: {model.split('/', 1)[1]}", self.fetch_diarization),
-                Task("extras", "Speaker detection", self.enable_extras, needs=("deps", model)),
-            ]
         tasks = [
             Task("uv", "Installer tools (uv)", self.fetch_uv),
             Task("app", "Transcribe app", self.fetch_source),
@@ -1539,22 +1481,13 @@ class Installer:
         return tasks
 
     def run(self, events: Events) -> bool:
-        if self.extras:
-            if not self.paths.uv_exe.is_file() or not self.paths.app_dir.is_dir():
-                raise InstallError("Transcribe is not installed yet. Run Transcribe-Setup first.")
-            self.hf_token = read_hf_token(self.paths.hf_token_file)
-            status = self.token_status(self.hf_token)
-            LOGGER.info("Hugging Face token check: %s", status if status is not None else "no answer")
-            if status in (401, 403):  # fail before the long deps sync; other answers leave it to fetch_diarization
-                raise InstallError(HF_AUTH_HELP)
-            self.wait_closed()
-        elif self.in_use(self.paths):
+        if self.in_use(self.paths):
             raise InstallError("Close Transcribe first, then retry.")
+        remove_legacy_speaker_setup(self.paths)
         self.paths.tmp_dir.mkdir(parents=True, exist_ok=True)
         if self.clean:
             clean_install(self.paths)
-        if not self.extras:  # before deps: device=cuda adds the gpu-win extra to the sync
-            save_device(self.paths.config_file, self.gpu)
+        save_device(self.paths.config_file, self.gpu)  # before deps: device=cuda adds the gpu-win extra to the sync
         return run_tasks(self.tasks(), events)
 
 
@@ -1597,7 +1530,7 @@ class SetupWindow:
         )
 
         self.mode = tk.StringVar(value="repair")
-        if is_installed(installer.paths) and not installer.extras:
+        if is_installed(installer.paths):
             mode_row = ttk.Frame(frame)
             mode_row.pack(anchor="w", pady=(8, 0))
             ttk.Label(mode_row, text="Already installed:").pack(side="left", padx=(0, 8))
@@ -1610,7 +1543,7 @@ class SetupWindow:
         self.use_gpu = tk.BooleanVar(value=False)
         self.gpu_check: ttk.Checkbutton | None = None
         self.gpu_info: GpuInfo | None = None
-        if installer.paths.windows and not installer.extras:
+        if installer.paths.windows:
             self.gpu_info = installer.detect(installer.env)
             ttk.Label(frame, text=gpu_summary(self.gpu_info), wraplength=480).pack(anchor="w", pady=(8, 0))
             if gpu_capable(self.gpu_info) or read_config(installer.paths.config_file).get("device") == "cuda":
@@ -1635,7 +1568,7 @@ class SetupWindow:
         buttons.pack(fill="x")
         self.install_button = ttk.Button(buttons, text="Install", command=self.start)
         self.install_button.pack(side="left")
-        launchable = installer.paths.gui_exe.is_file() and not installer.extras  # no repair needed to open it
+        launchable = installer.paths.gui_exe.is_file()  # no repair needed to open it
         self.launch_button = ttk.Button(
             buttons, text="Open Transcribe", command=self.launch, state="normal" if launchable else "disabled"
         )
@@ -1650,16 +1583,12 @@ class SetupWindow:
         if handoff is not None:
             self.install_button.config(state="disabled")
             root.after(100, self._await_handoff)
-        elif installer.extras:  # the app asked for this run and has already quit
-            root.after(100, self.start)
 
     def _await_handoff(self) -> None:
         if self.handoff is not None and not self.handoff.done():
             self.root.after(100, self._await_handoff)
             return
         self.install_button.config(state="normal")
-        if self.installer.extras:
-            self.start()
 
     def _on_mode(self, *_: object) -> None:
         self.install_button.config(text="Uninstall" if self.mode.get() == "uninstall" else "Install")
@@ -1761,9 +1690,6 @@ class SetupWindow:
 
     def _finished(self, ok: bool) -> None:
         self.running = False
-        if ok and self.installer.extras:  # the last extras task already reopened Transcribe
-            self.root.destroy()
-            return
         if ok:
             self.summary.config(text="Done. Transcribe is on your Desktop and in the Start menu.")
             self.launch_button.config(state="normal")
@@ -1792,7 +1718,7 @@ class SetupWindow:
 
 
 def headless_gpu(installer: Installer, *, cpu: bool) -> bool | None:
-    if installer.extras or not installer.paths.windows:  # elsewhere the CLI's own device probe decides
+    if not installer.paths.windows:  # elsewhere the CLI's own device probe decides
         return None
     if cpu:
         return False
@@ -1819,14 +1745,10 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--clean", action="store_true", help="clean reinstall (headless; the window asks)")
     parser.add_argument("--headless", action="store_true", help="no window; log progress to the console")
     parser.add_argument("--uninstall", action="store_true", help="remove the app, its models, settings and shortcuts")
-    parser.add_argument("--extras", action="store_true", help="add speaker detection to an existing install")
     parser.add_argument("--cpu", action="store_true", help="headless: skip GPU mode even if an NVIDIA GPU is found")
     parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # already confirmed (relaunch)
     parser.add_argument("--ready-file", type=Path, help=argparse.SUPPRESS)  # a hop: created once our window is up
-    args = parser.parse_args(argv)
-    if args.extras and (args.source or args.clean or args.uninstall):
-        parser.error("--extras cannot be combined with --source, --clean or --uninstall")
-    return args
+    return parser.parse_args(argv)
 
 
 def setup_hop(
@@ -1841,7 +1763,7 @@ def setup_hop(
     starting: Callable[..., None] = show_starting,
     dialogs: Callable[[], Any] = _messagebox,
 ) -> bool:
-    """Started by the venv's launcher (Repair, the app's extras): continue from a %TEMP% copy, as the run replaces
+    """Started by the venv's launcher (Repair): continue from a %TEMP% copy, as the run replaces
     that venv. True when the copy took over; the copy waits for us to exit (``--ready-file``) before any work."""
     exe = program()
     if not runs_from_install(exe, paths):
@@ -1893,7 +1815,7 @@ def forward_args(args: argparse.Namespace) -> list[str]:
     if args.source:
         remote = args.source.startswith(("https://", "http://"))
         out += ["--source", args.source if remote else str(Path(args.source).resolve())]
-    return out + [f"--{name}" for name in ("clean", "headless", "extras", "cpu") if getattr(args, name)]
+    return out + [f"--{name}" for name in ("clean", "headless", "cpu") if getattr(args, name)]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -1912,7 +1834,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     # downloads and the Transcribe it launches never see it either (isolated_env still guards passed-in envs).
     if keylog := os.environ.pop("SSLKEYLOGFILE", ""):
         LOGGER.warning("Ignoring inherited SSLKEYLOGFILE=%s", keylog)
-    installer = Installer(paths=paths, source=args.source, clean=args.clean, extras=args.extras)
+    installer = Installer(paths=paths, source=args.source, clean=args.clean)
     if args.headless:
         installer.gpu = headless_gpu(installer, cpu=args.cpu)
         last: dict[str, str] = {}
