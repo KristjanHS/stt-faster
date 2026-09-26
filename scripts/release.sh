@@ -5,7 +5,7 @@
 set -euo pipefail
 
 EXE_NAME="Transcribe-Setup.exe"
-NOTES="Download **${EXE_NAME}** and run it — no admin rights needed. The app is not code-signed yet, so Windows warns twice:
+NOTES="Download **${EXE_NAME}** and run it — no admin rights needed. The app is not code-signed, so Windows warns twice:
 1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
 2. *Windows protected your PC*: click **More info → Run anyway**."
 

@@ -2,7 +2,7 @@ name: Release installer
 
 # Attaches Transcribe-Setup.exe to a published release (scripts/release.sh). The exe is rebuilt only when
 # installer/ changed since the newest earlier release carrying it; otherwise that exe is re-attached, so its
-# hash (and SmartScreen reputation) carries over. SignPath signing runs only once the SIGNPATH_* repo variables exist.
+# hash (and SmartScreen reputation) carries over. Unsigned by decision (2026-09-26): setup runs the exe only once.
 on:
   release:
     types: [published]
@@ -11,10 +11,6 @@ on:
       tag:
         description: Release tag to build and attach (e.g. v1.2.0)
         required: true
-      skip_signing:
-        description: Falsifier run — skip SignPath so the Authenticode assert must fail
-        type: boolean
-        default: false
       rebuild:
         description: Rebuild even if installer/ is unchanged since the previous release
         type: boolean
@@ -26,7 +22,6 @@ on:
 
 permissions:
   contents: write
-  actions: read # SignPath reads the run's artifact with the job token
 
 jobs:
   build:
@@ -35,7 +30,7 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       EXE: dist/Transcribe-Setup.exe
       # Not `inputs.attach != false`: a release event has no inputs, and null == false after expression coercion.
-      ATTACH: ${{ github.event_name == 'release' || (inputs.attach && !inputs.skip_signing) }}
+      ATTACH: ${{ github.event_name == 'release' || inputs.attach }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -57,54 +52,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          FORCE_REBUILD: ${{ inputs.rebuild == true || inputs.skip_signing == true }}
+          FORCE_REBUILD: ${{ inputs.rebuild == true }}
         run: bash .ci/scripts/installer_reuse.sh "$TAG" dist
-
-      - name: Rebuild if signing is live but the reused exe is unsigned
-        if: env.REBUILD == 'false' && vars.SIGNPATH_ORG_ID != ''
-        shell: pwsh
-        run: |
-          if ((Get-AuthenticodeSignature $env:EXE).Status -ne 'Valid') {
-            Remove-Item $env:EXE
-            Add-Content $env:GITHUB_ENV 'REBUILD=true'
-          }
 
       - name: Build the installer
         if: env.REBUILD == 'true'
         shell: cmd
         run: call installer\build_installer.bat < NUL
 
-      - id: upload
-        if: env.REBUILD == 'true'
+      - if: env.REBUILD == 'true' # a dry-run's exe, downloadable from the run
         uses: actions/upload-artifact@v7
         with:
           name: Transcribe-Setup
           path: ${{ env.EXE }}
           if-no-files-found: error
-
-      - name: Sign via SignPath
-        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
-        uses: signpath/github-action-submit-signing-request@v3
-        with:
-          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
-          organization-id: ${{ vars.SIGNPATH_ORG_ID }}
-          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG }}
-          signing-policy-slug: ${{ vars.SIGNPATH_POLICY_SLUG }}
-          github-artifact-id: ${{ steps.upload.outputs.artifact-id }}
-          wait-for-completion: true
-          output-artifact-directory: signed
-
-      - name: Use the signed exe
-        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID != '' && inputs.skip_signing != true
-        shell: pwsh
-        run: Copy-Item signed/Transcribe-Setup.exe $env:EXE -Force
-
-      - name: Assert a valid Authenticode signature
-        if: vars.SIGNPATH_ORG_ID != ''
-        shell: pwsh
-        run: |
-          $status = (Get-AuthenticodeSignature $env:EXE).Status
-          if ($status -ne 'Valid') { throw "Authenticode status of $env:EXE is $status" }
 
       - name: Attach to the release
         if: env.ATTACH == 'true'
@@ -113,12 +74,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload $env:TAG $env:EXE --clobber
 
-      - name: SmartScreen submission reminder (unsigned rebuild)
-        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID == '' && env.ATTACH == 'true'
+      - name: SmartScreen submission reminder (rebuilt exe)
+        if: env.REBUILD == 'true' && env.ATTACH == 'true'
         shell: pwsh
         run: >-
-          Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned Transcribe-Setup.exe attached to $env:TAG — submit it at https://www.microsoft.com/en-us/wdsi/filesubmission (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)."
-
+          Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned Transcribe-Setup.exe attached to $env:TAG — submit it at https://www.microsoft.com/en-us/wdsi/filesubmission (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)." #magic___^_^___line
       - name: Reuse note
         if: env.REBUILD == 'false'
         shell: pwsh

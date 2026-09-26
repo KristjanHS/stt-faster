@@ -78,6 +78,7 @@ from installer.setup_gui import (
     register_uninstall,
     relaunch_from_temp,
     hop_behind_window,
+    forward_args,
     setup_hop,
     unlink_when_released,
     remove_shortcuts_script,
@@ -716,6 +717,13 @@ def test_setup_hop_only_from_the_install_dir(win_paths: InstallPaths, tmp_path: 
         assert relaunched == covered == []
 
 
+def test_forward_args_makes_a_local_source_absolute(tmp_path: Path) -> None:
+    local = parse_args(["--source", "app.zip", "--headless", "--cpu"])
+    assert forward_args(local) == ["--source", str(Path("app.zip").resolve()), "--headless", "--cpu"]
+    remote = parse_args(["--source", "https://x/app.zip", "--clean"])
+    assert forward_args(remote) == ["--source", "https://x/app.zip", "--clean"]
+
+
 def test_hop_copy_failure_says_so_and_closes(tmp_path: Path, fake_dialogs: _FakeDialogs) -> None:
     errors: list[str] = []
     fake_dialogs.showerror = lambda _title, message, **_kw: errors.append(message)  # type: ignore[method-assign]
@@ -1073,7 +1081,7 @@ def test_uninstall_main_hops_to_temp_copy_when_run_from_install_dir(
         confirmed=True,
         program=lambda: exe,
         winreg=_FakeReg,
-        relaunch=lambda e, args: relaunch_from_temp(e, args, popen=popen, tempdir=tempdir),
+        relaunch=lambda e, args, **kw: relaunch_from_temp(e, args, popen=popen, tempdir=tempdir, **kw),
         remove=lambda *_a, **_kw: pytest.fail("the temp copy removes"),
     )
     assert code == 0
