@@ -1,6 +1,6 @@
 # Installer — real byte progress for model downloads
 
-Status: open. Staged from the 2026-09-26 Windows eyeball run.
+Status: ✅ SHIPPED 2026-09-26 (Open ruled: elapsed ticker between bursts). Owed: Windows eyeball of a real install.
 
 ## Problem (reproduced locally, `Systran/faster-whisper-small`)
 

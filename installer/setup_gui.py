@@ -89,6 +89,9 @@ MODELS = (
     ModelSpec("Systran/faster-distil-whisper-large-v3"),
 )
 DIARIZATION_MODEL = ModelSpec("pyannote/speaker-diarization-community-1")  # gated: needs the user's token
+ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")  # tqdm's cursor-up between stacked bars
+DOWNLOAD_BAR = re.compile(r"(?P<done>\d+(?:\.\d+)?[kMGT]?)B?(?:/(?P<total>\d+(?:\.\d+)?[kMGT]?)B?)? \[\d+:\d")
+BYTE_UNITS = {"k": 1e3, "M": 1e6, "G": 1e9, "T": 1e12}
 HF_AUTH_ERROR = re.compile(r"\b40[13]\b|gated repo|unauthori[sz]ed|forbidden|invalid credentials", re.IGNORECASE)
 HF_AUTH_HELP = (
     "Hugging Face refused the speaker model (401/403). To fix: "
@@ -910,6 +913,28 @@ def kill_tree(proc: subprocess.Popen[str], env: Mapping[str, str]) -> None:
     proc.wait()
 
 
+def _bytes(value: str) -> float:
+    return float(value.rstrip("kMGT")) * BYTE_UNITS.get(value[-1], 1)
+
+
+def download_progress(line: str) -> tuple[float | None, str] | None:
+    """hf's aggregate byte bar (``TQDM_POSITION=-1``) as (fraction, ``done/total``); None for any other line.
+
+    The fraction is None until hf knows the total, and again once its closing line drops it.
+    """
+    match = DOWNLOAD_BAR.search(line) if line.startswith("Download") else None
+    if match is None:
+        return None
+    done, total = match["done"], match["total"]
+    if total is None or not _bytes(total):
+        return None, f"{done}B"
+    return min(_bytes(done) / _bytes(total), 1.0), f"{done}/{total}"
+
+
+def format_elapsed(seconds: float) -> str:
+    return f"{int(seconds) // 60}:{int(seconds) % 60:02d}"
+
+
 def run_process(
     cmd: Sequence[str],
     env: Mapping[str, str],
@@ -935,12 +960,14 @@ def run_process(
 
     def reader() -> None:
         for line in proc.stdout or ():  # universal newlines also split tqdm's \r updates
-            if line.strip():
-                lines.put(line.strip())
+            if line := ANSI_ESCAPE.sub("", line).strip():
+                lines.put(line)
 
     thread = threading.Thread(target=reader, daemon=True)
     thread.start()
+    started = time.monotonic()
     last = ""
+    bar: tuple[float | None, str] | None = None  # the latest hf byte bar, held between its bursty updates
     while proc.poll() is None:
         if cancel.is_set():
             kill_tree(proc, env)
@@ -949,7 +976,12 @@ def run_process(
             last = lines.get()
             LOGGER.debug("%s", last)
             tail = [*tail[-19:], last]
-        report(poll() if poll else None, last[-100:])
+            bar = download_progress(last) or bar
+        if bar is None:
+            report(poll() if poll else None, last[-100:])
+        else:
+            fraction = bar[0] if bar[0] is not None or poll is None else poll()
+            report(fraction, f"{bar[1]} · {format_elapsed(time.monotonic() - started)}")
         time.sleep(0.3)
     thread.join(timeout=5)
     while not lines.empty():
@@ -1071,6 +1103,7 @@ class Installer:
             return min(dir_size(cache) / total, 1.0) if total else None
 
         env = isolated_env(self.env, self.paths)
+        env["TQDM_POSITION"] = "-1"  # hf 1.2.1 then prints its aggregate byte bar through the pipe
         if token:
             env["HF_TOKEN"] = token
         self.runner(model_command(self.paths, spec, force=self.clean), env, report, self.cancel, poll)
