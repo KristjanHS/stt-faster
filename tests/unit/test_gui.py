@@ -12,6 +12,7 @@ import pytest
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.processor import TranscriptionProcessor
+from backend.progress import ProgressEvent
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
@@ -29,6 +30,7 @@ from backend.gui import (
     build_command,
     build_env,
     default_app_paths,
+    describe_progress,
     diarization_available,
     diarization_failure,
     extras_install_hint,
@@ -189,7 +191,7 @@ def test_build_env_points_hf_caches_at_installed_models_over_inherited(tmp_path:
 
 
 def _py_env() -> dict[str, str]:
-    return {"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1"}
+    return {"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", "STT_PROGRESS": "1"}
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="exercises the XDG branch")
@@ -512,3 +514,8 @@ def test_windowless_app_writes_its_streams_to_the_gui_log(tmp_path: Path) -> Non
     before = vars(console).copy()
     attach_missing_streams(tmp_path / "unused.log", console)
     assert vars(console) == before and not (tmp_path / "unused.log").exists()
+
+
+def test_describe_progress_shows_whole_job_percent_and_stage() -> None:
+    event = ProgressEvent(file=2, files=4, stage="transcribe", done=30.0, total=60.0)
+    assert describe_progress(event) == "38% · File 2/4 · Transcribing"

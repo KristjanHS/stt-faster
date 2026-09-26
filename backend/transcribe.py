@@ -50,6 +50,7 @@ from backend.model_loader import ModelLoader
 from backend.preprocess import PreprocessConfig, preprocess_audio
 from backend.preprocess.config import TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult
+from backend.progress import REPORTER, ProgressReporter
 
 if TYPE_CHECKING:
     from faster_whisper import Segment, TranscriptionInfo
@@ -450,6 +451,7 @@ def _collect_segments(
     logprob_threshold: float,
     total_audio_duration: float | None,
     transcribe_start: float,
+    reporter: ProgressReporter = REPORTER,
 ) -> tuple[list[Dict[str, Any]], int, list[Dict[str, Any]]]:
     """Drain the faster-whisper segment iterator into a payload list + skip stats.
 
@@ -500,6 +502,10 @@ def _collect_segments(
             start_time=transcribe_start,
             last_log_time=last_progress_log,
         )
+        reporter.advance("transcribe", audio_processed, total_audio_duration)
+
+    # The loop's last advance usually falls inside the throttle window; land the file at its end.
+    reporter.advance("transcribe", total_audio_duration or audio_processed, total_audio_duration, force=True)
 
     return segment_payloads, no_speech_skips, no_speech_skip_windows
 

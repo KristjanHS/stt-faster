@@ -28,6 +28,7 @@ from typing import Any
 
 from backend.config import setup_logging
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
+from backend.progress import PROGRESS_ENV, ProgressEvent, parse_progress
 
 LOGGER = logging.getLogger(__name__)
 
@@ -266,6 +267,7 @@ def build_env(
     env = dict(base)
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
+    env[PROGRESS_ENV] = "1"
     if device:
         env["STT_DEVICE"] = device
     if ffmpeg_bin is not None and ffmpeg_bin.is_dir():
@@ -275,6 +277,16 @@ def build_env(
     if hf_token:
         env["HF_TOKEN"] = hf_token  # secret: never log env
     return env
+
+
+RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
+_STAGE_LABELS = {"prepare": "Preparing", "transcribe": "Transcribing"}
+
+
+def describe_progress(event: ProgressEvent) -> str:
+    """One status line for ``event``: overall percent, file position, stage."""
+    stage = _STAGE_LABELS.get(event.stage, event.stage.capitalize())
+    return f"{event.overall_fraction:.0%} · File {event.file}/{event.files} · {stage}"
 
 
 def find_outputs(work_dir: Path, staged: Mapping[str, Path]) -> dict[Path, Path | None]:
@@ -450,7 +462,7 @@ def run_job(
         delivered = run.delivered
         if speakers_on and run.missing and run.diarization_error is not None:
             LOGGER.warning("Diarization failed; retrying %d file(s) without speakers", len(run.missing))
-            on_line("Retrying without speaker identification…")
+            on_line(f"{RETRY_PREFIX} without speaker identification…")
             speakers_on = False
             result.speakers_skipped = run.diarization_error
             run = once(run.missing, False)
@@ -462,7 +474,7 @@ def run_job(
     first = attempt(files, device)
     if device != "cpu" and result.missing and not first:
         LOGGER.warning("No transcripts on device=%s; retrying once on CPU", device or "auto")
-        on_line("Retrying on CPU…")
+        on_line(f"{RETRY_PREFIX} on CPU…")
         if attempt(result.missing, "cpu"):
             write_config_value(paths.config_file, "device", "cpu")
             result.fell_back_to_cpu = True
@@ -565,8 +577,10 @@ class TranscribeApp:
         self.open_button = ttk.Button(action_row, text="Open result", command=self.open_result, state="disabled")
         self.open_button.pack(side="left")
 
+        self.detail = ttk.Label(frame, text="")
+        self.detail.pack(anchor="w", pady=(8, 0))
         self.status = ttk.Label(frame, text="", foreground="gray")
-        self.status.pack(anchor="w", pady=(8, 0))
+        self.status.pack(anchor="w", pady=(4, 0))
         self.banner = ttk.Label(frame, text="", foreground="#b35c00", wraplength=420)
         self.banner.pack(anchor="w", pady=(4, 0))
 
@@ -634,6 +648,8 @@ class TranscribeApp:
         self.start_button.config(state="disabled")
         self.open_button.config(state="disabled")
         self.banner.config(text="")
+        self.detail.config(text="Starting…")
+        self.progress.config(mode="indeterminate", value=0)
         self.progress.start(12)
         self.running = True
         profile = GUI_PROFILES[self.language.get()]
@@ -688,16 +704,33 @@ class TranscribeApp:
             except queue.Empty:
                 self.root.after(100, self._poll)
                 return
-            if kind == "line" and str(payload).strip().lstrip("│╭╰─┃━"):  # skip Rich table borders
+            if kind == "line" and (event := parse_progress(str(payload))) is not None:
+                self._show_progress(event)
+            elif kind == "line" and str(payload).startswith(RETRY_PREFIX):
+                self.status.config(text=str(payload))
+                self.detail.config(text=str(payload))
+                self.progress.config(mode="indeterminate", value=0)
+                self.progress.start(12)
+            elif kind == "line" and str(payload).strip().lstrip("│╭╰─┃━"):  # skip Rich table borders
                 self.status.config(text=str(payload)[-90:])
             elif kind in ("done", "error"):
                 self._finish(payload)
                 return
 
+    def _show_progress(self, event: ProgressEvent) -> None:
+        if str(self.progress.cget("mode")) != "determinate":
+            self.progress.stop()
+            self.progress.config(mode="determinate", maximum=1.0)
+        self.progress.config(value=event.overall_fraction)
+        self.detail.config(text=describe_progress(event))
+
     def _finish(self, payload: object) -> None:
         self.running = False
         self.proc = None
         self.progress.stop()
+        succeeded = isinstance(payload, JobResult) and payload.ok
+        self.progress.config(mode="determinate", maximum=1.0, value=1.0 if succeeded else 0)
+        self.detail.config(text="")
         self.start_button.config(state="normal")
         if isinstance(payload, JobResult) and payload.delivered:
             self.last_output_dir = payload.delivered[0].parent
