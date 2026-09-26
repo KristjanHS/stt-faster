@@ -131,7 +131,10 @@ def read_device(config_file: Path) -> str | None:
 
 
 def read_hf_token(token_file: Path) -> str:
-    return token_file.read_text(encoding="utf-8").strip() if token_file.is_file() else ""
+    try:  # utf-8-sig + OSError → "" mirror installer.setup_gui.read_hf_token (Notepad adds a BOM)
+        return token_file.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        return ""
 
 
 def diarization_available(
@@ -150,17 +153,24 @@ def extras_install_hint(paths: AppPaths) -> str | None:
     return None if paths.setup_exe.is_file() else EXTRAS_NEED_INSTALL_HINT
 
 
-def launch_detached(cmd: list[str]) -> None:
+def launch_detached(cmd: list[str], cwd: str) -> None:
     flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen(cmd, close_fds=True, creationflags=flags)  # noqa: S603  # nosec B603 - our own setup exe
+    subprocess.Popen(cmd, cwd=cwd, close_fds=True, creationflags=flags)  # noqa: S603  # nosec B603 - our own setup exe
 
 
-def save_and_install(paths: AppPaths, token: str, *, launch: Callable[[list[str]], None] = launch_detached) -> None:
+def save_and_install(
+    paths: AppPaths,
+    token: str,
+    *,
+    launch: Callable[[list[str], str], None] = launch_detached,
+    tempdir: Callable[[], str] = tempfile.gettempdir,
+) -> None:
     """Store the HF token, then hand over to ``Transcribe-Setup.exe --extras`` (caller quits)."""
     paths.token_file.parent.mkdir(parents=True, exist_ok=True)
     paths.token_file.touch(mode=0o600)
     paths.token_file.write_text(token.strip(), encoding="utf-8")
-    launch([str(paths.setup_exe), "--extras"])
+    # The shortcut starts us in venv\Scripts; setup inheriting that cwd would read as "app still open".
+    launch([str(paths.setup_exe), "--extras"], tempdir())
 
 
 def diarization_failure(line: str) -> str | None:

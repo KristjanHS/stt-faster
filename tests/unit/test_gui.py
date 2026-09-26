@@ -16,6 +16,8 @@ from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult
+from installer import setup_gui
+from backend import gui
 from backend.gui import (
     EXTRAS_NEED_INSTALL_HINT,
     GUI_PROFILES,
@@ -29,6 +31,7 @@ from backend.gui import (
     extras_install_hint,
     find_outputs,
     read_device,
+    read_hf_token,
     run_job,
     save_and_install,
     stage_files,
@@ -352,16 +355,39 @@ def test_identify_speakers_hidden_when_pyannote_parent_is_missing(paths: AppPath
 
 
 def test_save_and_install_writes_token_then_launches_setup_extras(paths: AppPaths) -> None:
-    launched: list[list[str]] = []
+    launched: list[tuple[list[str], str]] = []
 
-    def launch(cmd: list[str]) -> None:
+    def launch(cmd: list[str], cwd: str) -> None:
         assert paths.token_file.read_text(encoding="utf-8") == "hf_abc"  # saved before setup starts
-        launched.append(cmd)
+        launched.append((cmd, cwd))
 
     save_and_install(paths, "  hf_abc\n", launch=launch)
 
-    assert launched == [[str(paths.install_dir / "Transcribe-Setup.exe"), "--extras"]]
+    [(cmd, cwd)] = launched
+    assert cmd == [str(paths.install_dir / "Transcribe-Setup.exe"), "--extras"]
+    # The shortcut parks the app in venv\Scripts; setup inheriting that cwd sees the app as "still open".
+    assert not Path(cwd).resolve().is_relative_to(paths.install_dir / ".venv")
     assert paths.token_file == paths.config_file.parent / "hf_token"
+
+
+def test_read_hf_token_strips_bom_and_treats_unreadable_as_none(paths: AppPaths) -> None:
+    paths.token_file.parent.mkdir(parents=True)
+    paths.token_file.write_text("\ufeffhf_abc\r\n", encoding="utf-8")  # Notepad's UTF-8 BOM
+    assert read_hf_token(paths.token_file) == "hf_abc"
+    paths.token_file.unlink()
+    paths.token_file.mkdir()  # a directory: read_text raises OSError
+    assert read_hf_token(paths.token_file) == ""
+
+
+@pytest.mark.parametrize("plat", ["win32", "linux"])
+def test_app_and_installer_agree_on_shared_paths(tmp_path: Path, plat: str) -> None:
+    env = {k: str(tmp_path / k) for k in ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME", "XDG_CONFIG_HOME")}
+    app = gui.default_app_paths(env, plat)
+    setup = setup_gui.default_install_paths(env, plat)
+    assert gui.SETUP_EXE_NAME == setup_gui.SETUP_EXE_NAME
+    assert app.config_file == setup.config_file
+    assert app.token_file == setup.hf_token_file
+    assert app.setup_exe == setup.setup_copy
 
 
 def test_extras_install_disabled_without_setup_exe(paths: AppPaths) -> None:

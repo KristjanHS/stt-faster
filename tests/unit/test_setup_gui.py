@@ -6,12 +6,14 @@ import contextlib
 import io
 import logging
 import os
+import queue
 import sys
 import tarfile
 import threading
 import time
 import tomllib
 import urllib.error
+import urllib.request
 import zipfile
 from collections.abc import Callable
 from email.message import Message
@@ -23,6 +25,8 @@ import pytest
 
 from backend.gui import default_app_paths
 from installer.setup_gui import (
+    HF_AUTH_HELP,
+    HF_TOKEN_PROBE_URL,
     HF_TOOL_PINS,
     MODELS,
     UNINSTALL_KEY,
@@ -50,9 +54,11 @@ from installer.setup_gui import (
     extract_named,
     extract_zip_stripped,
     hf_hub_cache,
+    hf_token_status,
     is_installed,
     isolated_env,
     latest_release_zip,
+    launch_gui,
     model_cache_dir,
     model_command,
     parse_args,
@@ -616,7 +622,7 @@ class _ExtrasRun:
             seeder=lambda *_a: False,
             model_size=lambda *_a: None,
             launch=self.launches.append,
-            **kw,
+            **{"token_status": lambda _token: 200, **kw},
         )
 
     def events(self) -> Events:
@@ -693,6 +699,90 @@ def test_extras_waits_for_the_app_to_close_then_gives_up(paths: InstallPaths) ->
     with pytest.raises(InstallError, match="Close Transcribe first"):
         stuck.run(run.events())
     assert run.runs == [] and run.launches == []
+
+
+@pytest.mark.parametrize("status", [401, 403])
+def test_extras_rejected_token_fails_before_any_command(paths: InstallPaths, status: int) -> None:
+    run = _ExtrasRun(paths)
+    checked: list[str] = []
+
+    def token_status(token: str) -> int:
+        checked.append(token)
+        return status
+
+    with pytest.raises(InstallError) as caught:
+        run.installer(token_status=token_status).run(run.events())
+    assert str(caught.value) == HF_AUTH_HELP
+    assert checked == ["hf_abc"] and run.runs == [] and run.launches == []
+
+
+@pytest.mark.parametrize("status", [200, None], ids=["ok", "offline"])
+def test_extras_token_check_only_blocks_on_a_refusal(paths: InstallPaths, status: int | None) -> None:
+    run = _ExtrasRun(paths)
+    assert run.installer(token_status=lambda _t: status).run(run.events()) is True
+    assert len(run.runs) == 2 and run.launches == [paths]
+
+
+def test_hf_token_status_heads_the_gated_config_with_the_token() -> None:
+    seen: list[urllib.request.Request] = []
+
+    def answer(outcome: Any) -> Callable[..., Any]:
+        def urlopen(request: urllib.request.Request, *, timeout: float) -> Any:
+            seen.append(request)
+            if isinstance(outcome, BaseException):
+                raise outcome
+            return contextlib.nullcontext(SimpleNamespace(status=outcome))
+
+        return urlopen
+
+    refused = urllib.error.HTTPError(HF_TOKEN_PROBE_URL, 401, "Unauthorized", Message(), None)
+    assert hf_token_status("hf_abc", urlopen=answer(refused)) == 401
+    assert hf_token_status("hf_abc", urlopen=answer(urllib.error.URLError("offline"))) is None
+    assert hf_token_status("hf_abc", urlopen=answer(TimeoutError())) is None
+    assert hf_token_status("hf_abc", urlopen=answer(200)) == 200
+    request = seen[0]
+    assert (request.get_method(), request.full_url) == ("HEAD", HF_TOKEN_PROBE_URL)
+    assert request.get_header("Authorization") == "Bearer hf_abc"
+    assert HF_TOKEN_PROBE_URL.startswith(f"https://huggingface.co/{DIARIZATION_MODEL.repo_id}/")
+
+
+def test_setup_opens_the_app_outside_its_venv(
+    paths: InstallPaths, popen_calls: list[tuple[Any, dict[str, Any]]], popen: Callable[..., None]
+) -> None:
+    launch_gui(paths, popen=popen)
+    ((args, kw),) = popen_calls
+    assert args == [str(paths.gui_exe)]
+    assert not Path(kw["cwd"]).is_relative_to(paths.venv_dir)
+
+
+class _FakeLabel:
+    def __init__(self) -> None:
+        self.text = ""
+
+    def config(self, **kw: Any) -> None:
+        self.text = kw.get("text", self.text)
+
+
+def test_pre_task_error_stays_in_the_final_summary(paths: InstallPaths) -> None:
+    def run(_events: Events) -> bool:
+        raise InstallError("Close Transcribe first, then retry.")
+
+    summary = _FakeLabel()
+    window = SimpleNamespace(
+        installer=SimpleNamespace(run=run, extras=False, paths=paths),
+        events=queue.Queue(),
+        failure="",
+        running=True,
+        rows={},
+        summary=summary,
+        install_button=_FakeLabel(),
+        root=_FakeTk(),
+    )
+    window._finished = lambda ok: SetupWindow._finished(cast(Any, window), ok)
+    SetupWindow._work(cast(Any, window), Events(progress=lambda *_a: None, state=lambda *_a: None))
+    SetupWindow._poll(cast(Any, window))
+    assert "Close Transcribe first, then retry." in summary.text
+    assert summary.text.startswith("Setup did not finish.") and str(paths.log_file) in summary.text
 
 
 class _FakeTk:
