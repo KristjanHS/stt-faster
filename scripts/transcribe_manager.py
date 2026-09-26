@@ -100,7 +100,7 @@ def create_parser() -> argparse.ArgumentParser:
         dest="diarize",
         action="store_true",
         default=True,
-        help="Run pyannote speaker diarization (default: enabled). Requires HF_TOKEN.",
+        help="Run pyannote speaker diarization (default: enabled). Needs the local model: make diarization-model.",
     )
     process_parser.add_argument(
         "--no-diarize",

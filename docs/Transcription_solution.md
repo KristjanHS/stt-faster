@@ -9,7 +9,7 @@ The system provides automated batch transcription of audio files with:
 - **Variant system** (16 pre-configured combinations of preprocessing and transcription parameters)
 - **Automatic file management** (processed/failed folder organization)
 - **Run log** (JSONL append-only history and metrics)
-- **Speaker diarization** (default-on; pyannote.audio with 2 speakers; see [docs/diarization_setup.md](diarization_setup.md))
+- **Speaker diarization** (default-on; pyannote.audio with 2 speakers; local pinned model, no HF token; see [docs/diarization_setup.md](diarization_setup.md))
 - **Flexible output formats** (TXT — default, with timestamps and speaker labels; JSON; or both)
 
 ## Models
@@ -108,7 +108,7 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 - `--preset`: Model preset (`turbo`, `distil`, `large8gb`, `et-large`, `et-32`, `small`)
 - `--language`: Force language code (e.g., `en`, `et`, `ru`). Auto-detect if not specified
 - `--output-format`: Output format (`txt`, `json`, `both`) - default: `txt`
-- `--diarize` / `--no-diarize`: Speaker diarization toggle - default: `--diarize` (requires HF_TOKEN; see [docs/diarization_setup.md](diarization_setup.md))
+- `--diarize` / `--no-diarize`: Speaker diarization toggle - default: `--diarize` (needs the local speaker model, `make diarization-model`; see [docs/diarization_setup.md](diarization_setup.md))
 - `--num-speakers N`: Expected speaker count - default: `2`
 - `--variant`: Variant number (1-16) - default: uses standard configuration
 
@@ -174,7 +174,7 @@ Core dependencies (in `pyproject.toml`):
 
 **Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch`, `torchaudio` and `pyannote.audio` live **in the extras, not in base deps**; the base closure has no torch (guarded by `tests/unit/test_lean_deps.py`). A single `uv.lock` holds both resolutions.
 
-**Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **A sync with no `cpu`/`cu130` extra is the lean install** (Windows GUI: `--extra gui`) — no torch, no pyannote; `--diarize` warns and is skipped.
+**Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **A sync with no `cpu`/`cu130` extra is the lean install** (the Windows installer always adds `--extra cpu`) — no torch, no pyannote; `--diarize` warns and is skipped.
 
 **Why not the rejected alternatives** (load-bearing — surfaces when reconsidering the layout):
 

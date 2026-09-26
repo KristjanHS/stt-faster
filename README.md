@@ -18,10 +18,10 @@ Download [Transcribe-Setup.exe](https://github.com/KristjanHS/stt-faster/release
 
 Open it straight from the browser. Afterwards, update or remove the app with Start ▸ Transcribe ▸ **Repair** / **Uninstall**: Smart App Control may block opening the downloaded file again.
 
-**Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It only downloads what it needs:
+**Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Only the installer downloads, and only what it needs:
 
-- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages) and huggingface.co (speech models); enabling diarization also downloads torch from download.pytorch.org.
-- App: huggingface.co (speech models; the diarization model with your own HF token) and raw.githubusercontent.com (the RNNoise noise-reduction model). No telemetry (pyannote's usage metrics are switched off), no update checks.
+- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages), download.pytorch.org (torch), huggingface.co (the Whisper speech models and the speaker model from its ungated, revision-pinned mirror; no account or token) and raw.githubusercontent.com (the RNNoise noise-reduction model).
+- App: no network calls while transcribing; every model loads from disk. No telemetry (pyannote's usage metrics are switched off), no update checks. Model attributions: [NOTICE](NOTICE).
 
 ## License
 
@@ -55,7 +55,7 @@ Generate requirements.txt based on uv.lock: `make export-reqs` (writes `requirem
 
 ## Command-line transcription
 
-Batch audio transcription with Estonian (default) and English models, with speaker diarization on by default. [Technical details →](docs/Transcription_solution.md) · [Diarization setup (HF token) →](docs/diarization_setup.md)
+Batch audio transcription with Estonian (default) and English models, with speaker diarization on by default. [Technical details →](docs/Transcription_solution.md) · [Speaker model setup →](docs/diarization_setup.md)
 
 ### Quick Start
 
@@ -84,8 +84,9 @@ Batch audio transcription with Estonian (default) and English models, with speak
 Run stt-faster in Docker without installing Python or dependencies:
 
 ```bash
-# Build production image (one time)
+# Build production image (one time); fetch the speaker + RNNoise models on the host
 make docker-build-prod
+make diarization-model rnnoise-model
 
 # Process audio files using Docker wrapper
 ./scripts/transcribe-docker process /path/to/audio --preset turbo
@@ -96,6 +97,8 @@ docker run --rm \
   -v ~/.cache/hf:/home/appuser/.cache/hf \
   stt-faster:latest process /workspace/audio --preset turbo
 ```
+
+The image carries no models: pass the speaker and RNNoise models as read-only mounts, see [docs/diarization_setup.md § Docker](docs/diarization_setup.md#docker).
 
 **Features:**
 - ✅ No Python installation required
