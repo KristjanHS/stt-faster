@@ -124,6 +124,12 @@ DIARIZATION_SHA256 = {
         "325f1ce8e48f7e55e9c8aa47e05d2766b7c48c4b25b8de8dd751e7a4cc5fbe8f"  # pragma: allowlist secret
     ),
 }
+# RNNoise denoiser weights, pinned; mirrors scripts/prefetch_models.py (drift-tested).
+RNNOISE_URL = (
+    "https://raw.githubusercontent.com/GregorR/rnnoise-models/"
+    "3eee541a283fd3b8f81b85b1748e3b9ccbefa04d/somnolent-hogwash-2018-09-01/sh.rnnn"  # pragma: allowlist secret
+)
+RNNOISE_SHA256 = "70bb6685eb0c2a1d18e2918dca3fbfbd39317010b1802eb1b6ea73a92f3fdec0"  # pragma: allowlist secret
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")  # tqdm's cursor-up between stacked bars
 DOWNLOAD_BAR = re.compile(r"(?P<done>\d+(?:\.\d+)?[kMGT]?)B?(?:/(?P<total>\d+(?:\.\d+)?[kMGT]?)B?)? \[\d+:\d")
 ELAPSED_SUFFIX = re.compile(r" · \d+:\d\d(?= \(|$)")
@@ -161,6 +167,10 @@ class InstallPaths:
     @property
     def hf_home(self) -> Path:
         return self.install_dir / "hf"
+
+    @property
+    def rnnoise_model(self) -> Path:
+        return self.install_dir / "models" / "sh.rnnn"  # backend/gui.py AppPaths mirrors this
 
     @property
     def uv_cache(self) -> Path:
@@ -291,17 +301,22 @@ def expected_model_size(spec: ModelSpec, fetch_json: Callable[[str], Any]) -> in
     return sum(sizes) or None
 
 
+def file_sha256(path: Path) -> str | None:
+    """The file's sha256 hex digest, or None when it can't be read."""
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
 def verify_snapshot(snapshot: Path, sha256: Mapping[str, str]) -> None:
     """Missing or wrong file: remove the snapshot (and that file's blob) so a rerun downloads it again."""
     for name, expected in sha256.items():
-        digest = hashlib.sha256()
-        try:
-            with (snapshot / name).open("rb") as handle:
-                for chunk in iter(lambda: handle.read(1 << 20), b""):
-                    digest.update(chunk)
-        except OSError:
-            pass  # missing: the empty digest below never matches a pinned hash
-        if digest.hexdigest() == expected:
+        if file_sha256(snapshot / name) == expected:  # missing: None never matches a pinned hash
             continue
         LOGGER.warning("%s: sha256 mismatch, removing %s", name, snapshot)
         blob = (snapshot / name).resolve()  # hf links snapshot files into blobs/, which hf download would reuse
@@ -1356,13 +1371,15 @@ class Installer:
     gpu: bool | None = None  # the device to save; None keeps the saved one
     detect: Callable[[Mapping[str, str]], GpuInfo | None] = detect_gpu
     verify: Callable[[Path, Mapping[str, str]], None] = verify_snapshot
+    downloader: Callable[[str, Path, Callable[[int, int | None], None], threading.Event], None] = download
+    rnnoise_sha256: str = RNNOISE_SHA256
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
         def on_progress(done: int, total: int | None) -> None:
             text = f"{done / 1e6:.0f} / {total / 1e6:.0f} MB" if total else f"{done / 1e6:.0f} MB"
             report(done / total if total else None, text)
 
-        download(url, dest, on_progress, self.cancel)
+        self.downloader(url, dest, on_progress, self.cancel)
 
     def fetch_uv(self, report: Report) -> None:
         if self.paths.uv_exe.is_file() and not self.clean:
@@ -1464,6 +1481,21 @@ class Installer:
         cache = model_cache_dir(self.paths.hf_home / "hub", DIARIZATION_MODEL.repo_id)
         self.verify(cache / "snapshots" / DIARIZATION_MODEL.revision, DIARIZATION_SHA256)
 
+    def fetch_rnnoise(self, report: Report) -> None:
+        """Download + verify the pinned sh.rnnn; the file appears only once it verifies (a verified one is kept)."""
+        dest = self.paths.rnnoise_model
+        if file_sha256(dest) == self.rnnoise_sha256:
+            report(1.0, "already present")
+            return
+        staged = dest.with_name(dest.name + ".new")
+        try:
+            self._download_step(RNNOISE_URL, staged, report)
+            if file_sha256(staged) != self.rnnoise_sha256:
+                raise InstallError("RNNoise model: corrupt download — rerun setup")
+            staged.replace(dest)
+        finally:
+            staged.unlink(missing_ok=True)
+
     def tasks(self) -> list[Task]:
         model = DIARIZATION_MODEL.repo_id
         tasks = [
@@ -1476,6 +1508,7 @@ class Installer:
             label = f"Model: {spec.repo_id.split('/', 1)[1]}"
             tasks.append(Task(spec.repo_id, label, lambda r, s=spec: self.fetch_model(s, r), needs=("uv",)))
         tasks.append(Task(model, f"Model: {model.split('/', 1)[1]}", self.fetch_diarization, needs=("uv",)))
+        tasks.append(Task("rnnoise", "Model: RNNoise", self.fetch_rnnoise))
         tasks.append(Task("deps", "Python + libraries", self.install_deps, needs=("uv", "app")))
         tasks.append(Task("finish", "Shortcuts", self.finish, needs=tuple(t.key for t in tasks)))
         return tasks
