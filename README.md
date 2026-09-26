@@ -6,7 +6,8 @@
 
 **[⬇ Download Transcribe-Setup.exe (latest, Windows)](https://github.com/KristjanHS/stt-faster/releases/latest/download/Transcribe-Setup.exe)** · [What's new](https://github.com/KristjanHS/stt-faster/releases/latest) · [All releases](https://github.com/KristjanHS/stt-faster/releases)
 
- repo for speech to text using faster-whisper HF model
+Turns speech recordings into text on your own computer — Estonian by default, English too.
+ _(Developers: jump to [For developers](#for-developers).)_
 
 ## Windows app (no technical setup)
 
@@ -15,11 +16,29 @@ Download [Transcribe-Setup.exe](https://github.com/KristjanHS/stt-faster/release
 1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
 2. Blue *Windows protected your PC* screen: click **More info → Run anyway**.
 
+## Code signing policy
+
+Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The Windows installer is built from source by the `.github/workflows/release-installer.yml` workflow, which submits it to SignPath for signing (pending approval — until then it is unsigned).
+
+- Committers and reviewers: [KristjanHS](https://github.com/KristjanHS)
+- Approvers: [KristjanHS](https://github.com/KristjanHS)
+
+**Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It only downloads what it needs:
+
+- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages) and huggingface.co (speech models); enabling diarization also downloads torch from download.pytorch.org.
+- App: huggingface.co (speech models; the diarization model with your own HF token) and raw.githubusercontent.com (the RNNoise noise-reduction model). No telemetry (pyannote's usage metrics are switched off), no update checks.
+
+## License
+
+MIT License - see [LICENSE](LICENSE) file.
+
 ---
 
-## For developers only — what you need to build from source
+# For developers
 
-_Just want to transcribe on Windows? You need none of this — use the [Windows app](#windows-app-no-technical-setup) above._
+_Everything below is for building, testing or running stt-faster from source — not needed to use the [Windows app](#windows-app-no-technical-setup)._
+
+## Requirements
 
 - uv (https://astral.sh/uv) or pip
  - Docker & Docker Compose
@@ -28,7 +47,7 @@ _Just want to transcribe on Windows? You need none of this — use the [Windows 
 
 ---
 
-## Quick Start
+## Dev setup
 
 - Create .venv and install dev/test toolchain (editable install, **CPU torch wheels by default**): `./run_uv.sh`
 - GPU users: `make use-gpu` once per machine (writes `.stt-variant.local`), then `./run_uv.sh`. `make use-cpu` to switch back; `make show-variant` to check. Mechanism: uv extras `cpu` / `cu130` — see `docs/Transcription_solution.md` § "CPU / GPU install variants".
@@ -39,7 +58,7 @@ _Just want to transcribe on Windows? You need none of this — use the [Windows 
 - Fallback to pip/venv:
 Generate requirements.txt based on uv.lock: `make export-reqs` (writes `requirements.txt` for CPU and `requirements-gpu.txt` for the `cu130` extra).
 
-## Audio Transcription
+## Command-line transcription
 
 Batch audio transcription with Estonian (default) and English models, with speaker diarization on by default. [Technical details →](docs/Transcription_solution.md) · [Diarization setup (HF token) →](docs/diarization_setup.md)
 
@@ -136,19 +155,3 @@ If outbound network is unavailable and required wheels are not already cached, u
 - **Where to look:**
   - `Makefile` targets listed above; interpreter selection and `--pythonpath` wiring.
   - `.github/workflows/python-lint-test.yml` environment no longer forces a venv name.
-
-## Code signing policy
-
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The Windows installer is built from source by the `.github/workflows/release-installer.yml` workflow, which submits it to SignPath for signing (pending approval — until then it is unsigned).
-
-- Committers and reviewers: [KristjanHS](https://github.com/KristjanHS)
-- Approvers: [KristjanHS](https://github.com/KristjanHS)
-
-**Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It only downloads what it needs:
-
-- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages) and huggingface.co (speech models); enabling diarization also downloads torch from download.pytorch.org.
-- App: huggingface.co (speech models; the diarization model with your own HF token) and raw.githubusercontent.com (the RNNoise noise-reduction model). No telemetry (pyannote's usage metrics are switched off), no update checks.
-
-## License
-
-MIT License - see [LICENSE](LICENSE) file.
