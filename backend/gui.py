@@ -735,8 +735,8 @@ class TranscribeApp:
         elif fraction is not None:
             if not determinate:
                 self.progress.stop()
-                self.progress.config(mode="determinate", maximum=1.0)
-            self.progress.config(value=fraction)
+                self.progress.config(mode="determinate")
+            self.progress.config(value=fraction * 100)  # default maximum=100; 1.0 makes the pulse jump end to end
         self.detail.config(text=describe_progress(event))
 
     def _finish(self, payload: object) -> None:
@@ -744,7 +744,7 @@ class TranscribeApp:
         self.proc = None
         self.progress.stop()
         succeeded = isinstance(payload, JobResult) and payload.ok
-        self.progress.config(mode="determinate", maximum=1.0, value=1.0 if succeeded else 0)
+        self.progress.config(mode="determinate", value=100 if succeeded else 0)
         self.detail.config(text="")
         self.start_button.config(state="normal")
         if isinstance(payload, JobResult) and payload.delivered:

@@ -654,6 +654,10 @@ class TestTranscribeDiarize:
     def test_executor_path_reports_the_same_stages(self, tmp_path: Path) -> None:
         from backend.variants.executor import _run_transcription  # pyright: ignore[reportPrivateUsage]  # noqa: PLC0415
 
+        def fake_runner(_audio_path: str, **kwargs: Any) -> list[Any]:
+            kwargs["on_progress"]("segmentation", None, None)
+            return []
+
         processed_path = tmp_path / "processed.wav"
         processed_path.write_text("data")
         info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
@@ -673,17 +677,18 @@ class TestTranscribeDiarize:
             can_track_skips=False,
             log_label="baseline",
             diarize=True,
-            diarize_runner=lambda _audio_path, **_kwargs: [],  # pyright: ignore[reportUnknownLambdaType]
+            diarize_runner=fake_runner,
             model_picker=lambda preset: model,  # noqa: ARG005
             reporter=reporter,
         )
 
-        assert [event.stage for line in lines if (event := parse_progress(line))] == [
-            "preprocess",
-            "load model",
-            "transcribe",
-            "transcribe",
-            "diarize",
+        assert [(event.stage, event.detail) for line in lines if (event := parse_progress(line))] == [
+            ("preprocess", None),
+            ("load model", None),
+            ("transcribe", None),
+            ("transcribe", None),
+            ("diarize", None),
+            ("diarize", "segmentation"),
         ]
 
     def test_transcribe_skips_annotate_when_diarize_false(self, tmp_path: Path) -> None:

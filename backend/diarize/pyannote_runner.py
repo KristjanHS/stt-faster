@@ -90,6 +90,15 @@ class _DiarizeProgressHook:
     def __exit__(self, *_exc: object) -> None:
         return None
 
+    def _forward(self, step_name: str, completed: int | None, total: int | None) -> None:
+        """Progress is advisory: a failing callback must not abort the diarization run."""
+        if self._on_progress is None:
+            return
+        try:
+            self._on_progress(step_name, completed, total)
+        except Exception:  # noqa: BLE001
+            LOGGER.debug("Diarization progress callback failed", exc_info=True)
+
     def __call__(
         self,
         step_name: str,
@@ -101,8 +110,7 @@ class _DiarizeProgressHook:
         now = self._clock()
         elapsed_min = (now - self._start_time) / 60
         if step_name != self._last_step:
-            if self._on_progress is not None:
-                self._on_progress(step_name, None, None)
+            self._forward(step_name, None, None)
             LOGGER.info(
                 "⌛ Diarization progress: %s, elapsed %.1f min",
                 step_name,
@@ -113,8 +121,7 @@ class _DiarizeProgressHook:
             return
         if completed is None or not total:
             return
-        if self._on_progress is not None:
-            self._on_progress(step_name, completed, total)
+        self._forward(step_name, completed, total)
         if (now - self._last_log_time) < PROGRESS_LOG_INTERVAL_SECONDS:
             return
         percent = min(completed / total * 100, 999.0)

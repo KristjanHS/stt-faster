@@ -521,3 +521,36 @@ def test_describe_progress_names_file_stage_and_substep() -> None:
     assert describe_progress(event) == "File 2/4 · Transcribing"
     event = ProgressEvent(file=1, files=3, stage="diarize", detail="embeddings")
     assert describe_progress(event) == "File 1/3 · Identifying speakers · embeddings"
+
+
+class _FakeBar:
+    def __init__(self) -> None:
+        self.options: dict[str, object] = {"mode": "indeterminate", "maximum": 100, "value": 0}
+        self.running = False
+
+    def cget(self, key: str) -> object:
+        return self.options[key]
+
+    def config(self, **options: object) -> None:
+        self.options.update(options)
+
+    def start(self, _interval: int) -> None:
+        self.running = True
+
+    def stop(self) -> None:
+        self.running = False
+
+
+def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
+    bar, detail = _FakeBar(), _FakeBar()
+    app = SimpleNamespace(progress=bar, detail=detail)
+    show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
+
+    show(app, ProgressEvent(1, 2, "transcribe", 30.0, 60.0))  # type: ignore[arg-type]
+    assert (bar.options["mode"], bar.options["value"], bar.running) == ("determinate", 50.0, False)
+    show(app, ProgressEvent(1, 2, "diarize"))  # type: ignore[arg-type]
+    assert (bar.options["mode"], bar.running) == ("indeterminate", True)
+    assert bar.options["maximum"] == 100  # at 1.0 ttk's pulse jumps end to end each tick
+    show(app, ProgressEvent(1, 2, "diarize", 1.0, 4.0, "embeddings"))  # type: ignore[arg-type]
+    assert (bar.options["mode"], bar.options["value"], bar.running) == ("determinate", 25.0, False)
+    assert detail.options["text"] == "File 1/2 · Identifying speakers · embeddings"
