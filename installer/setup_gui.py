@@ -929,9 +929,26 @@ def run_process(
         raise CommandFailed(tail[-1] if tail else f"exit code {proc.returncode}", "\n".join(tail))
 
 
-def launch_gui(paths: InstallPaths, *, popen: Callable[..., Any] = subprocess.Popen) -> None:
+def app_env(base: Mapping[str, str], bundle_dir: str | None = getattr(sys, "_MEIPASS", None)) -> dict[str, str]:
+    """base minus TCL_LIBRARY / TK_LIBRARY pointing into setup's own unpack dir, which is deleted when setup exits."""
+    if bundle_dir is None:
+        return dict(base)
+    return {
+        key: value
+        for key, value in base.items()
+        if key not in ("TCL_LIBRARY", "TK_LIBRARY") or not Path(value).is_relative_to(bundle_dir)
+    }
+
+
+def launch_gui(
+    paths: InstallPaths,
+    *,
+    popen: Callable[..., Any] = subprocess.Popen,
+    env: Mapping[str, str] | None = None,
+) -> None:
     # Never cwd inside the venv: a process parked in Scripts makes app_in_use report "open".
-    popen([str(paths.gui_exe)], cwd=str(paths.install_dir), creationflags=NO_WINDOW)
+    env = app_env(os.environ) if env is None else env
+    popen([str(paths.gui_exe)], cwd=str(paths.install_dir), creationflags=NO_WINDOW, env=dict(env))
 
 
 def open_file(
