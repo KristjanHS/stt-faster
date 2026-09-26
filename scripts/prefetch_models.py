@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pre-fetch Whisper models used by the Windows transcribe bats.
+"""Pre-fetch the Whisper models and the pinned speaker-diarization model.
 
 Downloads CT2 weights for the Estonian and English presets so the first
 transcription run on a fresh machine doesn't pay for ~3 GB of HuggingFace
@@ -10,21 +10,27 @@ Usage::
 
     .venv/Scripts/python scripts/prefetch_models.py    # Windows
     .venv/bin/python    scripts/prefetch_models.py    # Linux/WSL
+    .venv/bin/python    scripts/prefetch_models.py --diarization-only
 """
 
 from __future__ import annotations
 
+import argparse
 import logging
-import os
 import sys
 
+from backend.diarize.model import DIARIZATION_REPO, fetch_model
 from backend.transcribe import _get_cached_model_path, _get_estonian_model_path
 
 LOGGER = logging.getLogger("stt-faster.prefetch")
 
 ESTONIAN_MODEL = "TalTechNLP/whisper-large-v3-turbo-et-verbatim"
 ENGLISH_MODEL = "Systran/faster-distil-whisper-large-v3"
-PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
+
+
+def prefetch_diarization() -> None:
+    LOGGER.info("Prefetching speaker-diarization model: %s", DIARIZATION_REPO)
+    LOGGER.info("  -> %s", fetch_model())
 
 
 def prefetch_all() -> None:
@@ -36,55 +42,16 @@ def prefetch_all() -> None:
     en_path = _get_cached_model_path(ENGLISH_MODEL)
     LOGGER.info("  -> %s", en_path)
 
-    LOGGER.info("Prefetching pyannote diarization model: %s", PYANNOTE_MODEL)
-    pyannote_path = prefetch_pyannote(PYANNOTE_MODEL)
-    LOGGER.info("  -> %s", pyannote_path)
+    prefetch_diarization()
 
 
-def prefetch_pyannote(repo_id: str) -> str:
-    # Revision pin is required by Bandit B615 and must be a literal SHA in the
-    # snapshot_download() call (Bandit only accepts literal 40-char hex strings,
-    # not module constants or function parameters). Resolved from HF API 2026-05-21
-    # for pyannote/speaker-diarization-community-1.
-    # Cross-ref: backend/diarize/pyannote_runner.py uses Pipeline.from_pretrained
-    # without a revision pin — relies on the pyannote.audio lock to resolve a
-    # compatible snapshot. Keep this literal in sync if the model card updates.
-    from huggingface_hub import snapshot_download
-    from huggingface_hub.errors import HfHubHTTPError
-
-    from backend.diarize.errors import DiarizationConfigError
-
-    token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
-    if not token:
-        raise DiarizationConfigError(
-            f"HF_TOKEN is not set. The {repo_id} model is HuggingFace-gated; "
-            "see docs/diarization_setup.md for one-time token + model-license setup."
-        )
-    try:
-        return snapshot_download(
-            repo_id=repo_id,
-            token=token,
-            revision="3533c8cf8e369892e6b79ff1bf80f7b0286a54ee",  # pragma: allowlist secret
-        )
-    except HfHubHTTPError as exc:
-        status = getattr(exc.response, "status_code", None) if exc.response is not None else None
-        if status == 401:
-            raise DiarizationConfigError(
-                f"HF_TOKEN was rejected (401) fetching {repo_id}. "
-                "Verify the token at https://huggingface.co/settings/tokens; see docs/diarization_setup.md."
-            ) from exc
-        if status == 403:
-            raise DiarizationConfigError(
-                f"HuggingFace returned 403 for {repo_id}. Accept the model license at "
-                f"https://huggingface.co/{repo_id}; see docs/diarization_setup.md."
-            ) from exc
-        raise
-
-
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__.splitlines()[0] if __doc__ else None)
+    parser.add_argument("--diarization-only", action="store_true", help="fetch only the speaker model")
+    args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     try:
-        prefetch_all()
+        prefetch_diarization() if args.diarization_only else prefetch_all()
     except Exception:
         LOGGER.exception("Model prefetch failed")
         return 1

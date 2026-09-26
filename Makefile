@@ -8,7 +8,7 @@
 # Tests
 .PHONY: check unit integration e2e verify-variants
 # Audio
-.PHONY: preprocess-audio
+.PHONY: preprocess-audio diarization-model
 # Run log
 .PHONY: show-run show-runs
 # Reports
@@ -65,6 +65,7 @@ help:
 	@echo ""
 	@echo "  -- Audio --"
 	@echo "  preprocess-audio  - Run preprocessing on tests/test.mp3 (AUDIO=..., OUT=... to override)"
+	@echo "  diarization-model - Download + verify the pinned speaker model (no token)"
 	@echo ""
 	@echo "  -- Run log --"
 	@echo "  show-run          - Show run information (RUN_ID=... to specify, or shows latest)"
@@ -279,6 +280,9 @@ preprocess-audio:
 	OUT=$(if $(OUT),$(OUT),reports/preprocessed.wav); \
 	echo "Preprocessing $$SRC -> $$OUT"; \
 	STT_PREPROCESS_ENABLED=1 .venv/bin/python scripts/run_preprocess.py --input "$$SRC" --output "$$OUT"
+
+diarization-model:
+	.venv/bin/python scripts/prefetch_models.py --diarization-only
 
 # Show run information by ID or latest if no ID provided
 show-run:
