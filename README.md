@@ -17,7 +17,10 @@ Download [Transcribe-Setup.exe](https://github.com/KristjanHS/stt-faster/release
 
 ---
 
-## Prerequisites
+## For developers only — what you need to build from source
+
+_Just want to transcribe on Windows? You need none of this — use the [Windows app](#windows-app-no-technical-setup) above._
+
 - uv (https://astral.sh/uv) or pip
  - Docker & Docker Compose
  - Linux/WSL2
