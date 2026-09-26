@@ -37,7 +37,8 @@ if [[ "$1 $2" == "release list" ]]; then
   exit "${FAKE_GH_LIST_RC:-0}"
 fi
 if [[ "$1 $2" == "release view" ]]; then
-  [[ " ${FAKE_EXE_TAGS:-} " != *" $3 "* ]] || echo "Transcribe-Setup.exe"
+  # keep writing after the match: a grep -q consumer then races SIGPIPE, deterministically
+  [[ " ${FAKE_EXE_TAGS:-} " != *" $3 "* ]] || { echo "Transcribe-Setup.exe"; sleep 0.1; }
   echo "notes.txt"
 fi
 [[ "$1 $2" != "release delete-asset" ]] || exit "${FAKE_GH_DELETE_RC:-0}"
