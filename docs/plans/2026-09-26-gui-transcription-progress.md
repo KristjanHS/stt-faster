@@ -1,6 +1,6 @@
 # GUI transcription progress — structured channel
 
-**Status:** rungs 1–2 shipped; backlog below is unordered, re-pick after each rung.
+**Status:** rungs 1–3 shipped; backlog below is unordered, re-pick after each rung.
 
 ## Decision (2026-09-26)
 
@@ -33,10 +33,13 @@ Wire format: `@@progress {"file": 2, "files": 3, "stage": "diarize", "detail": "
   `backend.progress`); `ProgressReporter.substeps("diarize")` adapts it to `stage/advance(…, detail=step)`.
 - GUI: bar = `stage_fraction`, label `File 2/3 · Identifying speakers · embeddings`; `overall_fraction` removed.
 
+## Rung 3 (shipped) — stage ETA + terminal bar
+
+- GUI label appends `· ~6 min left` from `EtaEstimator`: the current stage's rate, after `ETA_MIN_SECONDS`; no wire change.
+- TTY stdout without `STT_PROGRESS` → `RichProgressBar` replaces the `⌛` log lines; piped output unchanged.
+
 ## Backlog
 
-- **ETA** — the GUI measures the rate of `done` against wall time per file → `~6 min left` for the current
-  file; the whole-job ETA needs the durations of later files (emit `durations` in `start_file`?).
+- **Whole-job ETA** — needs the durations of later files (emit `durations` in `start_file`); ruled out of rung 3.
 - **Retry file numbering** — a retry resets the bar to indeterminate with a `Retrying…` label, then counts
   `File 1/k` over the retried subset only; mapping back onto the original N would need the GUI to pass offsets.
-- **CLI terminal** — optional Rich progress bar rendered from the same reporter when stdout is a TTY.

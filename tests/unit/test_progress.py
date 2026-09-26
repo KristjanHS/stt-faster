@@ -2,12 +2,24 @@
 
 from __future__ import annotations
 
+import io
+import logging
 from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
+from rich.console import Console
 
-from backend.progress import MIN_INTERVAL_SECONDS, ProgressEvent, ProgressReporter, parse_progress
+from backend.progress import (
+    ETA_MIN_SECONDS,
+    MIN_INTERVAL_SECONDS,
+    EtaEstimator,
+    ProgressEvent,
+    ProgressReporter,
+    RichProgressBar,
+    format_eta,
+    parse_progress,
+)
 from backend.transcribe import _collect_segments  # pyright: ignore[reportPrivateUsage]
 from backend.variants.executor import _collect_executor_segments  # pyright: ignore[reportPrivateUsage]
 
@@ -22,7 +34,7 @@ class FakeClock:
 
 def _reporter(clock: FakeClock | None = None) -> tuple[ProgressReporter, list[str]]:
     lines: list[str] = []
-    return ProgressReporter(enabled=True, write=lines.append, clock=clock or FakeClock()), lines
+    return ProgressReporter(enabled=True, write=lines.append, clock=clock or FakeClock(), bar=None), lines
 
 
 def test_advance_is_throttled_but_stage_changes_are_not() -> None:
@@ -61,7 +73,7 @@ def test_substeps_name_each_step_and_force_its_last_point() -> None:
 
 def test_disabled_reporter_writes_nothing() -> None:
     lines: list[str] = []
-    reporter = ProgressReporter(enabled=False, write=lines.append)
+    reporter = ProgressReporter(enabled=False, write=lines.append, bar=None)
     reporter.start_file(1, 1)
     reporter.advance("transcribe", 1.0, 2.0)
     assert lines == []
@@ -108,3 +120,72 @@ def test_segment_loops_report_audio_seconds_and_land_the_file_at_its_end(
         ProgressEvent(1, 1, "transcribe", 40.0, 100.0),
         ProgressEvent(1, 1, "transcribe", 100.0, 100.0),  # forced end point despite the throttle
     ]
+
+
+class FakeBar:
+    def __init__(self) -> None:
+        self.events: list[ProgressEvent] = []
+        self.closed = False
+
+    def update(self, event: ProgressEvent) -> None:
+        self.events.append(event)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_bar_gets_events_without_the_gui_channel_and_is_closed_by_the_reporter() -> None:
+    bar, lines, clock = FakeBar(), [], FakeClock()
+    reporter = ProgressReporter(enabled=False, write=lines.append, clock=clock, bar=bar)
+    assert not reporter.draws_bar  # no file yet: a bare transcribe() keeps its ⌛ lines
+    reporter.start_file(1, 2)
+    clock.now += MIN_INTERVAL_SECONDS
+    reporter.advance("transcribe", 10.0, 100.0)
+    reporter.close()
+    assert (lines, reporter.draws_bar, bar.closed) == ([], True, True)
+    assert bar.events == [ProgressEvent(1, 2, "prepare"), ProgressEvent(1, 2, "transcribe", 10.0, 100.0)]
+
+
+def test_rich_bar_keeps_one_task_per_stage_and_pulses_on_a_bare_one() -> None:
+    bar = RichProgressBar(Console(file=io.StringIO(), force_terminal=True, width=100))
+    bar.update(ProgressEvent(1, 2, "transcribe", 30.0, 60.0))
+    bar.update(ProgressEvent(1, 2, "transcribe", 45.0, 60.0))
+    assert [(t.description, t.completed, t.total) for t in bar.progress.tasks] == [
+        ("File 1/2 · Transcribing", 45.0, 60.0)
+    ]
+    bar.update(ProgressEvent(1, 2, "diarize", detail="segmentation"))
+    assert [(t.description, t.total) for t in bar.progress.tasks] == [
+        ("File 1/2 · Identifying speakers · segmentation", None)
+    ]
+    bar.close()
+    assert bar.progress.tasks == []
+
+
+@pytest.mark.parametrize("collect", [_via_transcribe, _via_executor])
+@pytest.mark.parametrize("with_bar", [False, True])
+def test_terminal_bar_replaces_the_hourglass_log_lines(
+    collect: Callable[[list[Any], ProgressReporter], object], with_bar: bool, caplog: pytest.LogCaptureFixture
+) -> None:
+    reporter = ProgressReporter(enabled=False, clock=FakeClock(), bar=FakeBar() if with_bar else None)
+    reporter.files = reporter.file = 1
+    caplog.set_level(logging.INFO)
+    collect([SimpleNamespace(start=0.0, end=40.0, text="a", words=None)], reporter)
+    assert any("⌛" in r.getMessage() for r in caplog.records) is not with_bar
+
+
+def test_eta_extrapolates_the_stage_rate_after_a_warm_up_and_resets_per_stage() -> None:
+    eta = EtaEstimator()
+    assert eta.seconds_left(ProgressEvent(1, 1, "transcribe", 0.0, 90.0), now=100.0) is None
+    assert eta.seconds_left(ProgressEvent(1, 1, "transcribe", 10.0, 90.0), now=100.0 + ETA_MIN_SECONDS - 1) is None
+    assert eta.seconds_left(ProgressEvent(1, 1, "transcribe", 30.0, 90.0), now=110.0) == pytest.approx(20.0)
+    assert eta.seconds_left(ProgressEvent(1, 1, "diarize", 1.0, 4.0, "embeddings"), now=111.0) is None
+    assert eta.seconds_left(ProgressEvent(1, 1, "diarize", 3.0, 4.0, "embeddings"), now=121.0) == pytest.approx(5.0)
+    assert eta.seconds_left(ProgressEvent(1, 1, "diarize", 0.0, 4.0, "embeddings"), now=130.0) is None  # restart
+
+
+@pytest.mark.parametrize(
+    ("seconds", "text"),
+    [(20.0, "<1 min left"), (100.0, "~2 min left"), (59 * 60.0, "~59 min left"), (80 * 60.0, "~1 h 20 min left")],
+)
+def test_format_eta(seconds: float, text: str) -> None:
+    assert format_eta(seconds) == text

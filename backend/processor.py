@@ -179,14 +179,17 @@ class TranscriptionProcessor:
         failed = 0
         stats: list[FileProcessingStats] = []
 
-        for index, file_path in enumerate(file_paths, start=1):
-            reporter.start_file(index, len(file_paths))
-            result = self.process_file(file_path)
-            stats.append(result)
-            if result.status == "completed":
-                succeeded += 1
-            else:
-                failed += 1
+        try:
+            for index, file_path in enumerate(file_paths, start=1):
+                reporter.start_file(index, len(file_paths))
+                result = self.process_file(file_path)
+                stats.append(result)
+                if result.status == "completed":
+                    succeeded += 1
+                else:
+                    failed += 1
+        finally:
+            reporter.close()
 
         LOGGER.info(
             "Processing complete: %d succeeded, %d failed",
