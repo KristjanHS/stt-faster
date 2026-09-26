@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from functools import cache
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
+from typing import Any
 
 from backend.config import setup_logging
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
@@ -86,6 +87,20 @@ class AppPaths:
     @property
     def setup_exe(self) -> Path:
         return self.install_dir / SETUP_EXE_NAME
+
+    @property
+    def gui_log(self) -> Path:
+        return self.install_dir / "logs" / "gui.log"  # logs\ survives a partial uninstall, like setup.log
+
+
+def attach_missing_streams(log_file: Path, target: Any = sys) -> None:
+    """stt-faster-gui.exe runs windowless with no stdout/stderr; send both — and any crash traceback — to log_file."""
+    if target.stdout is not None and target.stderr is not None:
+        return
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    stream = open(log_file, "a", encoding="utf-8", buffering=1)  # noqa: SIM115  # lives as long as the app
+    target.stdout = target.stdout or stream
+    target.stderr = target.stderr or stream
 
 
 def default_app_paths(env: Mapping[str, str] | None = None, plat: str | None = None) -> AppPaths:
@@ -707,9 +722,11 @@ class TranscribeApp:
 
 
 def main() -> None:
+    paths = default_app_paths()
+    attach_missing_streams(paths.gui_log)
     setup_logging()
     root, dnd = _make_root()
-    TranscribeApp(root, dnd=dnd, paths=default_app_paths())
+    TranscribeApp(root, dnd=dnd, paths=paths)
     root.mainloop()
 
 
