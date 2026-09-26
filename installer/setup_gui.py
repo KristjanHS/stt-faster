@@ -58,6 +58,7 @@ MIN_GPU_DRIVER = (528, 33)  # CUDA 12.0 on Windows; newer cuBLAS 12.x runs via m
 MIN_GPU_VRAM_MIB = 4000  # ~4 GB; a misjudged GPU falls back to CPU (model load or the GUI's retry)
 GPU_EXTRA_SIZE = "1.2 GB"  # gpu-win wheels: cuBLAS + cuDNN 9.1
 UNINSTALL_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"  # HKCU: Apps & features, no admin
+DEVICE_SOURCE = "device_source"  # "user" (a setup pick) / "fallback" (the app's CPU retry); absent = a default
 UNINSTALL_TEMP_PREFIX = f"{APP_NAME}-uninstall-"
 DESKTOP_PS = "([Environment]::GetFolderPath('Desktop'))"
 PROGRAMS_PS = "([Environment]::GetFolderPath('Programs'))"
@@ -577,16 +578,22 @@ def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
         set_config_value(config_file, "device", device)
 
 
-def save_device(config_file: Path, gpu: bool | None) -> None:
-    """``gpu`` is the user's pick (new / clean install); None keeps the saved device (repair)."""
+def save_device(config_file: Path, gpu: bool | None, *, chosen: bool = False) -> None:
+    """None keeps the saved device; ``chosen`` marks a user's pick, which a later repair never pre-ticks over."""
     if gpu is None:
         ensure_device_config(config_file)
-    else:
-        set_config_value(config_file, "device", "cuda" if gpu else "cpu")
+        return
+    set_config_value(config_file, "device", "cuda" if gpu else "cpu")
+    if chosen:
+        set_config_value(config_file, DEVICE_SOURCE, "user")
 
 
-def initial_gpu_choice(info: GpuInfo | None, saved: str | None, *, fresh: bool) -> bool:
-    return gpu_capable(info) if fresh else saved == "cuda"
+def initial_gpu_choice(info: GpuInfo | None, saved: str | None, *, fresh: bool, source: str | None = None) -> bool:
+    """New / clean installs follow detection; a repair keeps the saved device, except that an unchosen ``cpu``
+    (v1.1.0 wrote one unasked) on a GPU-capable host starts ticked."""
+    if fresh:
+        return gpu_capable(info)
+    return saved == "cuda" or (not source and gpu_capable(info))
 
 
 @dataclass(frozen=True)
@@ -1046,7 +1053,8 @@ class Installer:
     close_timeout: float = 60.0  # the app quits right after starting --extras
     hf_token: str = field(default="", repr=False)  # read from hf_token_file when an --extras run starts
     token_status: Callable[[str], int | None] = hf_token_status
-    gpu: bool | None = None  # the user's pick for a new / clean install; None keeps the saved device
+    gpu: bool | None = None  # the device to save; None keeps the saved one
+    gpu_chosen: bool = False  # gpu came from the checkbox or --cpu, not from detection
     detect: Callable[[Mapping[str, str]], GpuInfo | None] = detect_gpu
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
@@ -1190,7 +1198,7 @@ class Installer:
         if self.clean:
             clean_install(self.paths)
         if not self.extras:  # before deps: device=cuda adds the gpu-win extra to the sync
-            save_device(self.paths.config_file, self.gpu)
+            save_device(self.paths.config_file, self.gpu, chosen=self.gpu_chosen)
         return run_tasks(self.tasks(), events)
 
 
@@ -1243,7 +1251,6 @@ class SetupWindow:
         self.use_gpu = tk.BooleanVar(value=False)
         self.gpu_check: ttk.Checkbutton | None = None
         self.gpu_info: GpuInfo | None = None
-        self.gpu_pick = False  # True: this run saves use_gpu; False: a repair keeps the saved device
         if installer.paths.windows and not installer.extras:
             self.gpu_info = installer.detect(installer.env)
             ttk.Label(frame, text=gpu_summary(self.gpu_info), wraplength=480).pack(anchor="w", pady=(8, 0))
@@ -1286,12 +1293,11 @@ class SetupWindow:
         self._sync_gpu_check()
 
     def _sync_gpu_check(self) -> None:
-        """New / clean installs pick the device; a repair shows the saved one, read-only."""
-        self.gpu_pick = self.mode.get() == "clean" or not is_installed(self.installer.paths)
-        saved = read_config(self.installer.paths.config_file).get("device")
-        self.use_gpu.set(initial_gpu_choice(self.gpu_info, saved, fresh=self.gpu_pick))
-        if self.gpu_check is not None:
-            self.gpu_check.config(state="normal" if self.gpu_pick else "disabled")
+        """Start the (always editable) checkbox from detection on new / clean installs, else the saved device."""
+        fresh = self.mode.get() == "clean" or not is_installed(self.installer.paths)
+        config = read_config(self.installer.paths.config_file)
+        saved, source = config.get("device"), config.get(DEVICE_SOURCE)
+        self.use_gpu.set(initial_gpu_choice(self.gpu_info, saved, fresh=fresh, source=source))
 
     def uninstall(self) -> None:
         if not self.dialogs().askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=self.root):
@@ -1310,7 +1316,8 @@ class SetupWindow:
         self.running = True
         self.failure = ""
         self.installer.clean = self.mode.get() == "clean"
-        self.installer.gpu = self.use_gpu.get() if self.gpu_pick else None  # kept on a same-window retry
+        self.installer.gpu = self.use_gpu.get() if self.gpu_check is not None else None  # kept on a retry
+        self.installer.gpu_chosen = self.gpu_check is not None
         self.installer.cancel.clear()
         self.install_button.config(state="disabled")
         self.summary.config(text="Installing…")
@@ -1411,11 +1418,11 @@ def headless_gpu(installer: Installer, *, cpu: bool) -> bool | None:
         return None
     if cpu:
         return False
-    if is_installed(installer.paths) and not installer.clean:
-        return None  # a repair keeps the saved device
     gpu = installer.detect(installer.env)
     LOGGER.info("%s", gpu_summary(gpu))
-    return gpu_capable(gpu)
+    config = read_config(installer.paths.config_file)
+    fresh = installer.clean or not is_installed(installer.paths)
+    return initial_gpu_choice(gpu, config.get("device"), fresh=fresh, source=config.get(DEVICE_SOURCE))
 
 
 def _setup_logging(log_file: Path | None, *, console: bool) -> None:
@@ -1457,6 +1464,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     installer = Installer(paths=paths, source=args.source, clean=args.clean, extras=args.extras)
     if args.headless:
         installer.gpu = headless_gpu(installer, cpu=args.cpu)
+        installer.gpu_chosen = args.cpu
         last: dict[str, str] = {}
 
         def progress(key: str, fraction: float | None, text: str) -> None:
