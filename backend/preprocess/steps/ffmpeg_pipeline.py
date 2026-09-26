@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import logging
-import os
 import time
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import urlparse
 
 import ffmpeg  # type: ignore[import-untyped, unused-ignore]
-import httpx
 
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import StepExecutionError
@@ -16,43 +13,17 @@ from backend.preprocess.metrics import StepMetrics
 
 LOGGER = logging.getLogger(__name__)
 
-# Default RNNoise model URL (fallback used when RNNOISE_MODEL_URL env not set)
-DEFAULT_RNNOISE_MODEL_URL = (
-    "https://raw.githubusercontent.com/GregorR/rnnoise-models/master/somnolent-hogwash-2018-09-01/sh.rnnn"
+RNNOISE_NOT_INSTALLED = (
+    "RNNoise model not installed at {path} — run `make rnnoise-model` (dev) or run setup again to repair (Windows)"
 )
 
 
 def _ensure_rnnoise_model(rnnoise_model: str | None) -> str | None:
-    """Ensure the RNNoise model file exists locally, downloading if necessary."""
+    """The model is prefetched at install time; transcription never downloads it."""
     if not rnnoise_model:
         return None
-
-    model_path = Path(rnnoise_model)
-    if model_path.exists():
-        return rnnoise_model
-
-    # Download the model if it doesn't exist
-    url = os.environ.get("RNNOISE_MODEL_URL") or DEFAULT_RNNOISE_MODEL_URL
-    model_path.parent.mkdir(parents=True, exist_ok=True)
-    LOGGER.info("RNNoise model not found at %s, downloading from %s", model_path, url)
-    try:
-        # Validate URL scheme - only allow http/https for security
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            raise ValueError(f"Unsafe URL scheme '{parsed.scheme}' in URL: {url}. Only http/https allowed.")
-        # Prefer HTTPS for secure downloads
-        if parsed.scheme == "http":
-            LOGGER.warning("Using HTTP instead of HTTPS for URL: %s", url)
-
-        # Use httpx with SSL verification enabled by default for secure downloads
-        with httpx.stream("GET", url, follow_redirects=True) as resp:
-            resp.raise_for_status()
-            with open(model_path, "wb") as out:
-                for chunk in resp.iter_bytes(chunk_size=16_384):
-                    out.write(chunk)
-    except Exception as exc:  # pragma: no cover - network I/O
-        raise StepExecutionError("ffmpeg_pipeline", f"failed to download rnnoise model: {exc}") from exc
-
+    if not Path(rnnoise_model).is_file():
+        raise StepExecutionError("ffmpeg_pipeline", RNNOISE_NOT_INSTALLED.format(path=rnnoise_model))
     return rnnoise_model
 
 

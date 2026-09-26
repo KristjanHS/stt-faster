@@ -6,7 +6,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from backend.preprocess.config import PreprocessConfig
-from backend.preprocess.steps.ffmpeg_pipeline import run_ffmpeg_pipeline
+from backend.preprocess.errors import StepExecutionError
+from backend.preprocess.steps.ffmpeg_pipeline import _ensure_rnnoise_model, run_ffmpeg_pipeline
 
 
 @pytest.fixture
@@ -220,3 +221,10 @@ def test_filter_order_3_phase_preprocessing(tmp_path: Path, default_rnnoise_mix:
     assert filters[1].startswith("aresample")
     assert filters[2].startswith("arnndn")
     assert filters[3].startswith("loudnorm")
+
+
+def test_missing_rnnoise_model_fails_without_downloading(tmp_path: Path) -> None:
+    missing = str(tmp_path / "models" / "sh.rnnn")
+    with pytest.raises(StepExecutionError, match="RNNoise model not installed"):
+        _ensure_rnnoise_model(missing)
+    assert not (tmp_path / "models").exists()

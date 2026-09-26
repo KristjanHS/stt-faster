@@ -8,7 +8,7 @@
 # Tests
 .PHONY: check unit integration e2e verify-variants
 # Audio
-.PHONY: preprocess-audio diarization-model
+.PHONY: preprocess-audio diarization-model rnnoise-model
 # Run log
 .PHONY: show-run show-runs
 # Reports
@@ -66,6 +66,7 @@ help:
 	@echo "  -- Audio --"
 	@echo "  preprocess-audio  - Run preprocessing on tests/test.mp3 (AUDIO=..., OUT=... to override)"
 	@echo "  diarization-model - Download + verify the pinned speaker model (no token)"
+	@echo "  rnnoise-model     - Download + verify the pinned RNNoise model to models/sh.rnnn"
 	@echo ""
 	@echo "  -- Run log --"
 	@echo "  show-run          - Show run information (RUN_ID=... to specify, or shows latest)"
@@ -283,6 +284,9 @@ preprocess-audio:
 
 diarization-model:
 	.venv/bin/python scripts/prefetch_models.py --diarization-only
+
+rnnoise-model:
+	.venv/bin/python scripts/prefetch_models.py --rnnoise-only
 
 # Show run information by ID or latest if no ID provided
 show-run:

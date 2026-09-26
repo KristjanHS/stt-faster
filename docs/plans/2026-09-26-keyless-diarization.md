@@ -109,7 +109,7 @@ Focus: `backend/gui.py`, `installer/setup_gui.py`.
 Focus: `backend/preprocess/steps/ffmpeg_pipeline.py` (:19-56), `scripts/prefetch_models.py`, `Makefile`, `installer/setup_gui.py`, `backend/gui.py` (`build_env`).
 
 - Runtime: `_ensure_rnnoise_model` only checks existence; missing → `StepExecutionError` "RNNoise model not installed — run `make rnnoise-model` (dev) or run setup again to repair (Windows)". Delete the httpx download and `RNNOISE_MODEL_URL`.
-- Pin: the URL at a GregorR/rnnoise-models commit SHA (not `master`) + sha256 of `sh.rnnn`. The executor derives both from one download, and a unit test pins them.
+- Pin (shipped in `scripts/prefetch_models.py`): commit `3eee541a283fd3b8f81b85b1748e3b9ccbefa04d`, 297 646 B, sha256 `70bb6685eb0c2a1d18e2918dca3fbfbd39317010b1802eb1b6ea73a92f3fdec0`. The installer copies these; a drift test pins them.
 - Dev: `prefetch_models.py --rnnoise-only` downloads + verifies to `models/sh.rnnn` (the `preprocess/config.py:172` default); `make rnnoise-model` wraps it; the default prefetch includes it.
 - Installer: new stdlib task "Model: RNNoise" downloads + verifies into `<install>/models/sh.rnnn`; `build_env` sets `STT_PREPROCESS_RNNOISE_MODEL` to that absolute path when it exists.
 - Tests: missing file → error with no network; installer task verify pass/fail with an injected fetcher; `build_env` sets the env var only when the file exists.
@@ -148,3 +148,4 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 - `[AUDIT]` plda/ licence (from the Rulings). The owner must confirm it before a public release. It does not block the code.
 - `[AUDIT]` The Stage 3 `HF_HUB_OFFLINE=1` assumes the installed Whisper snapshots have `refs/main` cached, which `hf download` writes. Stage 6 item 3 on Windows proves it.
 - `[AUDIT]` The Docker model path (Stage 5).
+- `[AUDIT]` RNNoise `sh.rnnn` licence: GregorR/rnnoise-models has no LICENSE file. The owner must confirm it before a public release.
