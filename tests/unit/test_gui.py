@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess  # nosec B404 - runs the test interpreter with a fixed argument list
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -542,6 +543,14 @@ def test_diarization_failure_parses_the_real_per_file_failure_log(
 
     reasons = [diarization_failure(record.getMessage()) for record in caplog.records]
     assert "HuggingFace returned 403" in reasons
+
+
+def test_gui_module_imports_without_stdout_or_stderr() -> None:
+    # pythonw.exe starts with sys.stdout/stderr = None, and attach_missing_streams only runs in main(): any import-time
+    # stream access in the GUI's import graph (progress.REPORTER's isatty() in v1.2.2) killed the app with no log.
+    code = "import sys; sys.stdout = sys.stderr = None; import backend.gui"
+    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)  # noqa: S603
+    assert result.returncode == 0
 
 
 def test_windowless_app_writes_its_streams_to_the_gui_log(tmp_path: Path) -> None:
