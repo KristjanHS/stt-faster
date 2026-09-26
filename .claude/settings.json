@@ -29,7 +29,6 @@
       "Read(**/.cache/**)",
       "Read(**/model_cache/**)",
       "Read(./docs/analysis/**)",
-      "Read(**/*.bat)",
       "Read(**/*.cmd)",
       "Read(./docs/variant_values*.txt)"
     ]
