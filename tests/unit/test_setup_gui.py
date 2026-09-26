@@ -54,6 +54,7 @@ from installer.setup_gui import (
     detect_gpu,
     ensure_device_config,
     expected_model_size,
+    fit_tail,
     gpu_capable,
     gpu_summary,
     headless_gpu,
@@ -1142,3 +1143,16 @@ def test_gpu_checkbox_shows_saved_device_on_repair(
     SetupWindow._sync_gpu_check(cast(Any, window))
     assert configured == {"state": state, "ticked": ticked}
     assert window.gpu_pick is (state == "normal")  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("pixels", "shown"),
+    [
+        (0, "0123456789"[-40:]),  # not laid out yet
+        (10, "0123456789"),  # fits as is
+        (5, "…6789"),  # keeps the newest end
+        (1_000, "0123456789"),  # a wider window shows it all
+    ],
+)
+def test_fit_tail_keeps_the_end_that_fits(pixels: int, shown: str) -> None:
+    assert fit_tail("0123456789", pixels, len) == shown
