@@ -35,14 +35,14 @@ jobs:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       EXE: dist/Transcribe-Setup.exe
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ env.TAG }}
           persist-credentials: false
           fetch-depth: 0 # the earlier release's tag for the installer/ diff
 
       # The workflow's own commit, not the tag's tree: a dry-run of an older tag predates the script.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.workflow_sha }}
           path: .ci
