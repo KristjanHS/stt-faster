@@ -1,6 +1,6 @@
 # Keyless, offline speaker diarization
 
-**Status:** Stages 1-6 shipped (Linux verify, network-off e2e, review fixes) — owner Windows eyeballs remain.
+**Status:** ✅ SHIPPED 2026-09-26 (0bb5968) — owner Windows eyeballs (Stage 6 item 4) tracked in project_state.
 
 "Identify speakers" should need no Hugging Face account or token. Model weights are fetched once at install time from an ungated, revision-pinned mirror, and at transcription time they load from a local dir only.
 
