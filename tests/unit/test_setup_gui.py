@@ -68,6 +68,7 @@ from installer.setup_gui import (
     launch_gui,
     model_cache_dir,
     model_command,
+    open_file,
     parse_args,
     read_config,
     register_uninstall,
@@ -770,12 +771,15 @@ class _FakeLabel:
     def config(self, **kw: Any) -> None:
         self.text = kw.get("text", self.text)
 
+    def pack(self, **_kw: Any) -> None:
+        self.shown = True
+
 
 def test_pre_task_error_stays_in_the_final_summary(paths: InstallPaths) -> None:
     def run(_events: Events) -> bool:
         raise InstallError("Close Transcribe first, then retry.")
 
-    summary = _FakeLabel()
+    summary, log_link = _FakeLabel(), _FakeLabel()
     window = SimpleNamespace(
         installer=SimpleNamespace(run=run, extras=False, paths=paths),
         events=queue.Queue(),
@@ -783,6 +787,7 @@ def test_pre_task_error_stays_in_the_final_summary(paths: InstallPaths) -> None:
         running=True,
         rows={},
         summary=summary,
+        log_link=log_link,
         install_button=_FakeLabel(),
         root=_FakeTk(),
     )
@@ -790,7 +795,17 @@ def test_pre_task_error_stays_in_the_final_summary(paths: InstallPaths) -> None:
     SetupWindow._work(cast(Any, window), Events(progress=lambda *_a: None, state=lambda *_a: None))
     SetupWindow._poll(cast(Any, window))
     assert "Close Transcribe first, then retry." in summary.text
-    assert summary.text.startswith("Setup did not finish.") and str(paths.log_file) in summary.text
+    assert summary.text.startswith("Setup did not finish.")
+    assert log_link.text == str(paths.log_file) and log_link.shown  # a clickable link to the log
+
+
+@pytest.mark.parametrize("windows", [True, False])
+def test_open_file_uses_the_platform_opener(tmp_path: Path, windows: bool) -> None:
+    started: list[str] = []
+    popened: list[list[str]] = []
+    open_file(tmp_path / "setup.log", windows=windows, popen=lambda cmd: popened.append(cmd), startfile=started.append)
+    log = str(tmp_path / "setup.log")
+    assert (started, popened) == (([log], []) if windows else ([], [["xdg-open", log]]))
 
 
 class _FakeTk:
