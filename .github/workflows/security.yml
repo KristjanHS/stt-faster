@@ -34,8 +34,11 @@ jobs:
           persist-credentials: false
 
       - name: Run Bandit Security Analysis
-        uses: PyCQA/bandit-action@v1
+        # Pinned past v1: the v1 tag runs Python 3.8 + bandit[sarif] (no toml extra),
+        # so it can't read pyproject.toml and writes an empty SARIF.
+        uses: PyCQA/bandit-action@320e3574f590bd44b4769384dcaf63a26346f189
         with:
+          python-version: "3.12"
           # Configuration file path (severity/confidence settings)
           # NOTE: Baseline is NOT used - CI will always report ALL issues, not just new ones
           configfile: pyproject.toml
