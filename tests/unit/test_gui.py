@@ -207,6 +207,14 @@ def test_build_env_points_hf_caches_at_installed_models_over_inherited(tmp_path:
     }  # installed: cache-only, and never a token
 
 
+def test_cli_env_points_rnnoise_at_the_installed_model_only_when_present(paths: AppPaths) -> None:
+    assert "STT_PREPROCESS_RNNOISE_MODEL" not in cli_env({}, paths, None)  # dev checkout: keep models/sh.rnnn
+    paths.rnnoise_model.parent.mkdir(parents=True)
+    paths.rnnoise_model.write_bytes(b"weights")
+    env = cli_env({}, paths, None)
+    assert env["STT_PREPROCESS_RNNOISE_MODEL"] == str(paths.install_dir / "models" / "sh.rnnn")
+
+
 def _py_env() -> dict[str, str]:
     return {"PYTHONIOENCODING": "utf-8", "PYTHONUNBUFFERED": "1", "STT_PROGRESS": "1"}
 

@@ -1,6 +1,6 @@
 # Keyless, offline speaker diarization
 
-**Status:** ready — Stage 1 next.
+**Status:** Stages 1-4 shipped (worktree-sec) — Stage 5 next.
 
 "Identify speakers" should need no Hugging Face account or token. Model weights are fetched once at install time from an ungated, revision-pinned mirror, and at transcription time they load from a local dir only.
 

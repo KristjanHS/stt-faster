@@ -84,6 +84,10 @@ class AppPaths:
         return self.install_dir / "hf"  # the installer's models; mirrors installer.setup_gui.InstallPaths
 
     @property
+    def rnnoise_model(self) -> Path:
+        return self.install_dir / "models" / "sh.rnnn"  # mirrors installer.setup_gui.InstallPaths
+
+    @property
     def gui_log(self) -> Path:
         return self.install_dir / "logs" / "gui.log"  # logs\ survives a partial uninstall, like setup.log
 
@@ -233,6 +237,7 @@ def build_env(
     device: str | None,
     ffmpeg_bin: Path | None,
     hf_home: Path | None = None,
+    rnnoise_model: Path | None = None,
 ) -> dict[str, str]:
     env = dict(base)
     env["PYTHONIOENCODING"] = "utf-8"
@@ -245,12 +250,16 @@ def build_env(
     if hf_home is not None and hf_home.is_dir():  # absent in a dev checkout: keep the user's own HF cache
         env.update(HF_HOME=str(hf_home), HF_HUB_CACHE=str(hf_home / "hub"), HF_XET_CACHE=str(hf_home / "xet"))
         env["HF_HUB_OFFLINE"] = "1"
+    if rnnoise_model is not None and rnnoise_model.is_file():  # absent in a dev checkout: keep models/sh.rnnn
+        env["STT_PREPROCESS_RNNOISE_MODEL"] = str(rnnoise_model)  # absolute: under the install dir
     return env
 
 
 def cli_env(base: Mapping[str, str], paths: AppPaths, device: str | None) -> dict[str, str]:
     """The env each CLI run gets; the speaker gate resolves the model from this same env."""
-    return build_env(base, device=device, ffmpeg_bin=paths.ffmpeg_bin, hf_home=paths.hf_home)
+    return build_env(
+        base, device=device, ffmpeg_bin=paths.ffmpeg_bin, hf_home=paths.hf_home, rnnoise_model=paths.rnnoise_model
+    )
 
 
 RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
