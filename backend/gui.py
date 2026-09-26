@@ -555,8 +555,9 @@ class TranscribeApp:
         frame = ttk.Frame(root, padding=16)
         frame.pack(fill="both", expand=True)
 
-        hint = "Drop audio files here\nor click to browse" if dnd else "Click to choose files"
-        self.zone = tk.Label(frame, text=hint, relief="groove", borderwidth=2, height=6, cursor="hand2")
+        self.zone = tk.Label(
+            frame, text="Click to choose files", relief="groove", borderwidth=2, height=6, cursor="hand2"
+        )
         self.zone.pack(fill="x")
         self.zone.bind("<Button-1>", lambda _e: self.browse())
         if dnd:
