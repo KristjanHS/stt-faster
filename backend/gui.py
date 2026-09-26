@@ -20,7 +20,7 @@ import threading
 import time
 import tkinter as tk
 from collections.abc import Callable, Iterable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -35,6 +35,7 @@ from backend.progress import (
     ProgressEvent,
     describe_progress,
     format_eta,
+    format_progress,
     parse_progress,
 )
 
@@ -290,6 +291,25 @@ def build_env(
 RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
 
 
+def renumber_progress(on_line: Callable[[str], None], *, skipped: int, files: int) -> Callable[[str], None]:
+    """Relay ``on_line`` with a retry's ``@@progress`` files counted as the last of the job's ``files``.
+
+    The CLI's scan order is not the GUI's list order, so a retry can't name its files' original
+    positions; it continues the count instead (``File 4/5`` for the first of 2 retried files).
+    """
+    if skipped <= 0:
+        return on_line
+
+    def relay(line: str) -> None:
+        event = parse_progress(line)
+        if event is None:
+            on_line(line)
+        else:  # durations index the retry's subset, not the job
+            on_line(format_progress(replace(event, file=event.file + skipped, files=files, durations=None)))
+
+    return relay
+
+
 def find_outputs(work_dir: Path, staged: Mapping[str, Path]) -> dict[Path, Path | None]:
     """Map each original file to its produced ``.txt`` in ``work_dir`` (None if missing).
 
@@ -455,7 +475,7 @@ def run_job(
                 timestamps=timestamps,
                 paths=paths,
                 runner=runner,
-                on_line=on_line,
+                on_line=renumber_progress(on_line, skipped=len(files) - len(files_now), files=len(files)),
                 base_env=env,
             )
 
@@ -582,6 +602,7 @@ class TranscribeApp:
         self.detail.pack(anchor="w", pady=(8, 0))
         self.eta = EtaEstimator()
         self.job_eta = JobEtaEstimator()
+        self.retrying = False
         self.clock: Callable[[], float] = time.monotonic
         self.status = ttk.Label(frame, text="", foreground="gray")
         self.status.pack(anchor="w", pady=(4, 0))
@@ -655,6 +676,7 @@ class TranscribeApp:
         self.detail.config(text="Starting…")
         self.eta = EtaEstimator()
         self.job_eta = JobEtaEstimator()
+        self.retrying = False
         self.progress.config(mode="indeterminate", value=0)
         self.progress.start(12)
         self.running = True
@@ -719,6 +741,7 @@ class TranscribeApp:
                 self.progress.start(12)
                 self.eta = EtaEstimator()
                 self.job_eta = JobEtaEstimator()
+                self.retrying = True
             elif kind == "line" and str(payload).strip().lstrip("│╭╰─┃━"):  # skip Rich table borders
                 self.status.config(text=str(payload)[-90:])
             elif kind in ("done", "error"):
@@ -737,7 +760,7 @@ class TranscribeApp:
                 self.progress.stop()
                 self.progress.config(mode="determinate")
             self.progress.config(value=fraction * 100)  # default maximum=100; 1.0 makes the pulse jump end to end
-        text = describe_progress(event)
+        text = describe_progress(event) + (" (retry)" if self.retrying else "")
         now = self.clock()
         stage_left = self.eta.seconds_left(event, now)
         if (job_left := self.job_eta.seconds_left(event, now)) is not None:

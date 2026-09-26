@@ -12,7 +12,7 @@ import pytest
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.processor import TranscriptionProcessor
-from backend.progress import EtaEstimator, JobEtaEstimator, ProgressEvent
+from backend.progress import EtaEstimator, JobEtaEstimator, ProgressEvent, format_progress, parse_progress
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
@@ -37,6 +37,7 @@ from backend.gui import (
     find_outputs,
     read_device,
     read_hf_token,
+    renumber_progress,
     run_job,
     save_and_install,
     stage_files,
@@ -65,7 +66,8 @@ class FakeRunner:
 
     ``processed=True`` mimics the real CLI, which moves results into ``<work>/processed/``;
     ``fail_stems`` (staged stems) produce no output, as when the CLI fails individual files;
-    ``diarize_error`` fails every file of a ``--diarize`` run, logged as components.FileProcessor does.
+    ``diarize_error`` fails every file of a ``--diarize`` run (or only ``diarize_fail_stems``), logged as
+    components.FileProcessor does; ``progress`` emits a ``prepare`` event per staged file.
     """
 
     def __init__(
@@ -77,6 +79,8 @@ class FakeRunner:
         exit_code: int = 0,
         processed: bool = False,
         diarize_error: Exception | None = None,
+        diarize_fail_stems: set[str] | None = None,
+        progress: bool = False,
     ) -> None:
         self.fail_devices = fail_devices or set()
         self.exit_code_on_fail = exit_code_on_fail
@@ -84,6 +88,8 @@ class FakeRunner:
         self.exit_code = exit_code
         self.processed = processed
         self.diarize_error = diarize_error
+        self.diarize_fail_stems = diarize_fail_stems
+        self.progress = progress
         self.envs: list[dict[str, str]] = []
         self.devices: list[str | None] = []
         self.commands: list[list[str]] = []
@@ -99,15 +105,22 @@ class FakeRunner:
         self.staged_names.append([p.name for p in inputs])
         if device in self.fail_devices:
             return self.exit_code_on_fail
+        if self.progress:
+            for index in range(1, len(inputs) + 1):
+                on_line(format_progress(ProgressEvent(index, len(inputs), "prepare")))
+        diarize_failed: set[str] = set()
         if self.diarize_error is not None and "--diarize" in cmd:
             error = self.diarize_error
             for staged in inputs:
-                on_line(f"Failed to process {staged}: {type(error).__name__}: {error}")
-            return self.exit_code
+                if self.diarize_fail_stems is None or staged.stem in self.diarize_fail_stems:
+                    diarize_failed.add(staged.stem)
+                    on_line(f"Failed to process {staged}: {type(error).__name__}: {error}")
+            if len(diarize_failed) == len(inputs):
+                return self.exit_code
         out_dir = work_dir / "processed" if self.processed else work_dir
         out_dir.mkdir(exist_ok=True)
         for staged in inputs:
-            if staged.stem not in self.fail_stems:
+            if staged.stem not in self.fail_stems | diarize_failed:
                 (out_dir / f"{staged.stem}.txt").write_text(f"text of {staged.name}", encoding="utf-8")
         return self.exit_code
 
@@ -425,6 +438,37 @@ def test_run_job_diarization_failure_reruns_once_without_speakers(
     assert result.banner == "Speakers skipped: HF_TOKEN was rejected (401)"
 
 
+def test_run_job_retry_progress_continues_the_jobs_file_count(paths: AppPaths, tmp_path: Path) -> None:
+    _save_token(paths)
+    files = [_write(tmp_path / f"{name}.mp3") for name in ("a", "b", "c")]
+    runner = FakeRunner(
+        diarize_error=DiarizationRuntimeError("CUDA out of memory"),
+        diarize_fail_stems={"b"},
+        processed=True,
+        progress=True,
+    )
+    lines: list[str] = []
+
+    result = run_job(
+        files, GUI_PROFILES["Estonian"], timestamps=True, paths=paths, diarize=True, runner=runner,
+        on_line=lines.append, base_env={},
+    )  # fmt: skip
+
+    assert result.ok and runner.staged_names[1] == ["b.mp3"]
+    events = [event for line in lines if (event := parse_progress(line)) is not None]
+    assert [(event.file, event.files) for event in events] == [(1, 3), (2, 3), (3, 3), (3, 3)]
+
+
+def test_renumber_progress_counts_a_retry_as_the_jobs_last_files() -> None:
+    lines: list[str] = []
+    relay = renumber_progress(lines.append, skipped=3, files=5)
+    relay(format_progress(ProgressEvent(1, 2, "prepare", durations=(60.0, 90.0))))
+    relay("Loading model…")
+    assert parse_progress(lines[0]) == ProgressEvent(4, 5, "prepare")  # durations index the subset: dropped
+    assert lines[1] == "Loading model…"
+    assert renumber_progress(lines.append, skipped=0, files=5) == lines.append
+
+
 def test_run_job_non_diarization_failure_is_not_retried_without_speakers(paths: AppPaths, audio: Path) -> None:
     write_config_value(paths.config_file, "device", "cpu")
     runner = FakeRunner(fail_stems={"meeting"}, processed=True)
@@ -543,7 +587,9 @@ class _FakeBar:
 
 def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
     bar, detail = _FakeBar(), _FakeBar()
-    app = SimpleNamespace(progress=bar, detail=detail, eta=EtaEstimator(), job_eta=JobEtaEstimator(), clock=lambda: 0.0)
+    app = SimpleNamespace(
+        progress=bar, detail=detail, eta=EtaEstimator(), job_eta=JobEtaEstimator(), retrying=False, clock=lambda: 0.0
+    )
     show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
 
     show(app, ProgressEvent(1, 2, "transcribe", 30.0, 60.0))  # type: ignore[arg-type]
@@ -561,10 +607,15 @@ def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
 
 def test_job_eta_replaces_the_stage_eta_once_a_file_has_finished() -> None:
     bar, detail = _FakeBar(), _FakeBar()
-    app = SimpleNamespace(progress=bar, detail=detail, eta=EtaEstimator(), job_eta=JobEtaEstimator(), clock=lambda: 0.0)
+    app = SimpleNamespace(
+        progress=bar, detail=detail, eta=EtaEstimator(), job_eta=JobEtaEstimator(), retrying=False, clock=lambda: 0.0
+    )
     show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
 
     show(app, ProgressEvent(1, 2, "prepare", durations=(600.0, 1200.0)))  # type: ignore[arg-type]
     app.clock = lambda: 300.0
     show(app, ProgressEvent(2, 2, "prepare"))  # type: ignore[arg-type]
     assert detail.options["text"] == "File 2/2 · Preparing · ~10 min left (all)"
+    app.retrying = True
+    show(app, ProgressEvent(2, 2, "transcribe"))  # type: ignore[arg-type]
+    assert str(detail.options["text"]).startswith("File 2/2 · Transcribing (retry)")
