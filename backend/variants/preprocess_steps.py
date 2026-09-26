@@ -10,7 +10,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable
 
-from rich.console import Console
+from rich import get_console
 
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.errors import StepExecutionError
@@ -20,7 +20,7 @@ from backend.preprocess.orchestrator import PreprocessResult
 from backend.variants.steps import StepRegistry
 
 LOGGER = logging.getLogger(__name__)
-console = Console()
+console = get_console()  # shared with the progress bar's Live; a separate Console bypasses it
 
 
 def _execute_step_with_registry(

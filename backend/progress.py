@@ -134,7 +134,7 @@ class RichProgressBar:
     def update(self, event: ProgressEvent) -> None:
         if self._task is None:
             self.progress.start()
-            atexit.register(self.close)  # a transcribe() run outside the file loop never reaches close()
+            atexit.register(self.close)  # restores the cursor if the process dies mid-file
         key = (event.file, event.files, event.stage, event.detail)
         if key != self._key or self._task is None:
             if self._task is not None:
@@ -145,6 +145,7 @@ class RichProgressBar:
             self.progress.update(self._task, completed=event.done, total=event.total)
 
     def close(self) -> None:
+        atexit.unregister(self.close)
         if self._task is not None:
             self.progress.stop()
             self.progress.remove_task(self._task)
@@ -184,6 +185,9 @@ class ProgressReporter:
         return self.bar is not None and self.files > 0
 
     def close(self) -> None:
+        """End the run: close the bar and forget the file, so later events neither redraw nor mute ⌛ lines."""
+        self.file = self.files = 0
+        self._last_emit = None
         if self.bar is not None:
             self.bar.close()
 
