@@ -10,6 +10,7 @@ import argparse
 import fnmatch
 import json
 import logging
+import math
 import os
 import platform
 import queue
@@ -76,6 +77,7 @@ class Stalled(InstallError):
     """A command's output stopped changing for longer than its stall timeout."""
 
 
+RETRY_NOTE = "stalled; retrying without xet"
 MODEL_STALL_TIMEOUT = 120.0  # hf-xet can hang forever on one stalled range request (xet-core #789, #850)
 PROGRESS_LOG_INTERVAL = 30.0
 
@@ -849,7 +851,10 @@ def wait_for_marker(
 
     def poll() -> None:
         if marker.exists() or clock() >= deadline:
-            marker.unlink(missing_ok=True)
+            try:
+                marker.unlink(missing_ok=True)
+            except OSError:  # the remover's cap covers a marker we could not take
+                LOGGER.warning("Could not delete %s", marker)
             root.destroy()
         else:
             root.after(200, poll)
@@ -890,16 +895,20 @@ class ReadyHandoff:
     def done(self) -> bool:
         now = self.clock()
         if self.signalled is None:
+            self.signalled = now
             try:
                 self.marker.touch()
-            except OSError:
+            except OSError:  # no marker to watch: only the cap applies
                 LOGGER.warning("Could not create %s", self.marker)
-            self.signalled = now
+                self.taken = math.inf
         if self.taken is None and not self.marker.exists():
             self.taken = now
         if (self.taken is None or now < self.taken + HANDOFF_GRACE) and now < self.signalled + HANDOFF_CAP:
             return False
-        self.marker.unlink(missing_ok=True)
+        try:
+            self.marker.unlink(missing_ok=True)
+        except OSError:  # a raise here would stop _poll's chain: no work, no Close button
+            LOGGER.warning("Could not delete %s", self.marker)
         return True
 
 
@@ -1096,6 +1105,25 @@ def kill_tree(proc: subprocess.Popen[str], env: Mapping[str, str]) -> None:
     proc.wait()
 
 
+def unlink_when_released(
+    path: Path,
+    *,
+    attempts: int = 20,
+    delay: float = 0.25,
+    unlink: Callable[[Path], None] = lambda p: p.unlink(missing_ok=True),
+    sleep: Callable[[float], None] = time.sleep,
+) -> None:
+    """Delete ``path``, waiting ~5 s for a just-killed Windows process (taskkill returns early) to let go of it."""
+    for attempt in range(attempts):
+        try:
+            unlink(path)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            sleep(delay)
+
+
 def _bytes(value: str) -> float:
     return float(value.rstrip("kMGT")) * BYTE_UNITS.get(value[-1], 1)
 
@@ -1241,6 +1269,7 @@ class Installer:
     extras: bool = False
     launch: Callable[[InstallPaths], None] = launch_gui
     sleep: Callable[[float], None] = time.sleep
+    unlinker: Callable[[Path], None] = unlink_when_released
     clock: Callable[[], float] = time.monotonic
     close_timeout: float = 60.0  # the app quits right after starting --extras
     hf_token: str = field(default="", repr=False)  # read from hf_token_file when an --extras run starts
@@ -1310,14 +1339,18 @@ class Installer:
             self.runner(cmd, env, report, self.cancel, poll, MODEL_STALL_TIMEOUT)
         except Stalled:  # hf-xet can hang forever on a stalled range request; plain HTTP times out instead
             LOGGER.warning("Retrying %s without xet", spec.repo_id)
-            report(None, "stalled; retrying without xet")
+            report(None, RETRY_NOTE)
             for part in (cache / "blobs").glob("*.incomplete"):  # xet's partial has holes: HTTP must not resume it
                 try:
-                    part.unlink()
+                    self.unlinker(part)
                 except OSError as error:
                     raise InstallError(f"Could not clear the stalled download ({error}). Retry.") from None
             env["HF_HUB_DISABLE_XET"] = "1"
-            self.runner(cmd, env, report, self.cancel, poll, MODEL_STALL_TIMEOUT)
+
+            def noted(fraction: float | None, text: str) -> None:  # keep the reason for the reset bar on screen
+                report(fraction, f"{RETRY_NOTE} · {text}" if text else RETRY_NOTE)
+
+            self.runner(cmd, env, noted, self.cancel, poll, MODEL_STALL_TIMEOUT)
 
     def fetch_ffmpeg(self, report: Report) -> None:
         if all((self.paths.ffmpeg_bin / name).is_file() for name in FFMPEG_BINARIES) and not self.clean:
