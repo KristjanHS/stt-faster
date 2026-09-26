@@ -1,6 +1,6 @@
 [project]
 name = "stt-faster"
-version = "1.2.4"
+version = "1.2.5"
 description = "Fast audio transcription tool using Whisper models"
 authors = [{ name=""}]
 readme = "README.md"
