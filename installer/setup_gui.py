@@ -59,7 +59,8 @@ MIN_GPU_VRAM_MIB = 4000  # ~4 GB; a misjudged GPU falls back to CPU (model load 
 GPU_EXTRA_SIZE = "1.2 GB"  # gpu-win wheels: cuBLAS + cuDNN 9.1
 UNINSTALL_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"  # HKCU: Apps & features, no admin
 UNINSTALL_TEMP_PREFIX = f"{APP_NAME}-uninstall-"
-SHORTCUT_DIRS_PS = "@([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))"
+DESKTOP_PS = "([Environment]::GetFolderPath('Desktop'))"
+PROGRAMS_PS = "([Environment]::GetFolderPath('Programs'))"
 
 
 class InstallError(RuntimeError):
@@ -472,23 +473,52 @@ def _ps_quote(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
 
-def shortcut_script(target: Path, name: str = SHORTCUT_NAME) -> str:
-    """PowerShell creating per-user Desktop + Start-menu shortcuts (WScript.Shell; no admin)."""
+def _ps_link(folder: str, name: str, target: Path, workdir: Path, args: str = "") -> str:
     return (
-        "$s = New-Object -ComObject WScript.Shell; "
-        f"foreach ($d in {SHORTCUT_DIRS_PS}) {{ "
-        f"$l = $s.CreateShortcut((Join-Path $d {_ps_quote(name + '.lnk')})); "
+        f"$l = $s.CreateShortcut((Join-Path {folder} {_ps_quote(name + '.lnk')})); "
         f"$l.TargetPath = {_ps_quote(str(target))}; "
-        f"$l.WorkingDirectory = {_ps_quote(str(target.parent))}; "
-        "$l.Save() }"
+        + (f"$l.Arguments = {_ps_quote(args)}; " if args else "")
+        + f"$l.WorkingDirectory = {_ps_quote(str(workdir))}; $l.Save(); "
     )
 
 
-def remove_shortcuts_script(name: str = SHORTCUT_NAME) -> str:
+def _ps_remove_old_links() -> str:
+    """Drop the ≤1.2.x top-level ``Programs\\Transcribe.lnk`` and the Start-menu folder (rebuilt on install)."""
     return (
-        f"foreach ($d in {SHORTCUT_DIRS_PS}) {{ "
-        f"Remove-Item -LiteralPath (Join-Path $d {_ps_quote(name + '.lnk')}) -Force -ErrorAction SilentlyContinue }}"
+        f"Remove-Item -LiteralPath (Join-Path $p {_ps_quote(SHORTCUT_NAME + '.lnk')}) -Force "
+        "-ErrorAction SilentlyContinue; "
+        "Remove-Item -LiteralPath $f -Recurse -Force -ErrorAction SilentlyContinue; "
     )
+
+
+_PS_START_MENU = f"$p = {PROGRAMS_PS}; $f = Join-Path $p {_ps_quote(SHORTCUT_NAME)}; "
+
+
+def shortcut_script(paths: InstallPaths, *, tools: bool) -> str:
+    """PowerShell creating the Desktop link and the Start-menu ``Transcribe`` folder (WScript.Shell; no admin).
+
+    ``tools`` adds Repair / Uninstall / Setup log links, which run the kept setup copy (dev runs have none).
+    """
+    script = (
+        "$s = New-Object -ComObject WScript.Shell; "
+        + _PS_START_MENU
+        + _ps_remove_old_links()
+        + "New-Item -ItemType Directory -Force -Path $f | Out-Null; "
+    )
+    for folder in (DESKTOP_PS, "$f"):  # WorkingDirectory never inside the venv (see launch_gui)
+        script += _ps_link(folder, SHORTCUT_NAME, paths.gui_exe, paths.install_dir)
+    if tools:
+        script += _ps_link("$f", f"Repair {SHORTCUT_NAME}", paths.setup_copy, paths.install_dir)
+        script += _ps_link("$f", f"Uninstall {SHORTCUT_NAME}", paths.setup_copy, paths.install_dir, "--uninstall")
+        script += _ps_link("$f", "Setup log", paths.log_file, paths.log_file.parent)
+    return script.rstrip()
+
+
+def remove_shortcuts_script() -> str:
+    return (
+        f"Remove-Item -LiteralPath (Join-Path {DESKTOP_PS} {_ps_quote(SHORTCUT_NAME + '.lnk')}) -Force "
+        "-ErrorAction SilentlyContinue; " + _PS_START_MENU + _ps_remove_old_links()
+    ).rstrip()
 
 
 def app_version(app_dir: Path) -> str:
@@ -691,7 +721,7 @@ def uninstall(
     run: Callable[..., Any] = subprocess.run,
     in_use: Callable[[InstallPaths], bool] = app_in_use,
 ) -> None:
-    """Remove the install dir, the config dir, both shortcuts and the Apps & features entry.
+    """Remove the install dir, the config dir, the Desktop + Start-menu shortcuts and the Apps & features entry.
 
     Past the venv, removal is best effort: shortcuts, entry and config go even when a locked file keeps part of
     the install dir, and the InstallError then lists what was left (a rerun of setup offers Uninstall again).
@@ -1064,7 +1094,8 @@ class Installer:
         if self.paths.windows:
             report(None, "creating shortcuts")
             powershell = system_tool(self.env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-            cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", shortcut_script(self.paths.gui_exe)]
+            script = shortcut_script(self.paths, tools=self.paths.setup_copy.is_file())
+            cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", script]
             self.runner(cmd, self.env, report, self.cancel)
             if self.paths.setup_copy.is_file():  # the entry's UninstallString runs that copy
                 register_uninstall(self.paths, self.winreg())

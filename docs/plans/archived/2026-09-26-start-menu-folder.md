@@ -1,6 +1,6 @@
 # Installer — Start-menu folder with tools
 
-Status: open. Ruled 2026-09-26 (option C). Implement in a fresh session.
+Status: ✅ SHIPPED 2026-09-26. Owed: Windows eyeball of Start ▸ All apps (project_state OPEN).
 
 ## Target
 

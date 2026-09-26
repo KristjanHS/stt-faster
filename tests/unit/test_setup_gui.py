@@ -448,10 +448,12 @@ def test_uninstall_refuses_unexpected_folder_and_open_app(tmp_path: Path) -> Non
         uninstall(odd, {}, in_use=lambda _p: True)
 
 
-def test_remove_shortcuts_script_targets_both_folders() -> None:
+def test_remove_shortcuts_script_removes_desktop_link_old_link_and_folder() -> None:
     script = remove_shortcuts_script()
-    assert "GetFolderPath('Desktop')" in script and "GetFolderPath('Programs')" in script
-    assert "'Transcribe.lnk'" in script
+    assert "(Join-Path ([Environment]::GetFolderPath('Desktop')) 'Transcribe.lnk')" in script
+    assert "$p = ([Environment]::GetFolderPath('Programs')); $f = Join-Path $p 'Transcribe'" in script
+    assert "Remove-Item -LiteralPath (Join-Path $p 'Transcribe.lnk')" in script  # ≤1.2.x top-level link
+    assert "Remove-Item -LiteralPath $f -Recurse -Force" in script
 
 
 def test_self_delete_command_removes_only_its_temp_folder() -> None:
@@ -501,10 +503,45 @@ def test_hf_tool_pins_match_uv_lock() -> None:
         assert locked[name.replace("_", "-")] == version, pin
 
 
-def test_shortcut_script_quotes_paths() -> None:
-    script = shortcut_script(Path("C:/Users/O'Brien/stt/gui.exe"))
-    assert "'C:/Users/O''Brien/stt/gui.exe'" in script
-    assert "GetFolderPath('Desktop')" in script and "GetFolderPath('Programs')" in script
+def _links(script: str) -> list[dict[str, str]]:
+    """The shortcuts a generated script creates: folder, name, target, args, workdir per ``$l.Save()``."""
+    links = []
+    for chunk in script.split("$l = $s.CreateShortcut((Join-Path ")[1:]:
+        folder, rest = chunk.split(" '", 1)
+        link = {"folder": folder, "name": rest.split("'", 1)[0]}
+        for key, field in (("target", "TargetPath"), ("args", "Arguments"), ("workdir", "WorkingDirectory")):
+            if f"$l.{field} = '" in chunk:
+                link[key] = chunk.split(f"$l.{field} = '", 1)[1].split("';", 1)[0].replace("''", "'")
+        links.append(link)
+    return links
+
+
+def test_shortcut_script_desktop_link_and_start_menu_tools() -> None:
+    paths = InstallPaths(Path("C:/Users/O'Brien/AppData/Local/stt-faster"), Path("C:/cfg/config"), windows=True)
+    script = shortcut_script(paths, tools=True)
+    root = str(paths.install_dir)
+    assert [(link["folder"], link["name"]) for link in _links(script)] == [
+        ("([Environment]::GetFolderPath('Desktop'))", "Transcribe.lnk"),
+        ("$f", "Transcribe.lnk"),
+        ("$f", "Repair Transcribe.lnk"),
+        ("$f", "Uninstall Transcribe.lnk"),
+        ("$f", "Setup log.lnk"),
+    ]
+    desktop, start, repair, remove, log = _links(script)
+    assert desktop["target"] == start["target"] == str(paths.gui_exe)
+    assert desktop["workdir"] == start["workdir"] == root  # never cwd inside the venv's Scripts
+    assert repair["target"] == remove["target"] == str(paths.setup_copy)
+    assert "args" not in repair and remove["args"] == "--uninstall"
+    assert log["target"] == str(paths.log_file)
+    assert "$f = Join-Path $p 'Transcribe'" in script and "GetFolderPath('Programs')" in script
+    # updates from ≤1.2.x: the old top-level Start-menu link goes, the folder is rebuilt from scratch
+    assert script.index("Remove-Item -LiteralPath (Join-Path $p 'Transcribe.lnk')") < script.index("New-Item")
+    assert script.index("Remove-Item -LiteralPath $f -Recurse") < script.index("New-Item")
+
+
+def test_shortcut_script_without_setup_copy_has_no_tool_links(win_paths: InstallPaths) -> None:
+    names = [link["name"] for link in _links(shortcut_script(win_paths, tools=False))]
+    assert names == ["Transcribe.lnk", "Transcribe.lnk"]
 
 
 def test_ensure_device_config_writes_cpu_once(tmp_path: Path) -> None:
@@ -576,16 +613,21 @@ def test_fetch_model_uses_install_cache_and_seeds_only_without_clean(tmp_path: P
     assert len(seeds) == 1 and runs[1][0][-1] == "--force-download"
 
 
-def test_finish_registers_uninstall_only_with_setup_copy(paths: InstallPaths) -> None:
+def test_finish_registers_uninstall_and_tool_links_only_with_setup_copy(paths: InstallPaths) -> None:
     reg = _FakeReg()
+    scripts: list[str] = []
     paths.gui_exe.parent.mkdir(parents=True)
     paths.gui_exe.write_bytes(b"exe")
-    installer = Installer(paths=paths, env={}, winreg=lambda: reg, runner=lambda *_a: None)
+    installer = Installer(
+        paths=paths, env={}, winreg=lambda: reg, runner=lambda cmd, *_a: scripts.append(list(cmd)[-1])
+    )
     installer.finish(lambda *_a: None)
     assert reg.keys == {}  # no copy to point UninstallString at
+    assert "Repair Transcribe.lnk" not in scripts[-1]
     paths.setup_copy.write_bytes(b"exe")
     installer.finish(lambda *_a: None)
     assert list(reg.keys) == [UNINSTALL_KEY]
+    assert "'Repair Transcribe.lnk'" in scripts[-1] and "'Uninstall Transcribe.lnk'" in scripts[-1]
 
 
 def test_parse_args_extras_only_alone() -> None:
