@@ -1512,7 +1512,10 @@ class SetupWindow:
         buttons.pack(fill="x")
         self.install_button = ttk.Button(buttons, text="Install", command=self.start)
         self.install_button.pack(side="left")
-        self.launch_button = ttk.Button(buttons, text="Open Transcribe", command=self.launch, state="disabled")
+        launchable = installer.paths.gui_exe.is_file() and not installer.extras  # no repair needed to open it
+        self.launch_button = ttk.Button(
+            buttons, text="Open Transcribe", command=self.launch, state="normal" if launchable else "disabled"
+        )
         self.launch_button.pack(side="right")
         self.summary = ttk.Label(frame, text="", foreground="gray", wraplength=480)
         self.summary.pack(anchor="w", pady=(8, 0))
@@ -1559,6 +1562,7 @@ class SetupWindow:
         self.installer.gpu = self.use_gpu.get() if self.gpu_check is not None else None  # kept on a retry
         self.installer.cancel.clear()
         self.install_button.config(state="disabled")
+        self.launch_button.config(state="disabled")  # the app would lock the venv the run replaces
         self.summary.config(text="Installing…")
         self.log_link.pack_forget()
         for bar, status in self.rows.values():
