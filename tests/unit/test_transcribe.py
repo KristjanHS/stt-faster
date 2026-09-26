@@ -623,7 +623,7 @@ class TestTranscribeDiarize:
         info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
         model = RecordingModel([FakeSegment(0, 0.0, 5.0, "hello")], info)
         lines: list[str] = []
-        reporter = ProgressReporter(enabled=True, write=lines.append, clock=lambda: 0.0, file=1, files=1)
+        reporter = ProgressReporter(enabled=True, write=lines.append, clock=lambda: 0.0, file=1, files=1, bar=None)
 
         def fake_runner(_audio_path: str, **kwargs: Any) -> list[Any]:
             kwargs["on_progress"]("embeddings", None, None)
@@ -663,7 +663,7 @@ class TestTranscribeDiarize:
         info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
         model = RecordingModel([FakeSegment(0, 0.0, 5.0, "hello")], info)
         lines: list[str] = []
-        reporter = ProgressReporter(enabled=True, write=lines.append, clock=lambda: 0.0, file=1, files=1)
+        reporter = ProgressReporter(enabled=True, write=lines.append, clock=lambda: 0.0, file=1, files=1, bar=None)
 
         _run_transcription(
             path="/path/to/audio.wav",

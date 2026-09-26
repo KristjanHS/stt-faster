@@ -12,7 +12,7 @@ import pytest
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.processor import TranscriptionProcessor
-from backend.progress import ProgressEvent
+from backend.progress import EtaEstimator, ProgressEvent
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
@@ -543,7 +543,7 @@ class _FakeBar:
 
 def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
     bar, detail = _FakeBar(), _FakeBar()
-    app = SimpleNamespace(progress=bar, detail=detail)
+    app = SimpleNamespace(progress=bar, detail=detail, eta=EtaEstimator(), clock=lambda: 0.0)
     show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
 
     show(app, ProgressEvent(1, 2, "transcribe", 30.0, 60.0))  # type: ignore[arg-type]
@@ -554,3 +554,6 @@ def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
     show(app, ProgressEvent(1, 2, "diarize", 1.0, 4.0, "embeddings"))  # type: ignore[arg-type]
     assert (bar.options["mode"], bar.options["value"], bar.running) == ("determinate", 25.0, False)
     assert detail.options["text"] == "File 1/2 · Identifying speakers · embeddings"
+    app.clock = lambda: 60.0
+    show(app, ProgressEvent(1, 2, "diarize", 2.0, 4.0, "embeddings"))  # type: ignore[arg-type]
+    assert detail.options["text"] == "File 1/2 · Identifying speakers · embeddings · ~2 min left"

@@ -28,7 +28,14 @@ from typing import Any
 
 from backend.config import setup_logging
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
-from backend.progress import PROGRESS_ENV, ProgressEvent, parse_progress
+from backend.progress import (
+    PROGRESS_ENV,
+    EtaEstimator,
+    ProgressEvent,
+    describe_progress,
+    format_eta,
+    parse_progress,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -280,21 +287,6 @@ def build_env(
 
 
 RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
-_STAGE_LABELS = {
-    "prepare": "Preparing",
-    "preprocess": "Preprocessing",
-    "load model": "Loading model",
-    "transcribe": "Transcribing",
-    "diarize": "Identifying speakers",
-}
-
-
-def describe_progress(event: ProgressEvent) -> str:
-    """One status line for ``event``: file position, stage, sub-step."""
-    parts = [f"File {event.file}/{event.files}", _STAGE_LABELS.get(event.stage, event.stage.capitalize())]
-    if event.detail:
-        parts.append(event.detail)
-    return " · ".join(parts)
 
 
 def find_outputs(work_dir: Path, staged: Mapping[str, Path]) -> dict[Path, Path | None]:
@@ -587,6 +579,8 @@ class TranscribeApp:
 
         self.detail = ttk.Label(frame, text="")
         self.detail.pack(anchor="w", pady=(8, 0))
+        self.eta = EtaEstimator()
+        self.clock: Callable[[], float] = time.monotonic
         self.status = ttk.Label(frame, text="", foreground="gray")
         self.status.pack(anchor="w", pady=(4, 0))
         self.banner = ttk.Label(frame, text="", foreground="#b35c00", wraplength=420)
@@ -657,6 +651,7 @@ class TranscribeApp:
         self.open_button.config(state="disabled")
         self.banner.config(text="")
         self.detail.config(text="Starting…")
+        self.eta = EtaEstimator()
         self.progress.config(mode="indeterminate", value=0)
         self.progress.start(12)
         self.running = True
@@ -719,6 +714,7 @@ class TranscribeApp:
                 self.detail.config(text=str(payload))
                 self.progress.config(mode="indeterminate", value=0)
                 self.progress.start(12)
+                self.eta = EtaEstimator()
             elif kind == "line" and str(payload).strip().lstrip("│╭╰─┃━"):  # skip Rich table borders
                 self.status.config(text=str(payload)[-90:])
             elif kind in ("done", "error"):
@@ -737,7 +733,10 @@ class TranscribeApp:
                 self.progress.stop()
                 self.progress.config(mode="determinate")
             self.progress.config(value=fraction * 100)  # default maximum=100; 1.0 makes the pulse jump end to end
-        self.detail.config(text=describe_progress(event))
+        text = describe_progress(event)
+        if (seconds := self.eta.seconds_left(event, self.clock())) is not None:
+            text += f" · {format_eta(seconds)}"
+        self.detail.config(text=text)
 
     def _finish(self, payload: object) -> None:
         self.running = False

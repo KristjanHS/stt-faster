@@ -417,12 +417,13 @@ def _collect_executor_segments(
         if end_time is not None:
             audio_processed = max(audio_processed, float(end_time))
 
-        last_progress_log = maybe_log_progress(
-            processed_seconds=audio_processed,
-            total_seconds=total_audio_duration,
-            start_time=transcribe_start,
-            last_log_time=last_progress_log,
-        )
+        if not reporter.draws_bar:  # the terminal bar stands in for the ⌛ lines
+            last_progress_log = maybe_log_progress(
+                processed_seconds=audio_processed,
+                total_seconds=total_audio_duration,
+                start_time=transcribe_start,
+                last_log_time=last_progress_log,
+            )
         reporter.advance("transcribe", audio_processed, total_audio_duration)
 
     # The loop's last advance usually falls inside the throttle window; land the file at its end.

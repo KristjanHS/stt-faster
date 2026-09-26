@@ -375,8 +375,10 @@ def test_process_all_files(
         run_config=run_config,
     )
     lines: list[str] = []
-    reporter = ProgressReporter(enabled=True, write=lines.append)
+    bar = _ClosingBar()
+    reporter = ProgressReporter(enabled=True, write=lines.append, bar=bar)
     results = processor.process_all_files([str(audio1), str(audio2)], reporter=reporter)
+    assert bar.closed  # the terminal bar is torn down once the file loop ends
 
     assert results["succeeded"] == 2
     assert results["failed"] == 0
@@ -385,6 +387,17 @@ def test_process_all_files(
     assert [(e.file, e.files, e.stage) for e in events if e is not None] == [(1, 2, "prepare"), (2, 2, "prepare")]
     assert all(stat.status == "completed" for stat in results["file_stats"])
     assert mock_transcription_service.transcribe.call_count == 2
+
+
+class _ClosingBar:
+    def __init__(self) -> None:
+        self.closed = False
+
+    def update(self, event: object) -> None:
+        pass
+
+    def close(self) -> None:
+        self.closed = True
 
 
 def test_process_folder(
