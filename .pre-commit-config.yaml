@@ -108,3 +108,12 @@ repos:
           )$
         additional_dependencies:
           - detect-secrets[gibberish]
+
+  - repo: local
+    hooks:
+      - id: no-monkeypatch
+        name: "No monkeypatch in tests"
+        description: "Inject a defaulted param/field instead (docs/plans/2026-09-26-no-monkeypatch-tests.md)"
+        language: pygrep
+        entry: monkeypatch
+        files: ^tests/.*\.py$
