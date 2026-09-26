@@ -31,6 +31,7 @@ from installer.setup_gui import (
     MODELS,
     UNINSTALL_KEY,
     DIARIZATION_MODEL,
+    app_env,
     GpuInfo,
     Cancelled,
     CommandFailed,
@@ -762,11 +763,22 @@ def test_hf_token_status_heads_the_gated_config_with_the_token() -> None:
     assert HF_TOKEN_PROBE_URL.startswith(f"https://huggingface.co/{DIARIZATION_MODEL.repo_id}/")
 
 
+def test_app_env_drops_tcl_paths_into_setups_unpack_dir(tmp_path: Path) -> None:
+    # Transcribe inherited these from the frozen setup and died once setup exited and deleted _MEI.
+    bundle = tmp_path / "_MEI123"
+    base = {"TCL_LIBRARY": str(bundle / "_tcl_data"), "TK_LIBRARY": str(bundle / "_tk_data"), "A": "1"}
+    assert app_env(base, str(bundle)) == {"A": "1"}
+    own = {"TCL_LIBRARY": str(tmp_path / "tcl8.6"), "A": "1"}  # a user's own Tcl stays
+    assert app_env(own, str(bundle)) == own
+    assert app_env(base, None) == base  # not frozen
+
+
 def test_setup_opens_the_app_outside_its_venv(
     paths: InstallPaths, popen_calls: list[tuple[Any, dict[str, Any]]], popen: Callable[..., None]
 ) -> None:
-    launch_gui(paths, popen=popen)
+    launch_gui(paths, popen=popen, env={"A": "1"})
     ((args, kw),) = popen_calls
+    assert kw["env"] == {"A": "1"}
     assert args == [str(paths.gui_exe)]
     assert not Path(kw["cwd"]).is_relative_to(paths.venv_dir)
 
