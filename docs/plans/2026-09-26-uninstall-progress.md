@@ -25,3 +25,5 @@ removed." box, so it looked as if the uninstall had crashed.
 - X is ignored while removing; headless uninstall keeps its current path.
 - Falsifier: unit tests on the step reporting and result state with injected `remove`; Windows eyeball: no blank gap
   longer than ~2 s from clicking Uninstall to the result.
+- Owed (review of b64b3b6): `UninstallWindow` starts `remove` only once the waiter consumed the marker + ~1 s (cap ~5 s),
+  then unlinks it; the waiter may run from the install dir. Also: disable `launch_button` while waiting; test `--ready-file` parsing.
