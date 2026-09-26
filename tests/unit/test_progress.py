@@ -214,6 +214,13 @@ def test_job_eta_stays_silent_without_a_later_known_duration(durations: tuple[fl
     assert eta.seconds_left(last, now=40.0) is None
 
 
+def test_job_eta_ignores_a_file_beyond_the_job() -> None:
+    eta, durations = JobEtaEstimator(), (60.0, 60.0)
+    eta.seconds_left(ProgressEvent(1, 2, "prepare", durations=durations), now=0.0)
+    eta.seconds_left(ProgressEvent(2, 2, "prepare"), now=30.0)
+    assert eta.seconds_left(ProgressEvent(3, 2, "prepare"), now=60.0) is None  # unpacking would raise
+
+
 def test_start_file_carries_durations_on_its_prepare_event_only() -> None:
     reporter, lines = _reporter()
     reporter.start_file(1, 2, [61.04, None])
