@@ -87,7 +87,8 @@ while read -r t; do
     [[ -n "$t" ]] || continue
     n=$((n + 1))
     ((n > KEEP_EXES)) || continue
-    if gh release view "$t" --json assets --jq '.assets[].name' | grep -qxF "$EXE_NAME"; then
+    # not grep -q: its early exit SIGPIPEs gh, and pipefail then reads the match as a miss
+    if gh release view "$t" --json assets --jq '.assets[].name' | grep -xF "$EXE_NAME" >/dev/null; then
         gh release delete-asset "$t" "$EXE_NAME" --yes >/dev/null && echo "release: removed ${EXE_NAME} from ${t}" ||
             echo "release: warning — could not remove ${EXE_NAME} from ${t}" >&2
     fi
