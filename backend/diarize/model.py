@@ -3,7 +3,7 @@
 Weights come from the ungated `pyannote-community` mirror at a pinned revision
 (CC-BY-4.0, see NOTICE). They are fetched once at install time; at run time
 the model resolves from a local dir only, never the network.
-Plan: docs/plans/2026-09-26-keyless-diarization.md.
+Plan: docs/plans/archived/2026-09-26-keyless-diarization.md.
 """
 
 from __future__ import annotations
