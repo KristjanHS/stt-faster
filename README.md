@@ -1,5 +1,11 @@
 # stt-faster
 
+[![Latest release](https://img.shields.io/github/v/release/KristjanHS/stt-faster?sort=semver&label=latest%20release)](https://github.com/KristjanHS/stt-faster/releases/latest)
+[![Release date](https://img.shields.io/github/release-date/KristjanHS/stt-faster?label=released)](https://github.com/KristjanHS/stt-faster/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/KristjanHS/stt-faster/total?label=downloads)](https://github.com/KristjanHS/stt-faster/releases)
+
+**[⬇ Download Transcribe-Setup.exe (latest, Windows)](https://github.com/KristjanHS/stt-faster/releases/latest/download/Transcribe-Setup.exe)** · [What's new](https://github.com/KristjanHS/stt-faster/releases/latest) · [All releases](https://github.com/KristjanHS/stt-faster/releases)
+
  repo for speech to text using faster-whisper HF model
 
 ## Windows app (no technical setup)
