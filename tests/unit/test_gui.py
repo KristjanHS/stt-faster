@@ -516,6 +516,8 @@ def test_windowless_app_writes_its_streams_to_the_gui_log(tmp_path: Path) -> Non
     assert vars(console) == before and not (tmp_path / "unused.log").exists()
 
 
-def test_describe_progress_shows_whole_job_percent_and_stage() -> None:
+def test_describe_progress_names_file_stage_and_substep() -> None:
     event = ProgressEvent(file=2, files=4, stage="transcribe", done=30.0, total=60.0)
-    assert describe_progress(event) == "38% · File 2/4 · Transcribing"
+    assert describe_progress(event) == "File 2/4 · Transcribing"
+    event = ProgressEvent(file=1, files=3, stage="diarize", detail="embeddings")
+    assert describe_progress(event) == "File 1/3 · Identifying speakers · embeddings"

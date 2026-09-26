@@ -16,6 +16,7 @@ from backend.model_loader import DeviceSelector, ModelLoader
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.metrics import PreprocessMetrics
 from backend.preprocess.orchestrator import PreprocessResult
+from backend.progress import ProgressEvent, ProgressReporter, parse_progress
 from backend.transcribe import (
     TranscriptionMetrics,
     _get_estonian_model_path,
@@ -615,6 +616,75 @@ class TestTranscribeDiarize:
         audio_path, runner_kwargs = runner_calls[0]
         assert audio_path == str(processed_path)
         assert runner_kwargs.get("num_speakers") == 3
+
+    def test_transcribe_reports_each_stage_in_order(self, tmp_path: Path) -> None:
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
+        model = RecordingModel([FakeSegment(0, 0.0, 5.0, "hello")], info)
+        lines: list[str] = []
+        reporter = ProgressReporter(enabled=True, write=lines.append, clock=lambda: 0.0, file=1, files=1)
+
+        def fake_runner(_audio_path: str, **kwargs: Any) -> list[Any]:
+            kwargs["on_progress"]("embeddings", None, None)
+            kwargs["on_progress"]("embeddings", 2, 2)
+            return []
+
+        transcribe(
+            "/path/to/audio.wav",
+            preset="et-large",
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path, duration=5.0),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+            diarize=True,
+            diarize_runner=fake_runner,
+            reporter=reporter,
+        )
+
+        assert [parse_progress(line) for line in lines] == [
+            ProgressEvent(1, 1, "preprocess"),
+            ProgressEvent(1, 1, "load model"),
+            ProgressEvent(1, 1, "transcribe"),
+            ProgressEvent(1, 1, "transcribe", 5.0, 5.0),
+            ProgressEvent(1, 1, "diarize"),
+            ProgressEvent(1, 1, "diarize", detail="embeddings"),
+            ProgressEvent(1, 1, "diarize", 2.0, 2.0, "embeddings"),
+        ]
+
+    def test_executor_path_reports_the_same_stages(self, tmp_path: Path) -> None:
+        from backend.variants.executor import _run_transcription  # pyright: ignore[reportPrivateUsage]  # noqa: PLC0415
+
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        info = FakeTranscriptionInfo(language="et", language_probability=0.95, duration=5.0)
+        model = RecordingModel([FakeSegment(0, 0.0, 5.0, "hello")], info)
+        lines: list[str] = []
+        reporter = ProgressReporter(enabled=True, write=lines.append, clock=lambda: 0.0, file=1, files=1)
+
+        _run_transcription(
+            path="/path/to/audio.wav",
+            preset="et-large",
+            requested_language="et",
+            applied_language="et",
+            preprocess_config=PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path, duration=5.0),  # noqa: ARG005
+            transcribe_kwargs={"language": "et"},
+            metrics_collector=None,
+            can_track_skips=False,
+            log_label="baseline",
+            diarize=True,
+            diarize_runner=lambda _audio_path, **_kwargs: [],  # pyright: ignore[reportUnknownLambdaType]
+            model_picker=lambda preset: model,  # noqa: ARG005
+            reporter=reporter,
+        )
+
+        assert [event.stage for line in lines if (event := parse_progress(line))] == [
+            "preprocess",
+            "load model",
+            "transcribe",
+            "transcribe",
+            "diarize",
+        ]
 
     def test_transcribe_skips_annotate_when_diarize_false(self, tmp_path: Path) -> None:
         """Default diarize=False leaves the runner unused."""

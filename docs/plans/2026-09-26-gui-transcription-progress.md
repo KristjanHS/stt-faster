@@ -1,6 +1,6 @@
 # GUI transcription progress — structured channel
 
-**Status:** rung 1 shipped; backlog below is unordered, re-pick after each rung.
+**Status:** rung 2 in flight; backlog below is unordered, re-pick after each rung.
 
 ## Decision (2026-09-26)
 
@@ -10,9 +10,10 @@ Chose option C over (A) regex-parsing the `⌛ Transcription progress` log line 
 the GUI reads only prefixed lines. A/B were rejected because they couple the GUI to a human/third-party
 text format and cover only the transcribe stage.
 
-Wire format: `@@progress {"file": 2, "files": 3, "stage": "transcribe", "done": 312.4, "total": 1800.0}`
-— `done`/`total` omitted on a bare stage change. Stage changes are never throttled; `advance` is
-throttled to 1/s (`MIN_INTERVAL_SECONDS`). Overall fraction = `(file - 1 + done/total) / files`.
+Wire format: `@@progress {"file": 2, "files": 3, "stage": "diarize", "detail": "embeddings", "done": 31, "total": 90}`
+— `done`/`total` omitted on a bare stage change, `detail` optional. Stage changes are never throttled;
+`advance` is throttled to 1/s (`MIN_INTERVAL_SECONDS`). Bar = the current stage's own `done/total`
+(resets per stage/detail; indeterminate on a bare stage); no overall % (ruled 2026-09-26, rung 2).
 
 ## Rung 1 (shipped)
 
@@ -25,14 +26,15 @@ throttled to 1/s (`MIN_INTERVAL_SECONDS`). Overall fraction = `(file - 1 + done/
 - Review fixes: forced end-of-file `advance` (the throttle dropped the last point); a `Retrying…` line
   resets the bar to indeterminate; `_finish` fills the bar only when `JobResult.ok`.
 
+## Rung 2 — diarize + stage names
+
+- `transcribe()` emits `preprocess` → `load model` → `transcribe` → `diarize` stages via a defaulted `reporter`.
+- `_DiarizeProgressHook` takes an `on_progress(step, completed, total)` callback (diarize stays free of
+  `backend.progress`); `transcribe()` adapts it to `stage/advance("diarize", …, detail=step)`.
+- GUI: bar = `stage_fraction`, label `File 2/3 · Identifying speakers · embeddings`; `overall_fraction` removed.
+
 ## Backlog
 
-- **Diarization stage** — feed `_DiarizeProgressHook` (`backend/diarize/pyannote_runner.py`) into the
-  reporter: `stage("diarize")` on entry, `advance("diarize", completed, total)` per pyannote step. Needs a
-  stage-weight split per file (e.g. transcribe 0.7 / diarize 0.3 when diarizing), else the bar reaches
-  100 % of a file before diarization starts.
-- **Preprocess / model-load stage names** — `stage("preprocess")`, `stage("load model")` so the long
-  pre-segment wait is named instead of a generic "Preparing".
 - **ETA** — the GUI measures the rate of `done` against wall time per file → `~6 min left` for the current
   file; the whole-job ETA needs the durations of later files (emit `durations` in `start_file`?).
 - **Retry file numbering** — a retry resets the bar to indeterminate with a `Retrying…` label, then counts

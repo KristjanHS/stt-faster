@@ -44,6 +44,8 @@ PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 # Mirrors backend/transcribe.py PROGRESS_LOG_INTERVAL_SECONDS — duplicated
 # rather than imported to keep diarize free of cross-module coupling.
 PROGRESS_LOG_INTERVAL_SECONDS = 60.0
+ProgressCallback = Callable[[str, int | None, int | None], None]
+"""``(step_name, completed, total)``; ``completed=None`` marks a step's entry."""
 
 
 class _DiarizeProgressHook:
@@ -65,9 +67,16 @@ class _DiarizeProgressHook:
       transcription progress logger.
     """
 
-    def __init__(self, audio_duration: float | None, *, clock: Callable[[], float] = time.time) -> None:
+    def __init__(
+        self,
+        audio_duration: float | None,
+        *,
+        clock: Callable[[], float] = time.time,
+        on_progress: ProgressCallback | None = None,
+    ) -> None:
         self._audio_duration = audio_duration
         self._clock = clock
+        self._on_progress = on_progress
         self._start_time = 0.0
         self._last_log_time = 0.0
         self._last_step: str | None = None
@@ -92,6 +101,8 @@ class _DiarizeProgressHook:
         now = self._clock()
         elapsed_min = (now - self._start_time) / 60
         if step_name != self._last_step:
+            if self._on_progress is not None:
+                self._on_progress(step_name, None, None)
             LOGGER.info(
                 "⌛ Diarization progress: %s, elapsed %.1f min",
                 step_name,
@@ -102,6 +113,8 @@ class _DiarizeProgressHook:
             return
         if completed is None or not total:
             return
+        if self._on_progress is not None:
+            self._on_progress(step_name, completed, total)
         if (now - self._last_log_time) < PROGRESS_LOG_INTERVAL_SECONDS:
             return
         percent = min(completed / total * 100, 999.0)
@@ -188,6 +201,7 @@ def run_pyannote(
     audio_duration: float | None = None,
     env: Mapping[str, str] = os.environ,
     import_pipeline: Callable[[], Any] = _import_pipeline_class,
+    on_progress: ProgressCallback | None = None,
 ) -> list[SpeakerTurn]:
     """Run pyannote speaker-diarization-community-1 on the given audio file.
 
@@ -260,7 +274,7 @@ def run_pyannote(
         else:
             LOGGER.info("🐌 Diarization pipeline on CPU (no CUDA available)")
         waveform, sample_rate = _load_audio_tensor(audio_path)
-        with _DiarizeProgressHook(audio_duration) as hook:
+        with _DiarizeProgressHook(audio_duration, on_progress=on_progress) as hook:
             diarization: Any = pipeline(
                 {"waveform": waveform, "sample_rate": sample_rate},
                 num_speakers=num_speakers,

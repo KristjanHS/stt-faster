@@ -651,6 +651,7 @@ def transcribe(
     diarize: bool = False,
     num_speakers: int = 2,
     diarize_runner: Any = None,
+    reporter: ProgressReporter = REPORTER,
 ) -> Dict[str, Any]:
     LOGGER.info("Starting transcription of: %s", os.path.basename(path))
     preset_config = get_preset(preset)
@@ -665,12 +666,14 @@ def transcribe(
     transcription_config = transcription_config_provider()
     LOGGER.info("Beam size: %d", transcription_config.beam_size)
     overall_start = time.time()
+    reporter.stage("preprocess")
     preprocess_result = preprocess_runner(path, preprocess_config)
     duration_hint = preprocess_result.input_info.duration if preprocess_result.input_info else None
     if duration_hint:
         LOGGER.info("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
     try:
+        reporter.stage("load model")
         model = (model_picker or pick_model)(preset)
         segments: Iterable["Segment"]
         info: "TranscriptionInfo"
@@ -686,6 +689,7 @@ def transcribe(
             LOGGER.info("Language: auto-detect")
 
         LOGGER.info("Transcribing audio")
+        reporter.stage("transcribe")
         transcribe_start = time.time()
         # Merge vad_threshold into vad_parameters as 'threshold'
         vad_params = dict(transcription_config.vad_parameters)
@@ -726,6 +730,7 @@ def transcribe(
             logprob_threshold=transcription_config.logprob_threshold,
             total_audio_duration=total_audio_duration,
             transcribe_start=transcribe_start,
+            reporter=reporter,
         )
 
         whisper_elapsed_min = (time.time() - transcribe_start) / 60
@@ -751,9 +756,11 @@ def transcribe(
                 audio_minutes,
             )
             diarize_start = time.time()
+            reporter.stage("diarize")
             annotate_kwargs: dict[str, Any] = {
                 "num_speakers": num_speakers,
                 "audio_duration": total_audio_duration,
+                "on_progress": reporter.substeps("diarize"),
             }
             if diarize_runner is not None:
                 annotate_kwargs["runner"] = diarize_runner

@@ -26,19 +26,14 @@ class ProgressEvent:
     stage: str
     done: float | None = None
     total: float | None = None
+    detail: str | None = None  # sub-step within the stage, e.g. a pyannote step name
 
     @property
-    def stage_fraction(self) -> float:
+    def stage_fraction(self) -> float | None:
+        """Fraction of the current stage, or None when the event carries no quantities."""
         if self.done is None or not self.total or self.total <= 0:
-            return 0.0
+            return None
         return min(max(self.done / self.total, 0.0), 1.0)
-
-    @property
-    def overall_fraction(self) -> float:
-        """Whole-job fraction, weighting every file equally."""
-        if self.files <= 0:
-            return 0.0
-        return min((max(self.file - 1, 0) + self.stage_fraction) / self.files, 1.0)
 
 
 def parse_progress(line: str) -> ProgressEvent | None:
@@ -54,6 +49,7 @@ def parse_progress(line: str) -> ProgressEvent | None:
             stage=str(data["stage"]),
             done=None if data.get("done") is None else float(data["done"]),
             total=None if data.get("total") is None else float(data["total"]),
+            detail=None if data.get("detail") is None else str(data["detail"]),
         )
     except (ValueError, KeyError, TypeError):
         return None
@@ -79,13 +75,27 @@ class ProgressReporter:
         self.file, self.files = index, total
         self.stage("prepare")
 
-    def stage(self, name: str) -> None:
+    def stage(self, name: str, detail: str | None = None) -> None:
         """Announce a stage change; never throttled."""
-        self._emit(ProgressEvent(self.file, self.files, name), force=True)
+        self._emit(ProgressEvent(self.file, self.files, name, detail=detail), force=True)
 
-    def advance(self, stage: str, done: float, total: float | None, *, force: bool = False) -> None:
+    def advance(
+        self, stage: str, done: float, total: float | None, *, detail: str | None = None, force: bool = False
+    ) -> None:
         """Report ``done`` of ``total`` within ``stage``; throttled to one line per interval unless ``force``."""
-        self._emit(ProgressEvent(self.file, self.files, stage, done, total), force=force)
+        self._emit(ProgressEvent(self.file, self.files, stage, done, total, detail), force=force)
+
+    def substeps(self, stage: str) -> Callable[[str, int | None, int | None], None]:
+        """A ``(step, completed, total)`` callback for sub-steps of ``stage``; ``completed=None`` = step entry."""
+
+        def report(step: str, completed: int | None, total: int | None) -> None:
+            detail = step.replace("_", " ")
+            if completed is None or not total:
+                self.stage(stage, detail)
+            else:
+                self.advance(stage, completed, total, detail=detail, force=completed >= total)
+
+        return report
 
     def _emit(self, event: ProgressEvent, *, force: bool) -> None:
         if not self.enabled or self.files <= 0:
@@ -95,6 +105,8 @@ class ProgressReporter:
             return
         self._last_emit = now
         payload: dict[str, object] = {"file": event.file, "files": event.files, "stage": event.stage}
+        if event.detail is not None:
+            payload["detail"] = event.detail
         if event.done is not None:
             payload["done"] = round(event.done, 1)
             payload["total"] = None if event.total is None else round(event.total, 1)

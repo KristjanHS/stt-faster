@@ -40,7 +40,23 @@ def test_advance_is_throttled_but_stage_changes_are_not() -> None:
         ProgressEvent(2, 3, "transcribe", 50.0, 100.0),
         ProgressEvent(2, 3, "diarize"),
     ]
-    assert events[1] is not None and events[1].overall_fraction == pytest.approx(0.5)  # (1 + 0.5) / 3
+    assert events[1] is not None and events[1].stage_fraction == pytest.approx(0.5)
+    assert events[2] is not None and events[2].stage_fraction is None  # a bare stage has no fraction
+
+
+def test_substeps_name_each_step_and_force_its_last_point() -> None:
+    clock = FakeClock()
+    reporter, lines = _reporter(clock)
+    reporter.start_file(1, 2)
+    report = reporter.substeps("diarize")
+    report("speaker_counting", None, None)
+    report("speaker_counting", 1, 4)  # same instant as the entry line: dropped
+    report("speaker_counting", 4, 4)  # step end: forced
+
+    assert [parse_progress(line) for line in lines][1:] == [
+        ProgressEvent(1, 2, "diarize", detail="speaker counting"),
+        ProgressEvent(1, 2, "diarize", 4.0, 4.0, "speaker counting"),
+    ]
 
 
 def test_disabled_reporter_writes_nothing() -> None:

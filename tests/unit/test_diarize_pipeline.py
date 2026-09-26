@@ -98,6 +98,21 @@ class TestAnnotate:
         for seg in out:
             assert "speaker" not in seg
 
+    def test_on_progress_reaches_the_runner_only_when_given(self) -> None:
+        seen: list[dict[str, Any]] = []
+
+        def runner(_path: str, **kwargs: Any) -> list[SpeakerTurn]:
+            seen.append(kwargs)
+            return []
+
+        def report(_step: str, _completed: int | None, _total: int | None) -> None:
+            return None
+
+        annotate([_seg(0.0, 1.0)], "fake.wav", runner=runner)
+        annotate([_seg(0.0, 1.0)], "fake.wav", runner=runner, on_progress=report)
+        assert "on_progress" not in seen[0]
+        assert seen[1]["on_progress"] is report
+
     def test_runner_turns_get_assigned_and_anchored(self) -> None:
         segments = [_seg(0.0, 2.0), _seg(2.0, 4.0)]
 
