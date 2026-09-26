@@ -82,8 +82,9 @@ jobs:
       #- name: Seed pip in .venv
       #  run: uv venv --seed
       - name: Sync test env
+        # gui extra: backend/gui.py imports tkinterdnd2, unresolvable without it
         run: |
-          uv sync --extra cpu --group test --frozen
+          uv sync --extra cpu --extra gui --group test --frozen
       - name: Pyright (Makefile)
         run: make pyright
 
