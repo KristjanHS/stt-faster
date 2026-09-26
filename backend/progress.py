@@ -203,7 +203,8 @@ class RichProgressBar:
 
 
 def _default_bar() -> ProgressBar | None:
-    if os.environ.get(PROGRESS_ENV) == "1" or not sys.stdout.isatty():
+    # REPORTER builds this at import, and pythonw.exe (the GUI) has sys.stdout = None until main() attaches gui.log.
+    if os.environ.get(PROGRESS_ENV) == "1" or sys.stdout is None or not sys.stdout.isatty():
         return None
     return RichProgressBar()
 
