@@ -11,6 +11,7 @@ explicitly calls out. Cheap and runs in unit-test time (no torch import).
 
 from __future__ import annotations
 
+import subprocess
 from importlib.metadata import PackageNotFoundError, distribution
 from pathlib import Path
 
@@ -18,10 +19,11 @@ import pytest
 
 
 def _gpu_variant_selected() -> bool:
-    variant_file = Path(__file__).resolve().parents[2] / ".stt-variant.local"
-    if not variant_file.exists():
-        return False
-    return variant_file.read_text().strip() == "cu130"
+    # Ask the same selector run_uv.sh uses, so a linked worktree that inherits
+    # the main checkout's `.stt-variant.local` resolves identically here.
+    selector = Path(__file__).resolve().parents[2] / "scripts" / "select_variant.sh"
+    result = subprocess.run([str(selector)], capture_output=True, text=True, check=True)  # noqa: S603
+    return result.stdout.strip() == "cu130"
 
 
 def test_cpu_install_has_no_transitive_cuda() -> None:
