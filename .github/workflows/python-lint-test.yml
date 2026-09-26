@@ -26,7 +26,7 @@ jobs:
     if: ${{ github.actor != 'nektos/act' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false # ⬅️ do not store token in git config
       - name: Ruff static analysis
@@ -44,7 +44,7 @@ jobs:
     name: Unit Tests
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false # ⬅️ do not store token in git config
       - name: Setup Python + uv (cached)
@@ -74,7 +74,7 @@ jobs:
     if: ${{ github.actor != 'nektos/act' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false # ⬅️ do not store token in git config
       - name: Setup Python + uv (cached)
@@ -94,7 +94,7 @@ jobs:
     needs: unit_tests
     if: ${{ github.actor == 'nektos/act' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false # ⬅️ do not store token in git config
       - name: Setup Python + uv (cached)
@@ -126,7 +126,7 @@ jobs:
     needs: unit_tests
     if: ${{ github.actor == 'nektos/act' && (github.event_name == 'workflow_dispatch' || github.event_name == 'schedule') }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false # ⬅️ do not store token in git config
       - name: Setup Python + uv (cached)
