@@ -55,6 +55,9 @@ FFMPEG_BINARIES = ("ffmpeg.exe", "ffprobe.exe")  # inspect_audio needs ffprobe e
 USER_AGENT = f"{APP_NAME}-setup"
 SOURCE_IGNORE_DIRS = frozenset({"__pycache__", "node_modules", "logs", "reports", "build", "dist"})
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash from a --windowed exe
+NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)  # a --headless hop: the launcher had no console
+SETUP_MUTEX = f"Local\\{APP_NAME}-setup"  # held by every setup process: one setup run at a time
+ERROR_ALREADY_EXISTS = 183
 GPU_MODE_VERSION = (1, 2, 0)  # first release with GPU mode; older installs saved device=cpu unasked
 MIN_GPU_DRIVER = (528, 33)  # CUDA 12.0 on Windows; newer cuBLAS 12.x runs via minor-version compatibility
 MIN_GPU_VRAM_MIB = 4000  # ~4 GB; a misjudged GPU falls back to CPU (model load or the GUI's retry)
@@ -818,6 +821,7 @@ def relaunch_from_temp(
     tempdir: Callable[[], str] = tempfile.gettempdir,
     runtime: Path = Path(sys.base_prefix),
     env: Mapping[str, str] = os.environ,
+    console: bool = False,
 ) -> None:
     """Windows can't replace or delete a running program: continue from a %TEMP% copy of it.
 
@@ -830,11 +834,12 @@ def relaunch_from_temp(
     cmd = [str(copy)]
     if program.suffix == ".py":
         shutil.copytree(runtime, hop / "python", ignore=RUNTIME_IGNORE)
-        cmd[:0] = [str(hop / "python" / "pythonw.exe"), "-I"]  # isolated: no user site, no PYTHON* vars
+        python = "python.exe" if console else "pythonw.exe"
+        cmd[:0] = [str(hop / "python" / python), "-I"]  # isolated: no user site, no PYTHON* vars
     # A venv launcher's marker would start the copy as that venv again.
     child_env = {k: v for k, v in env.items() if k.upper() not in {"__PYVENV_LAUNCHER__", "PYTHONHOME", "PYTHONPATH"}}
     # cwd outside the install dir: Explorer starts us there, and Windows won't remove a process's cwd.
-    popen([*cmd, *args], cwd=tempdir(), creationflags=NO_WINDOW, env=child_env)
+    popen([*cmd, *args], cwd=tempdir(), creationflags=NEW_CONSOLE if console else NO_WINDOW, env=child_env)
 
 
 def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
@@ -1056,7 +1061,7 @@ def uninstall_main(
     dialogs: Callable[[], Any] = _messagebox,
     winreg: Callable[[], Any] = _winreg,
     program: Callable[[], Path] = setup_program,
-    relaunch: Callable[[Path, Sequence[str]], None] = relaunch_from_temp,
+    relaunch: Callable[..., None] = relaunch_from_temp,
     remove: Callable[..., None] = uninstall,
     self_delete: Callable[[Path, Mapping[str, str]], None] = schedule_self_delete,
     marker: Callable[[], Path] = ready_marker,
@@ -1078,7 +1083,7 @@ def uninstall_main(
     reg = winreg() if paths.windows else None
     if runs_from_install(exe, paths):
         if root is None:
-            relaunch(exe, ["--uninstall", "--yes", "--headless"])
+            relaunch(exe, ["--uninstall", "--yes", "--headless"], console=True)
             return 0
         ready = ready_file or marker()
         args = ["--uninstall", "--yes", "--ready-file", str(ready)]
@@ -1786,7 +1791,7 @@ def setup_hop(
     *,
     headless: bool,
     program: Callable[[], Path] = setup_program,
-    relaunch: Callable[[Path, Sequence[str]], None] = relaunch_from_temp,
+    relaunch: Callable[..., None] = relaunch_from_temp,
     marker: Callable[[], Path] = ready_marker,
     tk_root: Callable[[], Any] = tk.Tk,
     starting: Callable[..., None] = show_starting,
@@ -1801,7 +1806,7 @@ def setup_hop(
     LOGGER.info("Continuing setup from a %%TEMP%% copy of %s", exe)
     args = [*argv, "--ready-file", str(ready)]
     if headless:
-        relaunch(exe, args)
+        relaunch(exe, args, console=True)
     else:
         root = tk_root()
         root.withdraw()
@@ -1812,15 +1817,51 @@ def setup_hop(
     return True
 
 
+def another_setup_running() -> bool:
+    """Open the setup mutex for this process's lifetime; True when another setup process already has it open."""
+    if sys.platform != "win32":
+        return False
+    import ctypes  # noqa: PLC0415 - Windows-only
+
+    kernel32 = getattr(ctypes, "WinDLL")("kernel32", use_last_error=True)
+    _MUTEX_HANDLES.append(kernel32.CreateMutexW(None, False, SETUP_MUTEX))
+    return getattr(ctypes, "get_last_error")() == ERROR_ALREADY_EXISTS
+
+
+_MUTEX_HANDLES: list[Any] = []  # never closed: Windows drops them at exit
+
+
+def already_running(*, headless: bool) -> int:
+    """A second click on Repair / Uninstall: point at the open setup window instead of racing it."""
+    if headless:
+        sys.stderr.write("Transcribe setup is already running.\n")
+        return 1
+    root = tk.Tk()
+    root.withdraw()
+    _messagebox().showinfo("Transcribe — Setup", "Transcribe setup is already open.", parent=root)
+    root.destroy()
+    return 1
+
+
+def forward_args(args: argparse.Namespace) -> list[str]:
+    """The hop's flags; a local ``--source`` made absolute, as the copy runs with cwd %TEMP%."""
+    out: list[str] = []
+    if args.source:
+        remote = args.source.startswith(("https://", "http://"))
+        out += ["--source", args.source if remote else str(Path(args.source).resolve())]
+    return out + [f"--{name}" for name in ("clean", "headless", "extras", "cpu") if getattr(args, name)]
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    argv = list(sys.argv[1:] if argv is None else argv)
     args = parse_args(argv)
+    if another_setup_running() and args.ready_file is None:  # a hop joins the run that started it
+        return already_running(headless=args.headless)
     paths = default_install_paths()
     if args.uninstall:
         _setup_logging(None, console=args.headless)
         return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes, ready_file=args.ready_file)
     _setup_logging(paths.log_file, console=args.headless)
-    if setup_hop(paths, argv, headless=args.headless):
+    if setup_hop(paths, forward_args(args), headless=args.headless):
         return 0
     handoff = ReadyHandoff(args.ready_file) if args.ready_file is not None else None
     # Bitdefender sets it in Chrome, so a setup opened from the download bar inherits it; dropped here, our own

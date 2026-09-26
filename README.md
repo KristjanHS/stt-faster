@@ -11,17 +11,12 @@ Turns speech recordings into text on your own computer — Estonian by default, 
 
 ## Windows app (no technical setup)
 
-Download [Transcribe-Setup.exe](https://github.com/KristjanHS/stt-faster/releases/latest/download/Transcribe-Setup.exe) and double-click it — no admin rights needed. The app is not code-signed yet, so Windows warns twice:
+Download [Transcribe-Setup.exe](https://github.com/KristjanHS/stt-faster/releases/latest/download/Transcribe-Setup.exe) and double-click it — no admin rights needed. The app is not code-signed, so Windows warns twice:
 
 1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
 2. Blue *Windows protected your PC* screen: click **More info → Run anyway**.
 
-## Code signing policy
-
-Free code signing provided by [SignPath.io](https://about.signpath.io), certificate by [SignPath Foundation](https://signpath.org). The Windows installer is built from source by the `.github/workflows/release-installer.yml` workflow, which submits it to SignPath for signing (pending approval — until then it is unsigned).
-
-- Committers and reviewers: [KristjanHS](https://github.com/KristjanHS)
-- Approvers: [KristjanHS](https://github.com/KristjanHS)
+Open it straight from the browser. Afterwards, update or remove the app with Start ▸ Transcribe ▸ **Repair** / **Uninstall**: Smart App Control may block opening the downloaded file again.
 
 **Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. It only downloads what it needs:
 
