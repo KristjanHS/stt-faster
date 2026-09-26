@@ -1,6 +1,6 @@
 # GUI transcription progress — structured channel
 
-**Status:** rungs 1–3 shipped; backlog below is unordered, re-pick after each rung.
+**Status:** ✅ SHIPPED — rungs 1–5.
 
 ## Decision (2026-09-26)
 
@@ -45,4 +45,4 @@ Wire format: `@@progress {"file": 2, "files": 3, "stage": "diarize", "detail": "
 
 ## Rung 5 — retry numbering (ruled 2026-09-26)
 
-- `run_job` renumbers a retry batch's `@@progress` lines onto the original list (`File 4/5`), dropping `durations`; GUI appends ` (retry)` after a `Retrying…` line. No backend change.
+- `renumber_progress` continues the count: a retry of k of N files shows `File N−k+1/N…` (CLI scan order ≠ list order, so no list positions), `durations` dropped; GUI appends ` (retry)`.
