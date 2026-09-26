@@ -5,6 +5,7 @@
 set -euo pipefail
 
 EXE_NAME="Transcribe-Setup.exe"
+KEEP_EXES=5 # releases (newest first, the new one included) that keep their exe; older ones lose it
 NOTES="Download **${EXE_NAME}** and run it — no admin rights needed. The app is not code-signed, so Windows warns twice:
 1. Browser says the file *isn't commonly downloaded*: click **Keep** (Edge: **… → Keep → Show more → Keep anyway**).
 2. *Windows protected your PC*: click **More info → Run anyway**."
@@ -78,4 +79,19 @@ git push --atomic origin main "$tag"
 hint="gh release create ${tag} --title ${tag} --generate-notes --latest --verify-tag"
 gh release create "$tag" --title "$tag" --generate-notes --notes "$NOTES" --latest --verify-tag
 hint=""
+
+# --- Prune the exe from all but the newest KEEP_EXES releases (best-effort: the release is already out) ---
+# The new release counts as one of them: CI attaches its exe, reusing the newest earlier one if installer/ is unchanged.
+n=0
+while read -r t; do
+    [[ -n "$t" ]] || continue
+    n=$((n + 1))
+    ((n > KEEP_EXES)) || continue
+    if gh release view "$t" --json assets --jq '.assets[].name' | grep -qxF "$EXE_NAME"; then
+        gh release delete-asset "$t" "$EXE_NAME" --yes >/dev/null && echo "release: removed ${EXE_NAME} from ${t}" ||
+            echo "release: warning — could not remove ${EXE_NAME} from ${t}" >&2
+    fi
+done < <(gh release list --exclude-drafts --limit 100 --json tagName --jq '.[].tagName' ||
+    echo "release: warning — could not list releases to prune old exes" >&2)
+
 echo "release: ${tag} published — the release-installer workflow attaches ${EXE_NAME} (rebuilt only if installer/ changed)"
