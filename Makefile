@@ -368,8 +368,9 @@ pre-commit:
 	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv sync --extra "$$(./scripts/select_variant.sh)" --group dev --group test --frozen
 	UV_CACHE_DIR=./.uv-cache PRE_COMMIT_HOME=./.pre-commit-cache uv run pre-commit run --all-files
 
+# Next patch version by default; BUMP=minor|major or V=X.Y.Z overrides
 release:
-	./scripts/release.sh "$(V)"
+	./scripts/release.sh "$(or $(V),$(BUMP))"
 
 # Run the same checks as the Git pre-push hook, forcing all SKIP flags to 0
 pre-push:

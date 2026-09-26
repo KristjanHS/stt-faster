@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cut a GitHub release: bump version, tag, push main + tag, publish. The release-installer workflow attaches the exe.
-# Usage: make release V=X.Y.Z   (or scripts/release.sh X.Y.Z)
+# Usage: make release [BUMP=patch|minor|major] [V=X.Y.Z]   (or scripts/release.sh [patch|minor|major|X.Y.Z])
 
 set -euo pipefail
 
@@ -14,12 +14,29 @@ die() {
     exit 1
 }
 
-version="${1:-}"
-[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "usage: make release V=X.Y.Z (got '${version}')"
-tag="v${version}"
-
+bump="${1:-patch}"
 root="$(git rev-parse --show-toplevel)"
 cd "$root"
+
+current="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
+if [[ "$bump" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    version="$bump"
+elif [[ "$bump" =~ ^(patch|minor|major)$ ]]; then
+    [[ "$current" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || die "pyproject.toml version '${current}' is not X.Y.Z"
+    major="${BASH_REMATCH[1]}" minor="${BASH_REMATCH[2]}" patch="${BASH_REMATCH[3]}"
+    if ! git ls-remote --exit-code --tags origin "refs/tags/v${current}" >/dev/null; then
+        version="$current" # an earlier run bumped but never tagged: finish that release
+    elif [[ "$bump" == major ]]; then
+        version="$((major + 1)).0.0"
+    elif [[ "$bump" == minor ]]; then
+        version="${major}.$((minor + 1)).0"
+    else
+        version="${major}.${minor}.$((patch + 1))"
+    fi
+else
+    die "usage: make release [BUMP=patch|minor|major] [V=X.Y.Z] (got '${bump}')"
+fi
+tag="v${version}"
 
 # --- Preflight: nothing below mutates the repo until every check passes ---
 [[ "$(git rev-parse --abbrev-ref HEAD)" == "main" ]] || die "not on main"
@@ -35,6 +52,11 @@ git fetch -q origin main
 [[ "$(git rev-list --count HEAD..origin/main)" == "0" ]] || die "main is behind origin/main — pull first"
 gh auth status >/dev/null 2>&1 || die "gh is not logged in — run: gh auth login"
 
+if [[ -t 0 ]]; then
+    read -r -p "release: publish ${tag} (currently ${current})? [y/N] " answer
+    [[ "$answer" == [yY] ]] || die "cancelled"
+fi
+
 hint=""
 cleanup() {
     local status=$?
@@ -43,7 +65,6 @@ cleanup() {
 trap cleanup EXIT
 
 # --- Bump the project version (skipped when a previous run already did it) ---
-current="$(sed -n 's/^version = "\(.*\)"$/\1/p' pyproject.toml | head -n 1)"
 if [[ "$current" != "$version" ]]; then
     hint="git checkout -- pyproject.toml uv.lock, then re-run make release V=${version}"
     sed -i "0,/^version = \".*\"\$/s//version = \"${version}\"/" pyproject.toml
