@@ -212,7 +212,7 @@ def test_cli_env_points_rnnoise_at_the_installed_model_only_when_present(paths: 
     paths.rnnoise_model.parent.mkdir(parents=True)
     paths.rnnoise_model.write_bytes(b"weights")
     env = cli_env({}, paths, None)
-    assert env["STT_PREPROCESS_RNNOISE_MODEL"] == str(paths.install_dir / "models" / "sh.rnnn")
+    assert env["STT_PREPROCESS_RNNOISE_MODEL"] == str(paths.install_dir / "app" / "models" / "sh.rnnn")
 
 
 def _py_env() -> dict[str, str]:

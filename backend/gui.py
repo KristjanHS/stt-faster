@@ -85,7 +85,7 @@ class AppPaths:
 
     @property
     def rnnoise_model(self) -> Path:
-        return self.install_dir / "models" / "sh.rnnn"  # mirrors installer.setup_gui.InstallPaths
+        return self.install_dir / "app" / "models" / "sh.rnnn"  # mirrors installer.setup_gui.InstallPaths
 
     @property
     def gui_log(self) -> Path:

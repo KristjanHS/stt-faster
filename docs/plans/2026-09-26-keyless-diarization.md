@@ -1,6 +1,6 @@
 # Keyless, offline speaker diarization
 
-**Status:** Stages 1-6 shipped (Linux verify, network-off e2e, review fixes) — owner Windows eyeballs + the RNNoise `[USER DECISION]` remain.
+**Status:** Stages 1-6 shipped (Linux verify, network-off e2e, review fixes) — owner Windows eyeballs remain.
 
 "Identify speakers" should need no Hugging Face account or token. Model weights are fetched once at install time from an ungated, revision-pinned mirror, and at transcription time they load from a local dir only.
 
@@ -12,6 +12,7 @@
 - Out of scope: sherpa-onnx, pyannoteAI precision-2 cloud tier (app must stay offline), removing torch.
 - Round 2 (owner, 2026-09-26): the app must never propose anything that needs a network connection. The in-app Extras panel and the installer's `--extras` mode are removed; every base install/repair ALWAYS installs the speaker libraries (`--extra cpu`) and the pinned model.
 - Round 2: RNNoise `sh.rnnn` is in scope. Install time prefetches it; the runtime never downloads and fails clearly if it is missing (Stage 4).
+- Round 4 (owner, 2026-09-26): drop the installer's RNNoise download — `models/sh.rnnn` is git-tracked and ships in `app\models\`.
 - Round 3 (owner, 2026-09-26): plda/ (BUT Speech@FIT VBx) and RNNoise `sh.rnnn` licences confirmed — NOTICE states plain attributions. Docker gets both models via a read-only host mount, never baked into the image.
 
 ## Pinned constants (checked against the HF tree API at the pinned revision, 2026-09-26)
@@ -111,7 +112,7 @@ Focus: `backend/preprocess/steps/ffmpeg_pipeline.py` (:19-56), `scripts/prefetch
 - Runtime: `_ensure_rnnoise_model` only checks existence; missing → `StepExecutionError` "RNNoise model not installed — run `make rnnoise-model` (dev) or run setup again to repair (Windows)". Delete the httpx download and `RNNOISE_MODEL_URL`.
 - Pin (shipped in `scripts/prefetch_models.py`): commit `3eee541a283fd3b8f81b85b1748e3b9ccbefa04d`, 297 646 B, sha256 `70bb6685eb0c2a1d18e2918dca3fbfbd39317010b1802eb1b6ea73a92f3fdec0`. The installer copies these; a drift test pins them.
 - Dev: `prefetch_models.py --rnnoise-only` downloads + verifies to `models/sh.rnnn` (the `preprocess/config.py:172` default); `make rnnoise-model` wraps it; the default prefetch includes it.
-- Installer: new stdlib task "Model: RNNoise" downloads + verifies into `<install>/models/sh.rnnn`; `build_env` sets `STT_PREPROCESS_RNNOISE_MODEL` to that absolute path when it exists.
+- Installer: no RNNoise task (Round 4); `build_env` sets `STT_PREPROCESS_RNNOISE_MODEL` to the shipped `<install>/app/models/sh.rnnn` when it exists.
 - Tests: missing file → error with no network; installer task verify pass/fail with an injected fetcher; `build_env` sets the env var only when the file exists.
 - Done when: `grep -rn "httpx\|RNNOISE_MODEL_URL" backend/` returns nothing, and the unit tests are green.
 
@@ -140,7 +141,7 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
    - The run includes RNNoise denoising (after `make rnnoise-model`); a second falsifier with `STT_PREPROCESS_RNNOISE_MODEL=/nonexistent` must fail with "RNNoise model not installed".
 3. Fresh `Agent(subagent_type="code-reviewer")` over the Stage 1-5 diff. Triage findings by defect class, then commit fixes.
 4. Owner-owed Windows eyeballs (ranked):
-   1. Fresh install → the setup rows "Model: speaker-diarization-community-1" (about 33 MB) and "Model: RNNoise" reach 100 %; Transcribe opens with ☐ Identify speakers and no ▸ Extras panel.
+   1. Fresh install → the setup row "Model: speaker-diarization-community-1" (about 33 MB) reaches 100 % and there is no RNNoise row; Transcribe opens with ☐ Identify speakers and no ▸ Extras panel.
    2. Upgrade an existing token install (run setup repair): `%APPDATA%\stt-faster\hf_token` and `<install>\hf\hub\models--pyannote--speaker-diarization-community-1` are gone, `models--pyannote-community--…\snapshots\8a52…` is present, and the checkbox is still shown.
    3. Airplane mode → transcribe a two-speaker file with Identify speakers → speaker labels appear and there is no "Speakers skipped" banner.
    4. Delete the `models--pyannote-community--…` folder and relaunch → the checkbox is hidden; setup repair restores it.
@@ -148,6 +149,4 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 
 ## Open hedges
 
-- `[USER DECISION]` RNNoise install task: `models/sh.rnnn` is git-tracked (ships in the zipball), no built-in variant runs `arnndn`, yet `rnnoise` is in `finish.needs` (`installer/setup_gui.py:1511-1513`).
-  Options: drop the task + GUI env + docker mount; keep it but drop it from `finish.needs`; keep as is.
 - `[AUDIT]` The Stage 3 `HF_HUB_OFFLINE=1` assumes the installed Whisper snapshots have `refs/main` cached, which `hf download` writes. Stage 6 item 3 on Windows proves it.
