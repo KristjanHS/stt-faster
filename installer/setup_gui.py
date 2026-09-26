@@ -63,6 +63,8 @@ GPU_MODE_VERSION = (1, 2, 0)  # first release with GPU mode; older installs save
 MIN_GPU_DRIVER = (528, 33)  # CUDA 12.0 on Windows; newer cuBLAS 12.x runs via minor-version compatibility
 MIN_GPU_VRAM_MIB = 4000  # ~4 GB; a misjudged GPU falls back to CPU (model load or the GUI's retry)
 GPU_EXTRA_SIZE = "1.2 GB"  # gpu-win wheels: cuBLAS + cuDNN 9.1
+MIN_SPEAKER_GPU_DRIVER = (580, 0)  # CUDA 13 (R580): the cu130 torch that runs speaker identification on the GPU
+GPU_SPEAKERS_EXTRA_SIZE = "3.7 GB"  # gpu-win + cu130 torch (~2.5 GB) in place of the CPU one
 UNINSTALL_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"  # HKCU: Apps & features, no admin
 SETUP_TEMP_PREFIX = f"{APP_NAME}-setup-"  # %TEMP% folders a setup run continues from (see relaunch_from_temp)
 # Kept out of a hop's runtime copy: the app's packages and the stdlib parts setup never imports.
@@ -450,11 +452,12 @@ def classify_source(source: str) -> str:
     raise InstallError(f"--source must be a URL, a .zip file or a folder: {source}")
 
 
-def deps_command(paths: InstallPaths) -> list[str]:
+def deps_command(paths: InstallPaths, gpu: GpuInfo | None = None) -> list[str]:
     pin = paths.app_dir / ".python-version"  # UV_NO_CONFIG also skips .python-version discovery
     python = pin.read_text(encoding="utf-8").strip() if pin.is_file() else PYTHON_VERSION
     # a full sync drops every optional group it is not given: speaker libraries always, GPU mode once it is on
-    config = read_config(paths.config_file)
+    cuda = read_config(paths.config_file).get("device") == "cuda"
+    speakers = "cu130" if cuda and speakers_on_gpu(gpu) else "cpu"
     return [
         str(paths.uv_exe),
         "sync",
@@ -463,8 +466,8 @@ def deps_command(paths: InstallPaths) -> list[str]:
         "--extra",
         "gui",
         "--extra",
-        "cpu",
-        *(("--extra", "gpu-win") if config.get("device") == "cuda" else ()),
+        speakers,
+        *(("--extra", "gpu-win") if cuda else ()),  # ctranslate2 needs CUDA 12 cuBLAS; cu130 torch ships 13
         "--python",
         python,
         "--python-preference",
@@ -680,6 +683,11 @@ def gpu_capable(info: GpuInfo | None) -> bool:
     return info is not None and info.vram_mib >= MIN_GPU_VRAM_MIB and info.driver >= MIN_GPU_DRIVER
 
 
+def speakers_on_gpu(info: GpuInfo | None) -> bool:
+    """GPU mode also moves speaker identification to the GPU when the driver runs CUDA 13 torch."""
+    return gpu_capable(info) and info is not None and info.driver >= MIN_SPEAKER_GPU_DRIVER
+
+
 def fit_tail(text: str, pixels: int, measure: Callable[[str], int]) -> str:
     """The longest end of text that fits pixels, with a leading ellipsis when cut — the newest output is last."""
     if pixels <= 1:  # not laid out yet
@@ -700,8 +708,12 @@ def gpu_summary(info: GpuInfo | None) -> str:
     if info is None:
         return "No NVIDIA graphics card found: transcription runs on the CPU."
     found = f"Found {info.name} ({info.vram_mib / 1024:.0f} GB)"
-    if gpu_capable(info):
+    if speakers_on_gpu(info):
         return f"{found}."
+    if gpu_capable(info):
+        return (
+            f"{found}. Speakers are identified on the CPU: driver {MIN_SPEAKER_GPU_DRIVER[0]}+ moves them to the GPU."
+        )
     need = f"{MIN_GPU_VRAM_MIB / 1000:.0f} GB and driver {'.'.join(map(str, MIN_GPU_DRIVER))}+"
     return f"{found}, driver {'.'.join(map(str, info.driver))}: GPU mode needs {need}, so the CPU is used."
 
@@ -1407,7 +1419,7 @@ class Installer:
         swap_in(staged, self.paths.app_dir)
 
     def install_deps(self, report: Report) -> None:
-        cmd = deps_command(self.paths)
+        cmd = deps_command(self.paths, self.detect(self.env) if self.paths.windows else None)
         self.runner(cmd, deps_env(self.env, self.paths), report, self.cancel)
 
     def fetch_model(self, spec: ModelSpec, report: Report) -> None:
@@ -1559,7 +1571,8 @@ class SetupWindow:
             self.gpu_info = installer.detect(installer.env)
             ttk.Label(frame, text=gpu_summary(self.gpu_info), wraplength=480).pack(anchor="w", pady=(8, 0))
             if gpu_capable(self.gpu_info) or read_config(installer.paths.config_file).get("device") == "cuda":
-                text = f"Use the graphics card (faster; {GPU_EXTRA_SIZE} extra download)"
+                size = GPU_SPEAKERS_EXTRA_SIZE if speakers_on_gpu(self.gpu_info) else GPU_EXTRA_SIZE
+                text = f"Use the graphics card (faster; {size} extra download)"
                 self.gpu_check = ttk.Checkbutton(frame, text=text, variable=self.use_gpu)
                 self.gpu_check.pack(anchor="w")
             self._sync_gpu_check()

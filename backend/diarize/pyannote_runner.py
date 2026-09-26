@@ -198,6 +198,18 @@ def _load_audio_tensor(path: str) -> tuple[torch.Tensor, int]:
     return waveform, sample_rate
 
 
+def _diarize(
+    pipeline: Any,
+    waveform: Any,
+    sample_rate: int,
+    num_speakers: int,
+    audio_duration: float | None,
+    on_progress: ProgressCallback | None,
+) -> Any:
+    with _DiarizeProgressHook(audio_duration, on_progress=on_progress) as hook:
+        return pipeline({"waveform": waveform, "sample_rate": sample_rate}, num_speakers=num_speakers, hook=hook)
+
+
 def run_pyannote(
     audio_path: str,
     *,
@@ -207,6 +219,7 @@ def run_pyannote(
     import_pipeline: Callable[[], Any] = _import_pipeline_class,
     on_progress: ProgressCallback | None = None,
     resolve_model: Callable[[Mapping[str, str]], Path] = resolve_model_dir,
+    cuda_available: Callable[[], bool] | None = None,
 ) -> list[SpeakerTurn]:
     """Run pyannote speaker-diarization-community-1 on the given audio file.
 
@@ -237,8 +250,12 @@ def run_pyannote(
 
     import torch
 
+    # STT_DEVICE=cpu (the user's pick, or the GUI's retry after a GPU failure) keeps pyannote off the GPU too.
+    wants_cpu = env.get("STT_DEVICE", "").strip().lower().startswith("cpu")
+    use_gpu = not wants_cpu and (cuda_available or torch.cuda.is_available)()
     try:
-        if torch.cuda.is_available():
+        waveform, sample_rate = _load_audio_tensor(audio_path)
+        if use_gpu:
             # pyannote's fix_reproducibility() (core/pipeline.py:__call__) flips
             # TF32 off and warns when CUDA + TF32-on. Setting it ourselves first
             # satisfies pyannote's contract proactively so the branch stays silent.
@@ -249,17 +266,18 @@ def run_pyannote(
             # See https://github.com/pyannote/pyannote-audio/issues/1370
             torch.backends.cuda.matmul.allow_tf32 = False
             torch.backends.cudnn.allow_tf32 = False
-            pipeline.to(torch.device("cuda"))  # pyright: ignore[reportPrivateImportUsage]
-            LOGGER.info("🚀 Diarization pipeline on GPU (CUDA)")
+            try:
+                pipeline.to(torch.device("cuda"))  # pyright: ignore[reportPrivateImportUsage]
+                LOGGER.info("🚀 Diarization pipeline on GPU (CUDA)")
+                diarization = _diarize(pipeline, waveform, sample_rate, num_speakers, audio_duration, on_progress)
+            except Exception as exc:  # e.g. a cuDNN clash with ctranslate2's copy in this process
+                LOGGER.warning("⚠️ GPU diarization failed (%s); retrying on the CPU", exc)
+                pipeline.to(torch.device("cpu"))  # pyright: ignore[reportPrivateImportUsage]
+                _release_cuda()
+                diarization = _diarize(pipeline, waveform, sample_rate, num_speakers, audio_duration, on_progress)
         else:
-            LOGGER.info("🐌 Diarization pipeline on CPU (no CUDA available)")
-        waveform, sample_rate = _load_audio_tensor(audio_path)
-        with _DiarizeProgressHook(audio_duration, on_progress=on_progress) as hook:
-            diarization: Any = pipeline(
-                {"waveform": waveform, "sample_rate": sample_rate},
-                num_speakers=num_speakers,
-                hook=hook,
-            )
+            LOGGER.info("🐌 Diarization pipeline on CPU (%s)", "STT_DEVICE=cpu" if wants_cpu else "no CUDA available")
+            diarization = _diarize(pipeline, waveform, sample_rate, num_speakers, audio_duration, on_progress)
     except DiarizationRuntimeError:
         raise
     except Exception as exc:

@@ -1453,7 +1453,34 @@ def test_detect_gpu_missing_tool_is_none() -> None:
 )
 def test_gpu_capable_needs_driver_and_vram(info: GpuInfo | None, capable: bool) -> None:
     assert gpu_capable(info) is capable
-    assert ("CPU" in gpu_summary(info)) is not capable
+    assert ("so the CPU is used" in gpu_summary(info) or info is None) is not capable
+
+
+@pytest.mark.parametrize(
+    ("info", "device", "speakers"),
+    [
+        (GpuInfo("RTX 3060", 12288, (580, 97)), "cuda", "cu130"),
+        (GpuInfo("RTX 3060", 12288, (560, 94)), "cuda", "cpu"),  # GPU mode, but too old for CUDA 13 torch
+        (GpuInfo("RTX 3060", 12288, (580, 97)), "cpu", "cpu"),  # GPU mode off
+        (GpuInfo("GTX 1050", 3072, (580, 97)), "cuda", "cpu"),  # not GPU-capable at all
+        (None, "cuda", "cpu"),
+    ],
+)
+def test_deps_command_gpu_speakers_need_gpu_mode_and_driver_580(
+    paths: InstallPaths, info: GpuInfo | None, device: str, speakers: str
+) -> None:
+    set_config_value(paths.config_file, "device", device)
+    cmd = deps_command(paths, info)
+    assert [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--extra"] == [
+        "gui",
+        speakers,
+        *(["gpu-win"] if device == "cuda" else []),
+    ]
+
+
+@pytest.mark.parametrize(("driver", "note"), [((580, 97), False), ((560, 94), True)])
+def test_gpu_summary_says_speakers_stay_on_cpu_below_driver_580(driver: tuple[int, int], note: bool) -> None:
+    assert ("driver 580+" in gpu_summary(GpuInfo("RTX 3060", 12288, driver))) is note
 
 
 def test_save_device_pick_overwrites_none_keeps(tmp_path: Path) -> None:
@@ -1494,13 +1521,14 @@ def test_install_run_saves_gpu_pick_before_deps_sync(paths: InstallPaths, tmp_pa
         model_size=lambda *_a: None,
         in_use=lambda _p: False,
         gpu=True,
+        detect=lambda _env: GpuInfo("RTX 3060", 12288, (580, 97)),
         verify=lambda *_a: None,
         downloader=_serving(b"x", fetched),
     )
     assert installer.run(Events(progress=lambda *_a: None, state=lambda *_a: None)) is True
     assert fetched == []  # uv + ffmpeg were present; RNNoise ships with the app
     (sync,) = [cmd for cmd in runs if "sync" in cmd]
-    assert sync[sync.index("gui") + 1 :][:4] == ["--extra", "cpu", "--extra", "gpu-win"]
+    assert sync[sync.index("gui") + 1 :][:4] == ["--extra", "cu130", "--extra", "gpu-win"]
     assert read_config(paths.config_file)["device"] == "cuda"
 
 

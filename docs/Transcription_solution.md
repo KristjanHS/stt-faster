@@ -174,7 +174,7 @@ Core dependencies (in `pyproject.toml`):
 
 **Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch`, `torchaudio` and `pyannote.audio` live **in the extras, not in base deps**; the base closure has no torch (guarded by `tests/unit/test_lean_deps.py`). A single `uv.lock` holds both resolutions.
 
-**Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **A sync with no `cpu`/`cu130` extra is the lean install** (the Windows installer always adds `--extra cpu`) — no torch, no pyannote; `--diarize` warns and is skipped.
+**Wrappers always pass `--extra`.** `run_uv.sh`, `Makefile` targets, `Dockerfile` (`ARG STT_VARIANT=cpu`), and CI workflows all forward the variant explicitly. **A sync with no `cpu`/`cu130` extra is the lean install** (the Windows installer always adds a speaker extra: `cu130` in GPU mode on driver 580+, `cpu` otherwise — `deps_command` in `installer/setup_gui.py`) — no torch, no pyannote; `--diarize` warns and is skipped.
 
 **Why not the rejected alternatives** (load-bearing — surfaces when reconsidering the layout):
 
