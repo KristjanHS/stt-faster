@@ -12,14 +12,14 @@ from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any, cast
 
 import typer
-from rich.console import Console
+from rich import get_console
 
 from backend.run_log import JsonlRunLog
 
 LOGGER = logging.getLogger(__name__)
 
 app = typer.Typer(name="db", help="Run-log inspection commands")
-console = Console()
+console = get_console()  # shared with the progress bar's Live; a separate Console bypasses it
 
 _TZ_OFFSETS = {
     "EET": 2,

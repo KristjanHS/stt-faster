@@ -8,6 +8,7 @@ from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
+from rich import get_console
 from rich.console import Console
 
 from backend.progress import (
@@ -141,13 +142,16 @@ def test_bar_gets_events_without_the_gui_channel_and_is_closed_by_the_reporter()
     reporter.start_file(1, 2)
     clock.now += MIN_INTERVAL_SECONDS
     reporter.advance("transcribe", 10.0, 100.0)
+    assert reporter.draws_bar
     reporter.close()
-    assert (lines, reporter.draws_bar, bar.closed) == ([], True, True)
+    reporter.advance("transcribe", 20.0, 100.0, force=True)  # a stray event after the run
+    assert (lines, reporter.draws_bar, bar.closed) == ([], False, True)
     assert bar.events == [ProgressEvent(1, 2, "prepare"), ProgressEvent(1, 2, "transcribe", 10.0, 100.0)]
 
 
-def test_rich_bar_keeps_one_task_per_stage_and_pulses_on_a_bare_one() -> None:
+def test_rich_bar_keeps_one_task_per_stage_and_pulses_on_a_bare_one(request: pytest.FixtureRequest) -> None:
     bar = RichProgressBar(Console(file=io.StringIO(), force_terminal=True, width=100))
+    request.addfinalizer(bar.close)  # a failed assertion must not leave Live redirecting stdout
     bar.update(ProgressEvent(1, 2, "transcribe", 30.0, 60.0))
     bar.update(ProgressEvent(1, 2, "transcribe", 45.0, 60.0))
     assert [(t.description, t.completed, t.total) for t in bar.progress.tasks] == [
@@ -158,7 +162,7 @@ def test_rich_bar_keeps_one_task_per_stage_and_pulses_on_a_bare_one() -> None:
         ("File 1/2 · Identifying speakers · segmentation", None)
     ]
     bar.close()
-    assert bar.progress.tasks == []
+    assert (bar.progress.tasks, bar.progress.live.is_started) == ([], False)
 
 
 @pytest.mark.parametrize("collect", [_via_transcribe, _via_executor])
@@ -189,3 +193,10 @@ def test_eta_extrapolates_the_stage_rate_after_a_warm_up_and_resets_per_stage() 
 )
 def test_format_eta(seconds: float, text: str) -> None:
     assert format_eta(seconds) == text
+
+
+def test_modules_printing_during_a_file_share_the_bars_console() -> None:
+    from backend.cli import db, ui
+    from backend.variants import executor, preprocess_steps
+
+    assert all(m.console is get_console() for m in (db, ui, executor, preprocess_steps))

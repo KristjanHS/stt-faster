@@ -9,7 +9,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from rich.console import Console
+from rich import get_console
 
 from backend.model_config import get_preset
 from backend.preprocess.config import PreprocessConfig
@@ -32,7 +32,7 @@ if TYPE_CHECKING:
     from backend.run_config import VariantRunContext
 
 LOGGER = logging.getLogger(__name__)
-console = Console()
+console = get_console()  # shared with the progress bar's Live; a separate Console bypasses it
 
 
 def create_variant_preprocess_runner(
