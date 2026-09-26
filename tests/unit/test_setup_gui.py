@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import io
 import logging
 import os
@@ -23,6 +24,7 @@ from typing import Any, cast
 
 import pytest
 
+from backend.diarize import model as diarize_model
 from backend.gui import default_app_paths
 from installer.setup_gui import (
     HF_AUTH_HELP,
@@ -31,6 +33,7 @@ from installer.setup_gui import (
     MODELS,
     UNINSTALL_KEY,
     DIARIZATION_MODEL,
+    DIARIZATION_SHA256,
     app_env,
     GpuInfo,
     Cancelled,
@@ -100,6 +103,7 @@ from installer.setup_gui import (
     swap_in,
     system_tool,
     uv_asset,
+    verify_snapshot,
 )
 
 
@@ -184,6 +188,47 @@ def test_expected_model_size_filters_include() -> None:
     ]
     assert expected_model_size(ModelSpec("a/b", ("ct2/*",)), lambda _url: tree) == 3020
     assert expected_model_size(ModelSpec("a/b"), lambda _url: tree) == 3020 + 9999
+    urls: list[str] = []
+    expected_model_size(ModelSpec("a/b", revision="abc123"), lambda url: urls.append(url) or tree)
+    assert urls == ["https://huggingface.co/api/models/a/b/tree/abc123?recursive=true"]
+
+
+def _snapshot(root: Path, files: dict[str, bytes]) -> Path:
+    snapshot = root / "models--a--b" / "snapshots" / "rev"
+    for name, data in files.items():
+        (snapshot / name).parent.mkdir(parents=True, exist_ok=True)
+        (snapshot / name).write_bytes(data)
+    return snapshot
+
+
+def test_verify_snapshot_passes_matching_files(tmp_path: Path) -> None:
+    snapshot = _snapshot(tmp_path, {"w/a.bin": b"weights", "config.yaml": b"x"})
+    verify_snapshot(snapshot, {"w/a.bin": hashlib.sha256(b"weights").hexdigest()})
+    assert (snapshot / "w" / "a.bin").is_file()
+
+
+@pytest.mark.parametrize("files", [{"w/a.bin": b"weightz"}, {}], ids=["mismatch", "missing"])
+def test_verify_snapshot_removes_a_corrupt_snapshot_and_its_blob(tmp_path: Path, files: dict[str, bytes]) -> None:
+    snapshot = _snapshot(tmp_path, {"config.yaml": b"x"})
+    blob = tmp_path / "models--a--b" / "blobs" / "deadbeef"
+    blob.parent.mkdir()
+    for data in files.values():
+        blob.write_bytes(data)
+        (snapshot / "w").mkdir()
+        (snapshot / "w" / "a.bin").symlink_to(blob)  # hf's cache layout
+    with pytest.raises(InstallError, match=r"corrupt download \(w/a.bin\) — rerun"):
+        verify_snapshot(snapshot, {"w/a.bin": hashlib.sha256(b"weights").hexdigest()})
+    assert not snapshot.exists() and not blob.exists()
+
+
+def test_installer_diarization_pin_matches_backend() -> None:
+    spec = DIARIZATION_MODEL
+    assert (spec.repo_id, spec.include, spec.revision) == (
+        diarize_model.DIARIZATION_REPO,
+        diarize_model.DIARIZATION_INCLUDE,
+        diarize_model.DIARIZATION_REVISION,
+    )
+    assert DIARIZATION_SHA256 == diarize_model.DIARIZATION_SHA256
 
 
 def test_expected_model_size_unknown_on_error() -> None:
@@ -319,11 +364,10 @@ def test_source_ignore_skips_dot_and_output_dirs(tmp_path: Path) -> None:
     assert source_ignore(str(tmp_path), names) == {".venv", ".cache", "logs"}
 
 
-def test_deps_command_uses_lean_gui_install(paths: InstallPaths) -> None:
+def test_deps_command_syncs_gui_and_speaker_extras(paths: InstallPaths) -> None:
     cmd = deps_command(paths)
     assert cmd[:4] == [str(paths.uv_exe), "sync", "--frozen", "--no-dev"]
-    assert "--extra" in cmd and cmd[cmd.index("--extra") + 1] == "gui"
-    assert cmd.count("--extra") == 1  # no cpu/cu130: diarization stays out of the lean install
+    assert [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--extra"] == ["gui", "cpu"]
     assert cmd[cmd.index("--python") + 1] == PYTHON_VERSION
     paths.app_dir.mkdir(parents=True)
     (paths.app_dir / ".python-version").write_text("3.12.11\n", encoding="utf-8")
@@ -527,7 +571,9 @@ def test_spawned_processes_never_run_inside_what_they_delete(
 def test_model_command_include_and_force(paths: InstallPaths) -> None:
     estonian = next(m for m in MODELS if m.include)
     cmd = model_command(paths, estonian, force=False)
-    assert cmd[cmd.index("download") + 1 :] == [estonian.repo_id, "--include", "ct2/*"]
+    assert cmd[cmd.index("download") + 1 :] == [estonian.repo_id, "--include", "ct2/*", "--revision", "main"]
+    pinned = model_command(paths, DIARIZATION_MODEL, force=False)
+    assert pinned[pinned.index("--revision") + 1] == DIARIZATION_MODEL.revision
     assert model_command(paths, estonian, force=True)[-1] == "--force-download"
     assert cmd[cmd.index("--python") + 1] == "3.12"
     assert cmd[cmd.index("--from") + 1].startswith("huggingface_hub==")
@@ -772,16 +818,24 @@ def test_parse_args_extras_only_alone() -> None:
         parse_args(["--extras", "--clean"])
 
 
-def test_deps_command_keeps_cpu_extra_once_diarization_is_on(paths: InstallPaths) -> None:
-    def extras(cmd: list[str]) -> list[str]:
-        return [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--extra"]
-
-    assert extras(deps_command(paths)) == ["gui"]
-    assert extras(deps_command(paths, diarization=True)) == ["gui", "cpu"]  # the --extras run itself
-    set_config_value(paths.config_file, "device", "cpu")
-    set_config_value(paths.config_file, "extras", "diarization")
-    assert extras(deps_command(paths)) == ["gui", "cpu"]  # repair / clean keep speaker detection
-    assert read_config(paths.config_file) == {"device": "cpu", "extras": "diarization"}
+def test_base_install_fetches_and_verifies_the_pinned_speaker_model_without_a_token(paths: InstallPaths) -> None:
+    runs: list[tuple[list[str], dict[str, str]]] = []
+    verified: list[tuple[Path, object]] = []
+    installer = Installer(
+        paths=paths,
+        env={"HF_TOKEN": "hf_user"},
+        runner=lambda cmd, env, *_a: runs.append((list(cmd), dict(env))),
+        seeder=lambda *_a: False,
+        model_size=lambda *_a: None,
+        verify=lambda snapshot, table: verified.append((snapshot, table)),
+    )
+    (task,) = [t for t in installer.tasks() if t.key == DIARIZATION_MODEL.repo_id]
+    task.run(lambda *_a: None)
+    ((cmd, env),) = runs
+    assert cmd[cmd.index("--revision") + 1] == DIARIZATION_MODEL.revision
+    assert env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] == "1"  # hf then sends neither HF_TOKEN nor a stored login
+    snapshot = model_cache_dir(paths.hf_home / "hub", DIARIZATION_MODEL.repo_id) / "snapshots"
+    assert verified == [(snapshot / DIARIZATION_MODEL.revision, DIARIZATION_SHA256)]
 
 
 class _ExtrasRun:
@@ -816,7 +870,7 @@ class _ExtrasRun:
             seeder=lambda *_a: False,
             model_size=lambda *_a: None,
             launch=self.launches.append,
-            **{"token_status": lambda _token: 200, **kw},
+            **{"token_status": lambda _token: 200, "verify": lambda *_a: None, **kw},
         )
 
     def events(self) -> Events:
@@ -832,8 +886,8 @@ def test_extras_success_writes_flag_then_relaunches(paths: InstallPaths) -> None
     assert run.installer().run(run.events()) is True
     (deps_cmd, _), (model_cmd, model_env) = sorted(run.runs, key=lambda r: DIARIZATION_MODEL.repo_id in r[0])
     assert deps_cmd[deps_cmd.index("gui") + 1 : deps_cmd.index("gui") + 3] == ["--extra", "cpu"]
-    assert model_cmd[model_cmd.index("download") + 1 :] == [DIARIZATION_MODEL.repo_id]  # full snapshot
-    assert model_env["HF_TOKEN"] == "hf_abc"
+    assert model_cmd[model_cmd.index("download") + 1] == DIARIZATION_MODEL.repo_id
+    assert "HF_TOKEN" not in model_env and model_env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] == "1"
     assert model_env["HF_HOME"] == str(paths.hf_home)
     assert read_config(paths.config_file).get("extras") == "diarization"
     assert run.launches == [paths]
@@ -1569,10 +1623,11 @@ def test_install_run_saves_gpu_pick_before_deps_sync(paths: InstallPaths, tmp_pa
         model_size=lambda *_a: None,
         in_use=lambda _p: False,
         gpu=True,
+        verify=lambda *_a: None,
     )
     assert installer.run(Events(progress=lambda *_a: None, state=lambda *_a: None)) is True
     (sync,) = [cmd for cmd in runs if "sync" in cmd]
-    assert sync[sync.index("gui") + 1 :][:2] == ["--extra", "gpu-win"]
+    assert sync[sync.index("gui") + 1 :][:4] == ["--extra", "cpu", "--extra", "gpu-win"]
     assert read_config(paths.config_file)["device"] == "cuda"
 
 
@@ -1581,9 +1636,9 @@ def test_deps_command_adds_gpu_extra_for_cuda_device(paths: InstallPaths) -> Non
         return [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--extra"]
 
     set_config_value(paths.config_file, "device", "cuda")
-    assert extras(deps_command(paths, diarization=True)) == ["gui", "cpu", "gpu-win"]  # --extras keeps GPU mode
+    assert extras(deps_command(paths)) == ["gui", "cpu", "gpu-win"]
     set_config_value(paths.config_file, "device", "cpu")
-    assert extras(deps_command(paths)) == ["gui"]
+    assert extras(deps_command(paths)) == ["gui", "cpu"]
 
 
 def test_headless_gpu_detects_on_windows_and_moves_only_legacy_cpu(paths: InstallPaths, tmp_path: Path) -> None:

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import argparse
 import fnmatch
+import hashlib
 import json
 import logging
 import math
@@ -97,6 +98,7 @@ class CommandFailed(InstallError):
 class ModelSpec:
     repo_id: str
     include: tuple[str, ...] = ()
+    revision: str = "main"
 
 
 # Estonian (et-large) and English (turbo) GUI profiles, see backend/model_config.py.
@@ -104,7 +106,24 @@ MODELS = (
     ModelSpec("TalTechNLP/whisper-large-v3-turbo-et-verbatim", ("ct2/*",)),
     ModelSpec("Systran/faster-distil-whisper-large-v3"),
 )
-DIARIZATION_MODEL = ModelSpec("pyannote/speaker-diarization-community-1")  # gated: needs the user's token
+# Ungated CC-BY-4.0 mirror, pinned; the stdlib-only exe can't import backend/diarize/model.py (drift-tested).
+DIARIZATION_MODEL = ModelSpec(
+    "pyannote-community/speaker-diarization-community-1",
+    ("config.yaml", "README.md", "segmentation/*", "embedding/*", "plda/*"),
+    "8a527374977391da736e0daaef26855d949d9685",  # pragma: allowlist secret
+)
+DIARIZATION_SHA256 = {
+    "segmentation/pytorch_model.bin": (
+        "7ad24338d844fb95985486eb1a464e32d229f6d7a03c9abe60f978bacf3f816e"  # pragma: allowlist secret
+    ),
+    "embedding/pytorch_model.bin": (
+        "6f10ff60898a1d185fa22e1d11e0bfa8a92efec811f11bca48cb8cafebefd929"  # pragma: allowlist secret
+    ),
+    "plda/plda.npz": "9b77bcd840692710dd3496f62ecfeed8d8e5f002fd991b785079b244eab7d255",  # pragma: allowlist secret
+    "plda/xvec_transform.npz": (
+        "325f1ce8e48f7e55e9c8aa47e05d2766b7c48c4b25b8de8dd751e7a4cc5fbe8f"  # pragma: allowlist secret
+    ),
+}
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]")  # tqdm's cursor-up between stacked bars
 DOWNLOAD_BAR = re.compile(r"(?P<done>\d+(?:\.\d+)?[kMGT]?)B?(?:/(?P<total>\d+(?:\.\d+)?[kMGT]?)B?)? \[\d+:\d")
 ELAPSED_SUFFIX = re.compile(r" · \d+:\d\d(?= \(|$)")
@@ -267,7 +286,7 @@ def _matches(path: str, patterns: Sequence[str]) -> bool:
 
 def expected_model_size(spec: ModelSpec, fetch_json: Callable[[str], Any]) -> int | None:
     """Total bytes ``hf download`` will fetch, from the HF tree API; None when unknown."""
-    url = f"https://huggingface.co/api/models/{spec.repo_id}/tree/main?recursive=true"
+    url = f"https://huggingface.co/api/models/{spec.repo_id}/tree/{spec.revision}?recursive=true"
     try:
         entries = fetch_json(url)
     except (OSError, ValueError) as error:
@@ -279,6 +298,26 @@ def expected_model_size(spec: ModelSpec, fetch_json: Callable[[str], Any]) -> in
         if entry.get("type") == "file" and _matches(entry.get("path", ""), spec.include)
     ]
     return sum(sizes) or None
+
+
+def verify_snapshot(snapshot: Path, sha256: Mapping[str, str]) -> None:
+    """Missing or wrong file: remove the snapshot (and that file's blob) so a rerun downloads it again."""
+    for name, expected in sha256.items():
+        digest = hashlib.sha256()
+        try:
+            with (snapshot / name).open("rb") as handle:
+                for chunk in iter(lambda: handle.read(1 << 20), b""):
+                    digest.update(chunk)
+        except OSError:
+            pass  # missing: the empty digest below never matches a pinned hash
+        if digest.hexdigest() == expected:
+            continue
+        LOGGER.warning("%s: sha256 mismatch, removing %s", name, snapshot)
+        blob = (snapshot / name).resolve()  # hf links snapshot files into blobs/, which hf download would reuse
+        shutil.rmtree(snapshot, ignore_errors=True)
+        if blob.is_relative_to(snapshot.parent.parent / "blobs"):
+            blob.unlink(missing_ok=True)
+        raise InstallError(f"Speaker model: corrupt download ({name}) — rerun setup")
 
 
 def fetch_json(url: str) -> Any:
@@ -425,12 +464,11 @@ def classify_source(source: str) -> str:
     raise InstallError(f"--source must be a URL, a .zip file or a folder: {source}")
 
 
-def deps_command(paths: InstallPaths, *, diarization: bool = False) -> list[str]:
+def deps_command(paths: InstallPaths) -> list[str]:
     pin = paths.app_dir / ".python-version"  # UV_NO_CONFIG also skips .python-version discovery
     python = pin.read_text(encoding="utf-8").strip() if pin.is_file() else PYTHON_VERSION
-    # a full sync drops unlisted extras: once speaker detection / GPU mode is on, every repair keeps it
+    # a full sync drops unlisted extras: speaker libraries always, GPU mode once it is on
     config = read_config(paths.config_file)
-    diarization = diarization or config.get("extras") == "diarization"
     return [
         str(paths.uv_exe),
         "sync",
@@ -438,7 +476,8 @@ def deps_command(paths: InstallPaths, *, diarization: bool = False) -> list[str]
         "--no-dev",
         "--extra",
         "gui",
-        *(("--extra", "cpu") if diarization else ()),
+        "--extra",
+        "cpu",
         *(("--extra", "gpu-win") if config.get("device") == "cuda" else ()),
         "--python",
         python,
@@ -495,6 +534,7 @@ def model_command(paths: InstallPaths, spec: ModelSpec, *, force: bool) -> list[
     cmd += ["--from", hub, *(arg for pin in extras for arg in ("--with", pin)), "hf", "download", spec.repo_id]
     for pattern in spec.include:
         cmd += ["--include", pattern]
+    cmd += ["--revision", spec.revision]
     if force:
         cmd.append("--force-download")
     return cmd
@@ -1350,6 +1390,7 @@ class Installer:
     token_status: Callable[[str], int | None] = hf_token_status
     gpu: bool | None = None  # the device to save; None keeps the saved one
     detect: Callable[[Mapping[str, str]], GpuInfo | None] = detect_gpu
+    verify: Callable[[Path, Mapping[str, str]], None] = verify_snapshot
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
         def on_progress(done: int, total: int | None) -> None:
@@ -1389,10 +1430,10 @@ class Installer:
         swap_in(staged, self.paths.app_dir)
 
     def install_deps(self, report: Report) -> None:
-        cmd = deps_command(self.paths, diarization=self.extras)
+        cmd = deps_command(self.paths)
         self.runner(cmd, deps_env(self.env, self.paths), report, self.cancel)
 
-    def fetch_model(self, spec: ModelSpec, report: Report, *, token: str = "") -> None:
+    def fetch_model(self, spec: ModelSpec, report: Report) -> None:
         cache = model_cache_dir(self.paths.hf_home / "hub", spec.repo_id)
         if not self.clean:  # a v1.1.0 install downloaded into the user's shared HF cache
             legacy = model_cache_dir(hf_hub_cache(self.env, Path.home()), spec.repo_id)
@@ -1406,8 +1447,7 @@ class Installer:
 
         env = isolated_env(self.env, self.paths)
         env["TQDM_POSITION"] = "-1"  # hf 1.2.1 then prints its aggregate byte bar through the pipe
-        if token:
-            env["HF_TOKEN"] = token
+        env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] = "1"  # nosec B105 - a flag, not a secret: public repos never get HF_TOKEN/stored login
         cmd = model_command(self.paths, spec, force=self.clean)
         try:
             self.runner(cmd, env, report, self.cancel, poll, MODEL_STALL_TIMEOUT)
@@ -1455,11 +1495,14 @@ class Installer:
 
     def fetch_diarization(self, report: Report) -> None:
         try:
-            self.fetch_model(DIARIZATION_MODEL, report, token=self.hf_token)
+            self.fetch_model(DIARIZATION_MODEL, report)
         except CommandFailed as error:
-            if HF_AUTH_ERROR.search(error.output):
+            if self.extras and HF_AUTH_ERROR.search(error.output):
                 raise InstallError(HF_AUTH_HELP) from None
             raise
+        report(None, "verifying")
+        cache = model_cache_dir(self.paths.hf_home / "hub", DIARIZATION_MODEL.repo_id)
+        self.verify(cache / "snapshots" / DIARIZATION_MODEL.revision, DIARIZATION_SHA256)
 
     def enable_extras(self, report: Report) -> None:
         set_config_value(self.paths.config_file, "extras", "diarization")
@@ -1474,8 +1517,8 @@ class Installer:
             self.sleep(0.5)
 
     def tasks(self) -> list[Task]:
-        if self.extras:  # the base install is in place; one deps sync + the gated model, then the flag
-            model = DIARIZATION_MODEL.repo_id
+        model = DIARIZATION_MODEL.repo_id
+        if self.extras:  # the base install is in place; one deps sync + the speaker model, then the flag
             return [
                 Task("deps", "Python + speaker libraries", self.install_deps),
                 Task(model, f"Model: {model.split('/', 1)[1]}", self.fetch_diarization),
@@ -1490,6 +1533,7 @@ class Installer:
         for spec in MODELS:
             label = f"Model: {spec.repo_id.split('/', 1)[1]}"
             tasks.append(Task(spec.repo_id, label, lambda r, s=spec: self.fetch_model(s, r), needs=("uv",)))
+        tasks.append(Task(model, f"Model: {model.split('/', 1)[1]}", self.fetch_diarization, needs=("uv",)))
         tasks.append(Task("deps", "Python + libraries", self.install_deps, needs=("uv", "app")))
         tasks.append(Task("finish", "Shortcuts", self.finish, needs=tuple(t.key for t in tasks)))
         return tasks
