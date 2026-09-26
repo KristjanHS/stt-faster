@@ -25,15 +25,12 @@ import pytest
 
 from backend.diarize import model as diarize_model
 from backend.gui import default_app_paths
-from scripts import prefetch_models
 from installer.setup_gui import (
     HF_TOOL_PINS,
     MODELS,
     UNINSTALL_KEY,
     DIARIZATION_MODEL,
     DIARIZATION_SHA256,
-    RNNOISE_SHA256,
-    RNNOISE_URL,
     app_env,
     GpuInfo,
     Cancelled,
@@ -228,10 +225,6 @@ def test_installer_diarization_pin_matches_backend() -> None:
         diarize_model.DIARIZATION_REVISION,
     )
     assert DIARIZATION_SHA256 == diarize_model.DIARIZATION_SHA256
-
-
-def test_installer_rnnoise_pin_matches_prefetch() -> None:
-    assert (RNNOISE_URL, RNNOISE_SHA256) == (prefetch_models.RNNOISE_URL, prefetch_models.RNNOISE_SHA256)
 
 
 def test_expected_model_size_unknown_on_error() -> None:
@@ -831,10 +824,6 @@ def test_base_install_fetches_and_verifies_the_pinned_speaker_model_without_a_to
     assert verified == [(snapshot / DIARIZATION_MODEL.revision, DIARIZATION_SHA256)]
 
 
-RNNOISE_BYTES = b"pinned rnnoise weights"
-RNNOISE_PIN = hashlib.sha256(RNNOISE_BYTES).hexdigest()
-
-
 def _serving(served: bytes, fetched: list[str]) -> Callable[[str, Path, Any, threading.Event], None]:
     """An offline downloader: every URL yields ``served``."""
 
@@ -845,56 +834,6 @@ def _serving(served: bytes, fetched: list[str]) -> Callable[[str, Path, Any, thr
         on_progress(len(served), len(served))
 
     return downloader
-
-
-def _rnnoise_installer(paths: InstallPaths, served: bytes, fetched: list[str]) -> Installer:
-    return Installer(paths=paths, downloader=_serving(served, fetched), rnnoise_sha256=RNNOISE_PIN)
-
-
-def _rnnoise_task(installer: Installer) -> Task:
-    (task,) = [t for t in installer.tasks() if t.key == "rnnoise"]
-    return task
-
-
-@pytest.mark.parametrize("windows", [True, False])
-def test_base_install_includes_the_rnnoise_task(tmp_path: Path, windows: bool) -> None:
-    installer = Installer(paths=InstallPaths(tmp_path, tmp_path / "c", windows=windows))
-    task = _rnnoise_task(installer)
-    assert task.label == "Model: RNNoise"
-    (finish,) = [t for t in installer.tasks() if t.key == "finish"]
-    assert "rnnoise" in finish.needs
-
-
-def test_rnnoise_task_downloads_verifies_then_skips_when_present(paths: InstallPaths) -> None:
-    fetched: list[str] = []
-    task = _rnnoise_task(_rnnoise_installer(paths, RNNOISE_BYTES, fetched))
-    task.run(lambda *_a: None)
-    assert fetched == [RNNOISE_URL]
-    assert paths.rnnoise_model == paths.install_dir / "models" / "sh.rnnn"
-    assert paths.rnnoise_model.read_bytes() == RNNOISE_BYTES
-    assert sorted(p.name for p in paths.rnnoise_model.parent.iterdir()) == ["sh.rnnn"]  # no staged leftover
-    task.run(lambda *_a: None)
-    assert fetched == [RNNOISE_URL]  # a verified file is kept, not re-fetched
-
-
-def test_rnnoise_task_replaces_a_corrupt_file(paths: InstallPaths) -> None:
-    paths.rnnoise_model.parent.mkdir(parents=True)
-    paths.rnnoise_model.write_bytes(b"truncated")
-    fetched: list[str] = []
-    _rnnoise_task(_rnnoise_installer(paths, RNNOISE_BYTES, fetched)).run(lambda *_a: None)
-    assert fetched == [RNNOISE_URL]
-    assert paths.rnnoise_model.read_bytes() == RNNOISE_BYTES
-
-
-def test_rnnoise_task_bad_hash_raises_and_leaves_no_file(paths: InstallPaths) -> None:
-    task = _rnnoise_task(_rnnoise_installer(paths, b"tampered weights", []))
-    with pytest.raises(InstallError, match="RNNoise model: corrupt download"):
-        task.run(lambda *_a: None)
-    assert list(paths.rnnoise_model.parent.iterdir()) == []
-
-
-def test_installer_rnnoise_pin_defaults_to_the_constant(paths: InstallPaths) -> None:
-    assert Installer(paths=paths).rnnoise_sha256 == RNNOISE_SHA256
 
 
 def _touch(path: Path) -> Path:
@@ -918,8 +857,7 @@ def test_every_run_removes_the_saved_token_and_the_old_gated_model(tmp_path: Pat
         model_size=lambda *_a: None,
         in_use=lambda _p: False,
         verify=lambda *_a: None,
-        downloader=_serving(RNNOISE_BYTES, []),
-        rnnoise_sha256=RNNOISE_PIN,
+        downloader=_serving(b"x", []),
     )
     assert installer.run(Events(progress=lambda *_a: None, state=lambda *_a: None)) is False
     assert not token.exists() and not gated.exists()
@@ -1557,11 +1495,10 @@ def test_install_run_saves_gpu_pick_before_deps_sync(paths: InstallPaths, tmp_pa
         in_use=lambda _p: False,
         gpu=True,
         verify=lambda *_a: None,
-        downloader=_serving(RNNOISE_BYTES, fetched),
-        rnnoise_sha256=RNNOISE_PIN,
+        downloader=_serving(b"x", fetched),
     )
     assert installer.run(Events(progress=lambda *_a: None, state=lambda *_a: None)) is True
-    assert fetched == [RNNOISE_URL]  # the only download: uv + ffmpeg were present
+    assert fetched == []  # uv + ffmpeg were present; RNNoise ships with the app
     (sync,) = [cmd for cmd in runs if "sync" in cmd]
     assert sync[sync.index("gui") + 1 :][:4] == ["--extra", "cpu", "--extra", "gpu-win"]
     assert read_config(paths.config_file)["device"] == "cuda"

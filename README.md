@@ -20,7 +20,7 @@ Open it straight from the browser. Afterwards, update or remove the app with Sta
 
 **Privacy:** This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Only the installer downloads, and only what it needs:
 
-- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages), download.pytorch.org (torch), huggingface.co (the Whisper speech models and the speaker model from its ungated, revision-pinned mirror; no account or token) and raw.githubusercontent.com (the RNNoise noise-reduction model).
+- Installer: github.com (uv, ffmpeg, the app source from the latest release), pypi.org + files.pythonhosted.org (Python packages), download.pytorch.org (torch), huggingface.co (the Whisper speech models and the speaker model from its ungated, revision-pinned mirror; no account or token).
 - App: no network calls while transcribing; every model loads from disk. No telemetry (pyannote's usage metrics are switched off), no update checks. Model attributions: [NOTICE](NOTICE).
 
 ## License

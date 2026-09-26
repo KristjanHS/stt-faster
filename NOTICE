@@ -1,9 +1,9 @@
 stt-faster
 Copyright (c) 2025 Kristjan Sillmann. MIT License, see LICENSE.
 
-The installer (and `make diarization-model` / `make rnnoise-model`) downloads
-the third-party model files below. They are used unmodified and are not part
-of the stt-faster source.
+The installer (and `make diarization-model`) downloads model 1 below; model 2
+ships in this repository (`models/sh.rnnn`). Both are used unmodified and are not covered
+by the stt-faster licence.
 
 1. pyannote speaker-diarization-community-1
    Authors:  pyannote (Hervé Bredin), pyannoteAI
