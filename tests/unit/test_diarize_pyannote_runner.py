@@ -213,6 +213,20 @@ class TestDiarizeProgressHook:
         assert msgs[0] == "⌛ Diarization progress: embeddings, elapsed 0.0 min"
         assert msgs[1] == "⌛ Diarization progress: embeddings 1/4 (25.0%), elapsed 1.0 min"
 
+    def test_on_progress_gets_every_entry_and_quantity_unthrottled(self, fake_clock: _FakeClock) -> None:
+        from backend.diarize.pyannote_runner import _DiarizeProgressHook
+
+        calls: list[tuple[str, int | None, int | None]] = []
+        with _DiarizeProgressHook(
+            audio_duration=None, clock=fake_clock, on_progress=lambda *a: calls.append(a)
+        ) as hook:
+            hook("segmentation", None, total=None, completed=None)
+            hook("segmentation", None, total=4, completed=1)  # under the log throttle, still forwarded
+            hook("segmentation", None, total=None, completed=None)  # no quantities: nothing new
+            hook("embeddings", None, total=4, completed=0)  # entry wins over its 0/N
+
+        assert calls == [("segmentation", None, None), ("segmentation", 1, 4), ("embeddings", None, None)]
+
     def test_entry_with_zero_progress_logs_no_quantities_and_skips_redundant_marker(
         self, fake_clock: _FakeClock, caplog: pytest.LogCaptureFixture
     ) -> None:

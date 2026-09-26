@@ -581,6 +581,7 @@ def _run_transcription(
     num_speakers: int = 2,
     diarize_runner: Any = None,
     model_picker: Callable[[str], Any] | None = None,
+    reporter: ProgressReporter = REPORTER,
 ) -> dict[str, Any]:
     """Shared scaffolding for the baseline/minimal executor paths.
 
@@ -608,12 +609,14 @@ def _run_transcription(
             seam); ``None`` = the real loader.
     """
     overall_start = time.time()
+    reporter.stage("preprocess")
     preprocess_result = preprocess_runner(path, preprocess_config)
     duration_hint = preprocess_result.input_info.duration if preprocess_result.input_info else None
     if duration_hint:
         console.print(f"[cyan]🎧 Input duration:[/cyan] {duration_hint / 60:.1f} minutes (from metadata)")
         LOGGER.debug("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
+    reporter.stage("load model")
     model = (model_picker or pick_model)(preset)
     LOGGER.info("Model loaded, ready for transcription")
 
@@ -622,6 +625,7 @@ def _run_transcription(
     else:
         LOGGER.info("Language: auto-detect")
 
+    reporter.stage("transcribe")
     transcribe_start = time.time()
 
     LOGGER.debug("Calling model.transcribe() with %s kwargs: %s", log_label, transcribe_kwargs)
@@ -648,6 +652,7 @@ def _run_transcription(
         total_audio_duration=total_audio_duration,
         no_speech_threshold=no_speech_threshold,
         logprob_threshold=logprob_threshold,
+        reporter=reporter,
     )
 
     whisper_elapsed_min = (time.time() - transcribe_start) / 60
@@ -667,9 +672,11 @@ def _run_transcription(
             audio_minutes,
         )
         diarize_start = time.time()
+        reporter.stage("diarize")
         annotate_kwargs: dict[str, Any] = {
             "num_speakers": num_speakers,
             "audio_duration": total_audio_duration,
+            "on_progress": reporter.substeps("diarize"),
         }
         if diarize_runner is not None:
             annotate_kwargs["runner"] = diarize_runner

@@ -280,13 +280,21 @@ def build_env(
 
 
 RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
-_STAGE_LABELS = {"prepare": "Preparing", "transcribe": "Transcribing"}
+_STAGE_LABELS = {
+    "prepare": "Preparing",
+    "preprocess": "Preprocessing",
+    "load model": "Loading model",
+    "transcribe": "Transcribing",
+    "diarize": "Identifying speakers",
+}
 
 
 def describe_progress(event: ProgressEvent) -> str:
-    """One status line for ``event``: overall percent, file position, stage."""
-    stage = _STAGE_LABELS.get(event.stage, event.stage.capitalize())
-    return f"{event.overall_fraction:.0%} · File {event.file}/{event.files} · {stage}"
+    """One status line for ``event``: file position, stage, sub-step."""
+    parts = [f"File {event.file}/{event.files}", _STAGE_LABELS.get(event.stage, event.stage.capitalize())]
+    if event.detail:
+        parts.append(event.detail)
+    return " · ".join(parts)
 
 
 def find_outputs(work_dir: Path, staged: Mapping[str, Path]) -> dict[Path, Path | None]:
@@ -718,10 +726,17 @@ class TranscribeApp:
                 return
 
     def _show_progress(self, event: ProgressEvent) -> None:
-        if str(self.progress.cget("mode")) != "determinate":
-            self.progress.stop()
-            self.progress.config(mode="determinate", maximum=1.0)
-        self.progress.config(value=event.overall_fraction)
+        """The bar tracks the current stage alone; a stage without quantities pulses."""
+        fraction = event.stage_fraction
+        determinate = str(self.progress.cget("mode")) == "determinate"
+        if fraction is None and determinate:
+            self.progress.config(mode="indeterminate", value=0)
+            self.progress.start(12)
+        elif fraction is not None:
+            if not determinate:
+                self.progress.stop()
+                self.progress.config(mode="determinate", maximum=1.0)
+            self.progress.config(value=fraction)
         self.detail.config(text=describe_progress(event))
 
     def _finish(self, payload: object) -> None:

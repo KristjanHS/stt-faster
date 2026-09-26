@@ -77,6 +77,7 @@ def annotate(
     num_speakers: int = 2,
     runner: Callable[..., list[SpeakerTurn]] | None = None,
     audio_duration: float | None = None,
+    on_progress: Callable[[str, int | None, int | None], None] | None = None,
 ) -> list[dict[str, Any]]:
     """Attach speaker labels to whisper segments via pyannote diarization.
 
@@ -94,7 +95,8 @@ def annotate(
         from backend.diarize.pyannote_runner import run_pyannote
 
         runner = run_pyannote
-    turns = runner(audio_path, num_speakers=num_speakers, audio_duration=audio_duration)
+    progress_kwargs = {} if on_progress is None else {"on_progress": on_progress}
+    turns = runner(audio_path, num_speakers=num_speakers, audio_duration=audio_duration, **progress_kwargs)
     if not turns:
         return list(segments)
     assigned = overlap_assign(segments, turns)
