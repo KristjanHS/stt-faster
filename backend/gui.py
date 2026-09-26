@@ -19,7 +19,7 @@ import tempfile
 import threading
 import time
 import tkinter as tk
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from functools import cache
 from pathlib import Path
@@ -33,11 +33,13 @@ from backend.progress import (
     PROGRESS_ENV,
     EtaEstimator,
     JobEtaEstimator,
+    STAGE_LABELS,
     ProgressEvent,
-    describe_progress,
     format_eta,
     format_progress,
     parse_progress,
+    stage_checklist,
+    stage_plan,
 )
 
 LOGGER = logging.getLogger(__name__)
@@ -46,6 +48,9 @@ APP_NAME = "stt-faster"
 GUI_VARIANT = 61
 PYANNOTE_MODULE = "pyannote.audio"
 SPEAKERS_MIN, SPEAKERS_MAX, SPEAKERS_DEFAULT = 2, 10, 2  # CLI rejects --num-speakers < 2
+SPEAKERS_WARNING = "Identifying speakers makes transcription take about 2–3 times longer."
+WARNING_COLOR = "#b35c00"
+STEP_COLORS = {"done": "gray", "current": "", "pending": "gray"}  # "" = the theme's default text colour
 # components.FileProcessor logs "Failed to process <file>: <ErrorType>: <message>" per failed file.
 _DIARIZATION_FAILURE = re.compile(
     rf"\b(?:{DiarizationConfigError.__name__}|{DiarizationRuntimeError.__name__}): (?P<reason>.+)"
@@ -263,6 +268,7 @@ def cli_env(base: Mapping[str, str], paths: AppPaths, device: str | None) -> dic
 
 
 RETRY_PREFIX = "Retrying"  # run_job's retry lines; a retry is a new CLI run that restarts at file 1
+RETRY_WITHOUT_SPEAKERS = f"{RETRY_PREFIX} without speaker identification…"
 
 
 def renumber_progress(on_line: Callable[[str], None], *, skipped: int, files: int) -> Callable[[str], None]:
@@ -454,7 +460,7 @@ def run_job(
         delivered = run.delivered
         if speakers_on and run.missing and run.diarization_error is not None:
             LOGGER.warning("Diarization failed; retrying %d file(s) without speakers", len(run.missing))
-            on_line(f"{RETRY_PREFIX} without speaker identification…")
+            on_line(RETRY_WITHOUT_SPEAKERS)
             speakers_on = False
             result.speakers_skipped = run.diarization_error
             run = once(run.missing, False)
@@ -493,6 +499,13 @@ def open_folder(folder: Path) -> None:
     else:
         opener = "open" if sys.platform == "darwin" else "xdg-open"
         subprocess.Popen([opener, str(folder)])  # noqa: S603  # nosec B603
+
+
+def paint_steps(widgets: Sequence[Any], rows: Sequence[tuple[str, str]], eta: str | None) -> None:
+    """Write each checklist row into its label; the current row carries the stage's ETA."""
+    for widget, (state, line) in zip(widgets, rows, strict=True):
+        text = f"{line} · {eta}" if state == "current" and eta else line
+        widget.config(text=text, foreground=STEP_COLORS[state])
 
 
 def _make_root() -> tuple[tk.Tk, bool]:
@@ -558,6 +571,15 @@ class TranscribeApp:
             ttk.Spinbox(
                 speaker_row, from_=SPEAKERS_MIN, to=SPEAKERS_MAX, width=4, textvariable=self.speakers, state="readonly"
             ).pack(side="left")
+            speaker_warning = ttk.Label(frame, text=SPEAKERS_WARNING, foreground=WARNING_COLOR, wraplength=420)
+
+            def toggle_warning(*_args: object) -> None:
+                if self.identify.get():
+                    speaker_warning.pack(anchor="w", pady=(0, 8), after=speaker_row)
+                else:
+                    speaker_warning.pack_forget()
+
+            self.identify.trace_add("write", toggle_warning)
 
         action_row = ttk.Frame(frame)
         action_row.pack(fill="x", pady=(4, 0))
@@ -570,13 +592,16 @@ class TranscribeApp:
 
         self.detail = ttk.Label(frame, text="")
         self.detail.pack(anchor="w", pady=(8, 0))
+        self.steps = ttk.Frame(frame)  # one row per stage of the current file, so the stages still to come show
+        self.stages: tuple[str, ...] = ()
+        self.step_rows: list[ttk.Label] = []
         self.eta = EtaEstimator()
         self.job_eta = JobEtaEstimator()
         self.retrying = False
         self.clock: Callable[[], float] = time.monotonic
         self.status = ttk.Label(frame, text="", foreground="gray")
         self.status.pack(anchor="w", pady=(4, 0))
-        self.banner = ttk.Label(frame, text="", foreground="#b35c00", wraplength=420)
+        self.banner = ttk.Label(frame, text="", foreground=WARNING_COLOR, wraplength=420)
         self.banner.pack(anchor="w", pady=(4, 0))
 
     def _on_drop(self, event: tk.Event) -> None:  # type: ignore[type-arg]
@@ -611,6 +636,7 @@ class TranscribeApp:
         self.running = True
         profile = GUI_PROFILES[self.language.get()]
         diarize = self.speakers_shown and self.identify.get()
+        self._show_steps(stage_plan(diarize=diarize))
         worker = threading.Thread(
             target=self._work,
             args=(list(self.files), profile, self.timestamps.get(), diarize, self.speakers.get()),
@@ -664,6 +690,8 @@ class TranscribeApp:
             if kind == "line" and (event := parse_progress(str(payload))) is not None:
                 self._show_progress(event)
             elif kind == "line" and str(payload).startswith(RETRY_PREFIX):
+                if str(payload) == RETRY_WITHOUT_SPEAKERS:
+                    self._show_steps(stage_plan(diarize=False))
                 self.status.config(text=str(payload))
                 self.detail.config(text=str(payload))
                 self.progress.config(mode="indeterminate", value=0)
@@ -677,8 +705,25 @@ class TranscribeApp:
                 self._finish(payload)
                 return
 
+    def _show_steps(self, stages: tuple[str, ...]) -> None:
+        """Replace the stage rows with one pending row per stage in ``stages`` (none clears them)."""
+        for row in self.step_rows:
+            row.destroy()
+        self.stages = stages
+        self.step_rows = [ttk.Label(self.steps, text="") for _ in stages]
+        for row in self.step_rows:
+            row.pack(anchor="w")
+        if not stages:  # Tk keeps an emptied frame at its old height: unpack it, or a blank band stays
+            self.steps.pack_forget()
+        else:
+            self.steps.pack(anchor="w", padx=(12, 0), after=self.detail)
+            paint_steps(self.step_rows, stage_checklist(stages, ProgressEvent(0, 0, "prepare")), None)
+
     def _show_progress(self, event: ProgressEvent) -> None:
-        """The bar tracks the current stage alone; a stage without quantities pulses."""
+        """Header: file position + whole-job ETA; one row per stage: done, current (+ its ETA), still to come.
+
+        The bar tracks the current stage alone; a stage without quantities pulses.
+        """
         fraction = event.stage_fraction
         determinate = str(self.progress.cget("mode")) == "determinate"
         if fraction is None and determinate:
@@ -689,14 +734,16 @@ class TranscribeApp:
                 self.progress.stop()
                 self.progress.config(mode="determinate")
             self.progress.config(value=fraction * 100)  # default maximum=100; 1.0 makes the pulse jump end to end
-        text = describe_progress(event) + (" (retry)" if self.retrying else "")
+        text = f"File {event.file}/{event.files}" + (" (retry)" if self.retrying else "")
+        if event.stage not in self.stages:  # prepare (between files): every row goes back to "still to come"
+            text += f" · {STAGE_LABELS.get(event.stage, event.stage.capitalize())}"
         now = self.clock()
         stage_left = self.eta.seconds_left(event, now)
         if (job_left := self.job_eta.seconds_left(event, now)) is not None:
-            text += f" · {format_eta(job_left)} (all)"
-        elif stage_left is not None:
-            text += f" · {format_eta(stage_left)}"
+            text += f" · {format_eta(job_left)} (all files)"
         self.detail.config(text=text)
+        eta = None if stage_left is None else format_eta(stage_left)
+        paint_steps(self.step_rows, stage_checklist(self.stages, event), eta)
 
     def _finish(self, payload: object) -> None:
         self.running = False
@@ -705,6 +752,7 @@ class TranscribeApp:
         succeeded = isinstance(payload, JobResult) and payload.ok
         self.progress.config(mode="determinate", value=100 if succeeded else 0)
         self.detail.config(text="")
+        self._show_steps(())
         self.start_button.config(state="normal")
         if isinstance(payload, JobResult) and payload.delivered:
             self.last_output_dir = payload.delivered[0].parent
