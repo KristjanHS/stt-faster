@@ -86,6 +86,13 @@ def _execute_step_with_registry(
     return output_path, metrics
 
 
+def _import_ffmpeg() -> Any:
+    """Lazily import ``ffmpeg-python`` (default loader for the steps' ``ffmpeg_module`` seam)."""
+    import ffmpeg  # type: ignore[import-untyped]
+
+    return ffmpeg
+
+
 def _run_single_filter(
     input_path: Path,
     output_path: Path,
@@ -94,6 +101,8 @@ def _run_single_filter(
     filter_chain: list[tuple[str, dict[str, Any]]],
     step_name: str,
     metric_name: str,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Execute a single ffmpeg filter chain and return StepMetrics.
 
@@ -105,7 +114,7 @@ def _run_single_filter(
     Errors are wrapped in :class:`StepExecutionError` tagged with ``step_name``; the
     returned ``StepMetrics.name`` is ``metric_name`` and ``backend`` is ``"ffmpeg"``.
     """
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -140,6 +149,8 @@ def loudnorm_only(
     target_sample_rate: int,
     target_channels: int,
     loudnorm_preset: str = "default",
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Lightweight ffmpeg step that only does resampling and loudness normalization (no highpass, no RNNoise)."""
     # NOTE: ``target_channels`` is intentionally ignored — this step forces mono (ac=1)
@@ -154,6 +165,7 @@ def loudnorm_only(
         filter_chain=[("loudnorm", dict(loudnorm_params))],
         step_name="loudnorm_only",
         metric_name=f"loudnorm_only_{loudnorm_preset}",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -163,9 +175,11 @@ def volume_with_limiter(
     target_sample_rate: int,
     target_channels: int,
     volume_db: float,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply volume adjustment with limiter."""
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -206,10 +220,12 @@ def peak_normalize_2pass(
     target_channels: int,
     target_db: float,
     max_gain_db: float,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply two-pass peak normalization."""
 
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -280,9 +296,11 @@ def loudnorm_with_highpass(
     target_sample_rate: int,
     target_channels: int,
     loudnorm_preset: str = "default",
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply loudness normalization with highpass filter."""
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -325,6 +343,8 @@ def dynaudnorm_only(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply dynamic audio normalization."""
     return _run_single_filter(
@@ -335,6 +355,7 @@ def dynaudnorm_only(
         filter_chain=[("dynaudnorm", {})],
         step_name="dynaudnorm_only",
         metric_name="dynaudnorm_only",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -343,9 +364,11 @@ def highlow_aform_loudnorm(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply high-low audio format loudness normalization."""
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -388,9 +411,11 @@ def highlow_nosampl_loudnorm(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply high-low no sample loudness normalization."""
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -437,6 +462,8 @@ def aresampl_loudnorm_fixed(
     target_i: float,
     target_tp: float,
     target_lra: float,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply aresample with fixed loudness normalization parameters."""
     return _run_single_filter(
@@ -457,6 +484,7 @@ def aresampl_loudnorm_fixed(
         ],
         step_name="aresampl_loudnorm_fixed",
         metric_name=f"aresampl_loudnorm_fixed_{target_i}dB_{target_tp}dB_{target_lra}dB",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -468,6 +496,8 @@ def aresampl_loudnorm_fixed2(
     target_i: float,
     target_tp: float,
     target_lra: float,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply aresample with fixed loudness normalization parameters (variant 2)."""
     return _run_single_filter(
@@ -488,6 +518,7 @@ def aresampl_loudnorm_fixed2(
         ],
         step_name="aresampl_loudnorm_fixed2",
         metric_name=f"aresampl_loudnorm_fixed2_{target_i}dB_{target_tp}dB_{target_lra}dB",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -496,6 +527,8 @@ def loudnorm_2pass_linear(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply two-pass linear loudness normalization."""
     return _run_single_filter(
@@ -506,6 +539,7 @@ def loudnorm_2pass_linear(
         filter_chain=[("loudnorm", {"linear": "true", "dual_mono": "true"})],
         step_name="loudnorm_2pass_linear",
         metric_name="loudnorm_2pass_linear",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -514,6 +548,8 @@ def limiter_only(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply audio limiter only."""
     return _run_single_filter(
@@ -524,6 +560,7 @@ def limiter_only(
         filter_chain=[("alimiter", {})],
         step_name="limiter_only",
         metric_name="limiter_only",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -533,6 +570,8 @@ def sox_peak_normalize(
     target_sample_rate: int,
     target_channels: int,
     target_db: float,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply SoX-style peak normalization."""
     # Use volume filter to normalize to target dB
@@ -544,6 +583,7 @@ def sox_peak_normalize(
         filter_chain=[("volume", {"volume": f"{target_db:.1f}dB"})],
         step_name="sox_peak_normalize",
         metric_name=f"sox_peak_normalize_{target_db}dB",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
@@ -552,9 +592,11 @@ def compressor_with_limiter(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply compression with limiter."""
-    import ffmpeg  # type: ignore[import-untyped]
+    ffmpeg = ffmpeg_module()
 
     start = time.time()
     try:
@@ -597,6 +639,8 @@ def dynaudnorm_conservative(
     output_path: Path,
     target_sample_rate: int,
     target_channels: int,
+    *,
+    ffmpeg_module: Callable[[], Any] = _import_ffmpeg,
 ) -> StepMetrics:
     """Apply conservative dynamic audio normalization."""
     return _run_single_filter(
@@ -607,6 +651,7 @@ def dynaudnorm_conservative(
         filter_chain=[("dynaudnorm", {"f": "150", "g": "15", "p": "0.95"})],
         step_name="dynaudnorm_conservative",
         metric_name="dynaudnorm_conservative",
+        ffmpeg_module=ffmpeg_module,
     )
 
 
