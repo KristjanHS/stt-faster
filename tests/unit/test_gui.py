@@ -18,11 +18,14 @@ from backend.services.factory import ServiceFactory
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult
 from installer import setup_gui
 from backend import gui
+from types import SimpleNamespace
+
 from backend.gui import (
     EXTRAS_NEED_INSTALL_HINT,
     GUI_PROFILES,
     PYANNOTE_MODULE,
     AppPaths,
+    attach_missing_streams,
     build_command,
     build_env,
     default_app_paths,
@@ -493,3 +496,19 @@ def test_diarization_failure_parses_the_real_per_file_failure_log(
 
     reasons = [diarization_failure(record.getMessage()) for record in caplog.records]
     assert "HuggingFace returned 403" in reasons
+
+
+def test_windowless_app_writes_its_streams_to_the_gui_log(tmp_path: Path) -> None:
+    # stt-faster-gui.exe gives the app no stdout/stderr; setup_logging's sys.stderr.isatty() crashed on None.
+    log = tmp_path / "logs" / "gui.log"
+    windowless = SimpleNamespace(stdout=None, stderr=None)
+    attach_missing_streams(log, windowless)
+    assert windowless.stderr.isatty() is False
+    windowless.stderr.write("Traceback: boom\n")
+    windowless.stdout.write("hello\n")
+    assert log.read_text(encoding="utf-8") == "Traceback: boom\nhello\n"
+    windowless.stderr.close()
+    console = SimpleNamespace(stdout=object(), stderr=object())
+    before = vars(console).copy()
+    attach_missing_streams(tmp_path / "unused.log", console)
+    assert vars(console) == before and not (tmp_path / "unused.log").exists()
