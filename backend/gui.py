@@ -43,7 +43,7 @@ LOGGER = logging.getLogger(__name__)
 
 APP_NAME = "stt-faster"
 GUI_VARIANT = 61
-SETUP_EXE_NAME = "Transcribe-Setup.exe"  # mirrors installer.setup_gui.SETUP_EXE_NAME
+SETUP_LAUNCHER = Path(".venv", "Scripts", "stt-faster-setup.exe")  # mirrors installer InstallPaths.setup_exe
 PYANNOTE_MODULE = "pyannote.audio"
 SPEAKERS_MIN, SPEAKERS_MAX, SPEAKERS_DEFAULT = 2, 10, 2  # CLI rejects --num-speakers < 2
 EXTRAS_HINT = (
@@ -52,7 +52,7 @@ EXTRAS_HINT = (
     "2. Accept the pyannote/speaker-diarization-community-1 licence\n"
     "3. Create a read token at hf.co/settings/tokens and paste it below"
 )
-EXTRAS_NEED_INSTALL_HINT = "Extras need the installed app (Transcribe-Setup.exe not found)."
+EXTRAS_NEED_INSTALL_HINT = "Extras need the installed app (stt-faster-setup.exe not found)."
 # components.FileProcessor logs "Failed to process <file>: <ErrorType>: <message>" per failed file.
 _DIARIZATION_FAILURE = re.compile(
     rf"\b(?:{DiarizationConfigError.__name__}|{DiarizationRuntimeError.__name__}): (?P<reason>.+)"
@@ -96,7 +96,7 @@ class AppPaths:
 
     @property
     def setup_exe(self) -> Path:
-        return self.install_dir / SETUP_EXE_NAME
+        return self.install_dir / SETUP_LAUNCHER
 
     @property
     def gui_log(self) -> Path:
@@ -190,7 +190,7 @@ def save_and_install(
     launch: Callable[[list[str], str], None] = launch_detached,
     tempdir: Callable[[], str] = tempfile.gettempdir,
 ) -> None:
-    """Store the HF token, then hand over to ``Transcribe-Setup.exe --extras`` (caller quits)."""
+    """Store the HF token, then hand over to ``stt-faster-setup.exe --extras`` (caller quits)."""
     paths.token_file.parent.mkdir(parents=True, exist_ok=True)
     paths.token_file.touch(mode=0o600)
     paths.token_file.write_text(token.strip(), encoding="utf-8")

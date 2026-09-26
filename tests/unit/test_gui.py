@@ -383,7 +383,7 @@ def test_save_and_install_writes_token_then_launches_setup_extras(paths: AppPath
     save_and_install(paths, "  hf_abc\n", launch=launch)
 
     [(cmd, cwd)] = launched
-    assert cmd == [str(paths.install_dir / "Transcribe-Setup.exe"), "--extras"]
+    assert cmd == [str(paths.install_dir / ".venv" / "Scripts" / "stt-faster-setup.exe"), "--extras"]
     # The shortcut parks the app in venv\Scripts; setup inheriting that cwd sees the app as "still open".
     assert not Path(cwd).resolve().is_relative_to(paths.install_dir / ".venv")
     assert paths.token_file == paths.config_file.parent / "hf_token"
@@ -403,10 +403,10 @@ def test_app_and_installer_agree_on_shared_paths(tmp_path: Path, plat: str) -> N
     env = {k: str(tmp_path / k) for k in ("LOCALAPPDATA", "APPDATA", "XDG_DATA_HOME", "XDG_CONFIG_HOME")}
     app = gui.default_app_paths(env, plat)
     setup = setup_gui.default_install_paths(env, plat)
-    assert gui.SETUP_EXE_NAME == setup_gui.SETUP_EXE_NAME
     assert app.config_file == setup.config_file
     assert app.token_file == setup.hf_token_file
-    assert app.setup_exe == setup.setup_copy
+    windows_setup = setup_gui.InstallPaths(setup.install_dir, setup.config_file, windows=True)
+    assert app.setup_exe == windows_setup.setup_exe  # extras needs the installed (Windows) app anyway
 
 
 def test_extras_install_disabled_without_setup_exe(paths: AppPaths) -> None:

@@ -1,6 +1,6 @@
 # SmartScreen + code signing — plan
 
-**Status:** A shipped; D's CI build shipped with signing dormant. SignPath (C, D's SignPath steps) dropped 2026-09-26; signing route undecided. Parent: `2026-09-25-windows-installer-gui-design.md` (slice 7).
+**Status:** ARCHIVED 2026-09-26 — signing abandoned; the exe now launches only once (from the browser), see the parent design §SmartScreen. A + D (unsigned CI build) shipped. Parent: `../2026-09-25-windows-installer-gui-design.md` (slice 7).
 
 ## Rulings (owner, 2026-09-25)
 

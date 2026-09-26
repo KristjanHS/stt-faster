@@ -121,6 +121,7 @@ stt-faster = "backend.cli.main:main"
 
 [project.gui-scripts]
 stt-faster-gui = "backend.gui:main"
+stt-faster-setup = "installer.setup_gui:main"  # Repair / Uninstall / extras: the downloaded exe runs only once
 
 [build-system]
 requires = ["setuptools"]
