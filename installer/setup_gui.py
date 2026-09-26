@@ -60,7 +60,9 @@ MIN_GPU_DRIVER = (528, 33)  # CUDA 12.0 on Windows; newer cuBLAS 12.x runs via m
 MIN_GPU_VRAM_MIB = 4000  # ~4 GB; a misjudged GPU falls back to CPU (model load or the GUI's retry)
 GPU_EXTRA_SIZE = "1.2 GB"  # gpu-win wheels: cuBLAS + cuDNN 9.1
 UNINSTALL_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"  # HKCU: Apps & features, no admin
-UNINSTALL_TEMP_PREFIX = f"{APP_NAME}-uninstall-"
+SETUP_TEMP_PREFIX = f"{APP_NAME}-setup-"  # %TEMP% folders a setup run continues from (see relaunch_from_temp)
+# Kept out of a hop's runtime copy: the app's packages and the stdlib parts setup never imports.
+RUNTIME_IGNORE = shutil.ignore_patterns("site-packages", "test", "idlelib", "ensurepip", "include", "libs")
 DESKTOP_PS = "([Environment]::GetFolderPath('Desktop'))"
 PROGRAMS_PS = "([Environment]::GetFolderPath('Programs'))"
 
@@ -166,7 +168,18 @@ class InstallPaths:
         return self.venv_dir / "bin" / "stt-faster-gui"
 
     @property
+    def setup_exe(self) -> Path:
+        """The venv's launcher for this setup: Repair / Uninstall / extras start it like the app starts its own.
+
+        Smart App Control blocks every later launch of the downloaded setup exe, but not the app's launchers.
+        """
+        if self.windows:
+            return self.venv_dir / "Scripts" / "stt-faster-setup.exe"
+        return self.venv_dir / "bin" / "stt-faster-setup"
+
+    @property
     def setup_copy(self) -> Path:
+        """Where ≤1.2.3 kept a copy of the setup exe; finish() drops it."""
         return self.install_dir / SETUP_EXE_NAME
 
     @property
@@ -512,7 +525,7 @@ _PS_START_MENU = f"$p = {PROGRAMS_PS}; $f = Join-Path $p {_ps_quote(SHORTCUT_NAM
 def shortcut_script(paths: InstallPaths, *, tools: bool) -> str:
     """PowerShell creating the Desktop link and the Start-menu ``Transcribe`` folder (WScript.Shell; no admin).
 
-    ``tools`` adds Repair / Uninstall / Setup log links, which run the kept setup copy (dev runs have none).
+    ``tools`` adds Repair / Uninstall / Setup log links, which run the venv's setup launcher.
     """
     script = (
         "$s = New-Object -ComObject WScript.Shell; "
@@ -523,8 +536,8 @@ def shortcut_script(paths: InstallPaths, *, tools: bool) -> str:
     for folder in (DESKTOP_PS, "$f"):  # WorkingDirectory never inside the venv (see launch_gui)
         script += _ps_link(folder, SHORTCUT_NAME, paths.gui_exe, paths.install_dir)
     if tools:
-        script += _ps_link("$f", f"Repair {SHORTCUT_NAME}", paths.setup_copy, paths.install_dir)
-        script += _ps_link("$f", f"Uninstall {SHORTCUT_NAME}", paths.setup_copy, paths.install_dir, "--uninstall")
+        script += _ps_link("$f", f"Repair {SHORTCUT_NAME}", paths.setup_exe, paths.install_dir)
+        script += _ps_link("$f", f"Uninstall {SHORTCUT_NAME}", paths.setup_exe, paths.install_dir, "--uninstall")
         script += _ps_link("$f", "Setup log", paths.log_file, paths.log_file.parent)
     return script.rstrip()
 
@@ -550,8 +563,8 @@ def register_uninstall(paths: InstallPaths, reg: Any) -> None:
         "DisplayVersion": app_version(paths.app_dir),
         "Publisher": APP_NAME,
         "InstallLocation": str(paths.install_dir),
-        "DisplayIcon": str(paths.setup_copy),
-        "UninstallString": f'"{paths.setup_copy}" --uninstall',
+        "DisplayIcon": str(paths.gui_exe),
+        "UninstallString": f'"{paths.setup_exe}" --uninstall',
     }
     with reg.CreateKey(reg.HKEY_CURRENT_USER, UNINSTALL_KEY) as key:
         for name, value in values.items():
@@ -746,6 +759,7 @@ def uninstall(
     run: Callable[..., Any] = subprocess.run,
     in_use: Callable[[InstallPaths], bool] = app_in_use,
     step: Callable[[str], None] = lambda _text: None,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Remove the install dir, the config dir, the Desktop + Start-menu shortcuts and the Apps & features entry.
 
@@ -753,7 +767,11 @@ def uninstall(
     the install dir, and the InstallError then lists what was left (a rerun of setup offers Uninstall again).
     ``step`` gets a status line before each part.
     """
-    if in_use(paths):
+    for _ in range(20):  # ~10 s: the venv launcher that started our hop may still be exiting
+        if not in_use(paths):
+            break
+        sleep(0.5)
+    else:
         raise InstallError("Close Transcribe first, then retry.")
     for target in (paths.install_dir, paths.config_file.parent):
         if target.name != APP_NAME:  # both are <base>\stt-faster by construction; never rmtree anything else
@@ -782,18 +800,41 @@ def running_exe() -> Path | None:
     return Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
 
 
+def setup_program() -> Path:
+    """What runs now: the frozen Transcribe-Setup.exe, or this script (the venv's ``stt-faster-setup`` launcher)."""
+    return running_exe() or Path(__file__).resolve()
+
+
+def runs_from_install(program: Path, paths: InstallPaths) -> bool:
+    """A run from the install dir locks what repair replaces and uninstall deletes: it must hop to %TEMP% first."""
+    return paths.windows and program.is_relative_to(paths.install_dir.resolve())
+
+
 def relaunch_from_temp(
-    exe: Path,
+    program: Path,
     args: Sequence[str],
     *,
     popen: Callable[..., Any] = subprocess.Popen,
     tempdir: Callable[[], str] = tempfile.gettempdir,
+    runtime: Path = Path(sys.base_prefix),
+    env: Mapping[str, str] = os.environ,
 ) -> None:
-    """Windows can't delete a running exe: continue the uninstall from a %TEMP% copy of it."""
-    copy = Path(tempfile.mkdtemp(prefix=UNINSTALL_TEMP_PREFIX, dir=tempdir())) / exe.name
-    shutil.copy2(exe, copy)
+    """Windows can't replace or delete a running program: continue from a %TEMP% copy of it.
+
+    This script takes its Python ``runtime`` along (setup is stdlib-only): the app's own, which a clean
+    reinstall or uninstall removes. Smart App Control judges the copy by its content, as it did the original.
+    """
+    hop = Path(tempfile.mkdtemp(prefix=SETUP_TEMP_PREFIX, dir=tempdir()))
+    copy = hop / program.name
+    shutil.copy2(program, copy)
+    cmd = [str(copy)]
+    if program.suffix == ".py":
+        shutil.copytree(runtime, hop / "python", ignore=RUNTIME_IGNORE)
+        cmd[:0] = [str(hop / "python" / "pythonw.exe"), "-I"]  # isolated: no user site, no PYTHON* vars
+    # A venv launcher's marker would start the copy as that venv again.
+    child_env = {k: v for k, v in env.items() if k.upper() not in {"__PYVENV_LAUNCHER__", "PYTHONHOME", "PYTHONPATH"}}
     # cwd outside the install dir: Explorer starts us there, and Windows won't remove a process's cwd.
-    popen([str(copy), *args], cwd=tempdir(), creationflags=NO_WINDOW)
+    popen([*cmd, *args], cwd=tempdir(), creationflags=NO_WINDOW, env=child_env)
 
 
 def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
@@ -808,7 +849,7 @@ def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
 
 
 def schedule_self_delete(exe: Path, env: Mapping[str, str], *, popen: Callable[..., Any] = subprocess.Popen) -> None:
-    if exe.parent.name.startswith(UNINSTALL_TEMP_PREFIX):  # only ever our own relaunch copy
+    if exe.parent.name.startswith(SETUP_TEMP_PREFIX):  # only ever our own relaunch copy
         cmd = self_delete_command(exe, env)
         popen(cmd, cwd=exe.parent.parent, creationflags=NO_WINDOW)  # never cwd in what it deletes
 
@@ -840,7 +881,7 @@ READY_TIMEOUT = 20.0  # seconds a "Starting uninstall…" window waits for the r
 
 def ready_marker(tempdir: Callable[[], str] = tempfile.gettempdir) -> Path:
     """Where the process that removes the app signals that its window is up (``--ready-file``)."""
-    return Path(tempdir(), f"{UNINSTALL_TEMP_PREFIX}{os.getpid()}.ready")
+    return Path(tempdir(), f"{SETUP_TEMP_PREFIX}{os.getpid()}.ready")
 
 
 def wait_for_marker(
@@ -862,12 +903,14 @@ def wait_for_marker(
     poll()
 
 
-def show_starting(root: Any, marker: Path) -> None:
+def show_starting(
+    root: Any, marker: Path, *, title: str = "Uninstall Transcribe", text: str = "Starting uninstall…"
+) -> None:
     """Cover the hop to the %TEMP% copy: a small busy window until the copy's own window is up."""
-    root.title("Uninstall Transcribe")
+    root.title(title)
     frame = ttk.Frame(root, padding=16)
     frame.pack(fill="both", expand=True)
-    ttk.Label(frame, text="Starting uninstall…").pack(anchor="w")
+    ttk.Label(frame, text=text).pack(anchor="w")
     bar = ttk.Progressbar(frame, mode="indeterminate", length=320)
     bar.pack(fill="x", pady=(8, 0))
     bar.start(15)
@@ -876,14 +919,38 @@ def show_starting(root: Any, marker: Path) -> None:
     root.mainloop()
 
 
+def hop_behind_window(
+    root: Any,
+    relaunch: Callable[[], None],
+    marker: Path,
+    *,
+    starting: Callable[..., None] = show_starting,
+    dialogs: Callable[[], Any] = _messagebox,
+    title: str = "Uninstall Transcribe",
+    text: str = "Starting uninstall…",
+) -> None:
+    """Copy + relaunch once the "Starting…" window is up (the runtime copy takes seconds); a failure says so."""
+
+    def go() -> None:
+        try:
+            relaunch()
+        except OSError as error:  # pythonw has no stderr: without this the click just seems to do nothing
+            LOGGER.exception("Could not continue from %%TEMP%%")
+            dialogs().showerror(title, f"Could not copy setup to %TEMP% ({error}).", parent=root)
+            root.destroy()
+
+    root.after(50, go)
+    starting(root, marker, title=title, text=text)
+
+
 HANDOFF_GRACE = 1.0  # seconds after the waiter took the marker, for its process to exit and unlock its exe
 HANDOFF_CAP = 5.0  # seconds after signalling before removing anyway
 
 
 class ReadyHandoff:
-    """The remover's side of ``--ready-file``: signal our window is up, then wait for the waiter to let go.
+    """The hopped copy's side of ``--ready-file``: signal our window is up, then wait for the waiter to let go.
 
-    The waiter may run from the install dir, so removing before it exits leaves its exe behind.
+    The waiter may run from the install dir, so working before it exits finds its files locked.
     """
 
     def __init__(self, marker: Path, *, clock: Callable[[], float] = time.monotonic) -> None:
@@ -988,7 +1055,7 @@ def uninstall_main(
     tk_root: Callable[[], Any] = tk.Tk,
     dialogs: Callable[[], Any] = _messagebox,
     winreg: Callable[[], Any] = _winreg,
-    current_exe: Callable[[], Path | None] = running_exe,
+    program: Callable[[], Path] = setup_program,
     relaunch: Callable[[Path, Sequence[str]], None] = relaunch_from_temp,
     remove: Callable[..., None] = uninstall,
     self_delete: Callable[[Path, Mapping[str, str]], None] = schedule_self_delete,
@@ -1007,24 +1074,26 @@ def uninstall_main(
     if root is not None and not confirmed:
         if not dialogs().askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=root):
             return 1
-    exe = current_exe()
+    exe = program()
     reg = winreg() if paths.windows else None
-    if exe is not None and paths.windows and exe.is_relative_to(paths.install_dir.resolve()):
+    if runs_from_install(exe, paths):
         if root is None:
             relaunch(exe, ["--uninstall", "--yes", "--headless"])
             return 0
         ready = ready_file or marker()
-        relaunch(exe, ["--uninstall", "--yes", "--ready-file", str(ready)])
+        args = ["--uninstall", "--yes", "--ready-file", str(ready)]
         if ready_file is None:  # nobody else is covering the hop
-            starting(root, ready)
+            hop_behind_window(root, lambda: relaunch(exe, args), ready, starting=starting, dialogs=dialogs)
+        else:
+            relaunch(exe, args)
         return 0
     if root is None:
+        ok = True
         try:
             remove(paths, env, reg=reg)
         except InstallError as error:
             LOGGER.error("Uninstall failed: %s", error)
-            return 1
-        ok = True
+            ok = False
     else:
 
         def remove_reporting(step: Callable[[str], None]) -> None:
@@ -1033,11 +1102,11 @@ def uninstall_main(
         shown = window(root, remove_reporting, ready_file=ready_file)
         root.mainloop()
         ok = shown.ok
+    if paths.windows:
+        self_delete(exe, env)  # a no-op outside a hop folder; a retry starts from the Start menu again
     if not ok:
         return 1
     LOGGER.info("Removed %s and %s", paths.install_dir, paths.config_file.parent)
-    if exe is not None and paths.windows:
-        self_delete(exe, env)
     return 0
 
 
@@ -1364,17 +1433,19 @@ class Installer:
     def finish(self, report: Report) -> None:
         if not self.paths.gui_exe.is_file():
             raise InstallError(f"Install finished but {self.paths.gui_exe.name} is missing")
-        if getattr(sys, "frozen", False):  # keep a copy so the GUI can re-run setup (repair / extras)
-            exe = Path(sys.executable)
-            if exe.resolve() != self.paths.setup_copy.resolve():
-                shutil.copy2(exe, self.paths.setup_copy)
+        tools = self.paths.setup_exe.is_file()  # a source predating it keeps the ≤1.2.3 copy + its entry
+        try:  # the venv's setup launcher replaces it everywhere; Smart App Control blocked it
+            if tools:
+                self.paths.setup_copy.unlink(missing_ok=True)
+        except OSError as error:
+            LOGGER.warning("Could not remove %s (%s)", self.paths.setup_copy, error)
         if self.paths.windows:
             report(None, "creating shortcuts")
             powershell = system_tool(self.env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-            script = shortcut_script(self.paths, tools=self.paths.setup_copy.is_file())
+            script = shortcut_script(self.paths, tools=tools)
             cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", script]
             self.runner(cmd, self.env, report, self.cancel)
-            if self.paths.setup_copy.is_file():  # the entry's UninstallString runs that copy
+            if tools:  # the entry's UninstallString runs the launcher
                 register_uninstall(self.paths, self.winreg())
 
     def fetch_diarization(self, report: Report) -> None:
@@ -1451,9 +1522,12 @@ class SetupWindow:
         tempdir: Callable[[], str] = tempfile.gettempdir,
         dialogs: Callable[[], Any] = _messagebox,
         logger: logging.Logger | None = None,
+        handoff: ReadyHandoff | None = None,
     ) -> None:
         self.root = root
         self.installer = installer
+        self.handoff = handoff  # set when we hopped: the launcher's process still holds the venv
+        self.handed_off = False  # an uninstall copy now runs from our folder: it deletes that, not we
         self.popen = popen
         self.tempdir = tempdir
         self.dialogs = dialogs
@@ -1524,8 +1598,19 @@ class SetupWindow:
         self.log_link = ttk.Label(frame, text="", foreground="#0066cc", cursor="hand2", font=link_font)
         self.log_link.bind("<Button-1>", lambda _e: self.open_log())  # packed only once a run has failed
         self.mode.trace_add("write", self._on_mode)
-        if installer.extras:  # the app asked for this run and has already quit
+        if handoff is not None:
+            self.install_button.config(state="disabled")
+            root.after(100, self._await_handoff)
+        elif installer.extras:  # the app asked for this run and has already quit
             root.after(100, self.start)
+
+    def _await_handoff(self) -> None:
+        if self.handoff is not None and not self.handoff.done():
+            self.root.after(100, self._await_handoff)
+            return
+        self.install_button.config(state="normal")
+        if self.installer.extras:
+            self.start()
 
     def _on_mode(self, *_: object) -> None:
         self.install_button.config(text="Uninstall" if self.mode.get() == "uninstall" else "Install")
@@ -1547,6 +1632,7 @@ class SetupWindow:
         ready = ready_marker(self.tempdir)
         cmd = [*self_command(), "--uninstall", "--yes", "--ready-file", str(ready)]
         self.popen(cmd, cwd=self.tempdir(), creationflags=NO_WINDOW)  # not the install dir
+        self.handed_off = True
         self.install_button.config(state="disabled")
         self.launch_button.config(state="disabled")
         self.summary.config(text="Starting uninstall…")
@@ -1687,20 +1773,56 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--extras", action="store_true", help="add speaker detection to an existing install")
     parser.add_argument("--cpu", action="store_true", help="headless: skip GPU mode even if an NVIDIA GPU is found")
     parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # already confirmed (relaunch)
-    parser.add_argument("--ready-file", type=Path, help=argparse.SUPPRESS)  # uninstall: created once our window is up
+    parser.add_argument("--ready-file", type=Path, help=argparse.SUPPRESS)  # a hop: created once our window is up
     args = parser.parse_args(argv)
     if args.extras and (args.source or args.clean or args.uninstall):
         parser.error("--extras cannot be combined with --source, --clean or --uninstall")
     return args
 
 
+def setup_hop(
+    paths: InstallPaths,
+    argv: Sequence[str],
+    *,
+    headless: bool,
+    program: Callable[[], Path] = setup_program,
+    relaunch: Callable[[Path, Sequence[str]], None] = relaunch_from_temp,
+    marker: Callable[[], Path] = ready_marker,
+    tk_root: Callable[[], Any] = tk.Tk,
+    starting: Callable[..., None] = show_starting,
+    dialogs: Callable[[], Any] = _messagebox,
+) -> bool:
+    """Started by the venv's launcher (Repair, the app's extras): continue from a %TEMP% copy, as the run replaces
+    that venv. True when the copy took over; the copy waits for us to exit (``--ready-file``) before any work."""
+    exe = program()
+    if not runs_from_install(exe, paths):
+        return False
+    ready = marker()
+    LOGGER.info("Continuing setup from a %%TEMP%% copy of %s", exe)
+    args = [*argv, "--ready-file", str(ready)]
+    if headless:
+        relaunch(exe, args)
+    else:
+        root = tk_root()
+        root.withdraw()
+        title, text = "Transcribe — Setup", "Starting setup…"
+        hop_behind_window(
+            root, lambda: relaunch(exe, args), ready, starting=starting, dialogs=dialogs, title=title, text=text
+        )
+    return True
+
+
 def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
     args = parse_args(argv)
     paths = default_install_paths()
     if args.uninstall:
         _setup_logging(None, console=args.headless)
         return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes, ready_file=args.ready_file)
     _setup_logging(paths.log_file, console=args.headless)
+    if setup_hop(paths, argv, headless=args.headless):
+        return 0
+    handoff = ReadyHandoff(args.ready_file) if args.ready_file is not None else None
     # Bitdefender sets it in Chrome, so a setup opened from the download bar inherits it; dropped here, our own
     # downloads and the Transcribe it launches never see it either (isolated_env still guards passed-in envs).
     if keylog := os.environ.pop("SSLKEYLOGFILE", ""):
@@ -1719,11 +1841,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         def state(key: str, value: str, message: str) -> None:
             LOGGER.info("%s: %s %s", key, value, message)
 
-        return 0 if installer.run(Events(progress=progress, state=state)) else 1
+        while handoff is not None and not handoff.done():
+            time.sleep(0.2)
+        ok = installer.run(Events(progress=progress, state=state))
+        if paths.windows:
+            schedule_self_delete(setup_program(), os.environ)
+        return 0 if ok else 1
 
     root = tk.Tk()
-    SetupWindow(root, installer)
+    window = SetupWindow(root, installer, handoff=handoff)
     root.mainloop()
+    if paths.windows and not window.handed_off:
+        schedule_self_delete(setup_program(), os.environ)  # a no-op unless we run from a hop folder
     return 0
 
 

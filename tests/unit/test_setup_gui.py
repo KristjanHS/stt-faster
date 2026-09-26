@@ -77,6 +77,8 @@ from installer.setup_gui import (
     read_config,
     register_uninstall,
     relaunch_from_temp,
+    hop_behind_window,
+    setup_hop,
     unlink_when_released,
     remove_shortcuts_script,
     download_progress,
@@ -402,7 +404,7 @@ def test_uninstall_registry_entry_roundtrip(paths: InstallPaths) -> None:
     register_uninstall(paths, reg)
     ((key, values),) = reg.keys.items()
     assert key.endswith(r"CurrentVersion\Uninstall\stt-faster")
-    assert values["UninstallString"] == f'"{paths.setup_copy}" --uninstall'
+    assert values["UninstallString"] == f'"{paths.setup_exe}" --uninstall'
     unregister_uninstall(reg)
     unregister_uninstall(reg)  # already gone is not an error
     assert reg.keys == {}
@@ -463,7 +465,14 @@ def test_uninstall_refuses_unexpected_folder_and_open_app(tmp_path: Path) -> Non
         uninstall(odd, {})
     assert odd.install_dir.is_dir()
     with pytest.raises(InstallError, match="Close Transcribe"):
-        uninstall(odd, {}, in_use=lambda _p: True)
+        uninstall(odd, {}, in_use=lambda _p: True, sleep=lambda _s: None)
+    busy = iter([True, True, False])  # the launcher that started the hop exits a moment later
+    uninstall(
+        odd.__class__(tmp_path / "x" / "stt-faster", odd.config_file, windows=False),
+        {},
+        in_use=lambda _p: next(busy),
+        sleep=lambda _s: None,
+    )
 
 
 def test_remove_shortcuts_script_removes_desktop_link_old_link_and_folder() -> None:
@@ -475,7 +484,7 @@ def test_remove_shortcuts_script_removes_desktop_link_old_link_and_folder() -> N
 
 
 def test_self_delete_command_removes_only_its_temp_folder() -> None:
-    exe = Path("C:/Temp/stt-faster-uninstall-ab12/Transcribe-Setup.exe")
+    exe = Path("C:/Temp/stt-faster-setup-ab12/Transcribe-Setup.exe")
     cmd = self_delete_command(exe, {"SYSTEMROOT": "C:/Windows"})
     assert f'rmdir /s /q "{exe.parent}"' in cmd and f'if not exist "{exe.parent}" exit' in cmd
     assert cmd.startswith(f'"{Path("C:/Windows", "System32", "cmd.exe")}" /d /c for /l')
@@ -558,7 +567,8 @@ def test_shortcut_script_desktop_link_and_start_menu_tools() -> None:
     desktop, start, repair, remove, log = _links(script)
     assert desktop["target"] == start["target"] == str(paths.gui_exe)
     assert desktop["workdir"] == start["workdir"] == root  # never cwd inside the venv's Scripts
-    assert repair["target"] == remove["target"] == str(paths.setup_copy)
+    assert repair["target"] == remove["target"] == str(paths.setup_exe)  # never the SAC-blocked exe copy
+    assert paths.setup_exe.parent == paths.gui_exe.parent  # launched like the app itself
     assert "args" not in repair and remove["args"] == "--uninstall"
     assert log["target"] == str(paths.log_file)
     assert "$f = Join-Path $p 'Transcribe'" in script and "GetFolderPath('Programs')" in script
@@ -567,7 +577,7 @@ def test_shortcut_script_desktop_link_and_start_menu_tools() -> None:
     assert script.index("Remove-Item -LiteralPath $f -Recurse") < script.index("New-Item")
 
 
-def test_shortcut_script_without_setup_copy_has_no_tool_links(win_paths: InstallPaths) -> None:
+def test_shortcut_script_without_setup_launcher_has_no_tool_links(win_paths: InstallPaths) -> None:
     names = [link["name"] for link in _links(shortcut_script(win_paths, tools=False))]
     assert names == ["Transcribe.lnk", "Transcribe.lnk"]
 
@@ -642,21 +652,104 @@ def test_fetch_model_uses_install_cache_and_seeds_only_without_clean(tmp_path: P
     assert len(seeds) == 1 and runs[1][0][-1] == "--force-download"
 
 
-def test_finish_registers_uninstall_and_tool_links_only_with_setup_copy(paths: InstallPaths) -> None:
+def test_finish_registers_uninstall_and_tool_links_only_with_setup_launcher(win_paths: InstallPaths) -> None:
     reg = _FakeReg()
     scripts: list[str] = []
-    paths.gui_exe.parent.mkdir(parents=True)
-    paths.gui_exe.write_bytes(b"exe")
+    win_paths.gui_exe.parent.mkdir(parents=True)
+    win_paths.gui_exe.write_bytes(b"exe")
+    win_paths.setup_copy.write_bytes(b"exe")  # a ≤1.2.3 install's copy
     installer = Installer(
-        paths=paths, env={}, winreg=lambda: reg, runner=lambda cmd, *_a: scripts.append(list(cmd)[-1])
+        paths=win_paths, env={}, winreg=lambda: reg, runner=lambda cmd, *_a: scripts.append(list(cmd)[-1])
     )
     installer.finish(lambda *_a: None)
-    assert reg.keys == {}  # no copy to point UninstallString at
+    assert reg.keys == {}  # no launcher to point UninstallString at
     assert "Repair Transcribe.lnk" not in scripts[-1]
-    paths.setup_copy.write_bytes(b"exe")
+    assert win_paths.setup_copy.exists()  # an older source without the launcher: its entry still needs the copy
+    win_paths.setup_exe.write_bytes(b"exe")
     installer.finish(lambda *_a: None)
     assert list(reg.keys) == [UNINSTALL_KEY]
+    assert not win_paths.setup_copy.exists()  # Smart App Control blocks it; nothing points at it any more
     assert "'Repair Transcribe.lnk'" in scripts[-1] and "'Uninstall Transcribe.lnk'" in scripts[-1]
+
+
+def test_relaunch_from_temp_takes_the_scripts_python_along(
+    tmp_path: Path,
+    popen_calls: list[tuple[Any, dict[str, Any]]],
+    popen: Callable[..., None],
+    tempdir: Callable[[], str],
+) -> None:
+    script = tmp_path / "app" / "installer" / "setup_gui.py"
+    runtime = tmp_path / "python"
+    for f in (script, runtime / "pythonw.exe", runtime / "Lib" / "os.py", runtime / "Lib" / "site-packages" / "x.py"):
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"")
+    env = {"PATH": "C:/Windows", "__PYVENV_LAUNCHER__": "C:/venv/Scripts/pythonw.exe"}
+    relaunch_from_temp(script, ["--extras"], popen=popen, tempdir=tempdir, runtime=runtime, env=env)
+    ((cmd, kw),) = popen_calls
+    hop = Path(cmd[2]).parent
+    assert hop.name.startswith("stt-faster-setup-") and hop.parent == Path(tempdir())
+    assert cmd == [str(hop / "python" / "pythonw.exe"), "-I", str(hop / "setup_gui.py"), "--extras"]
+    assert (hop / "python" / "Lib" / "os.py").is_file() and not (hop / "python" / "Lib" / "site-packages").exists()
+    assert kw["env"] == {"PATH": "C:/Windows"}  # else the copy would start as the venv it left
+
+
+@pytest.mark.parametrize("home", ["install", "downloads"])
+def test_setup_hop_only_from_the_install_dir(win_paths: InstallPaths, tmp_path: Path, home: str) -> None:
+    program = win_paths.app_dir / "installer" / "setup_gui.py" if home == "install" else tmp_path / "Transcribe.exe"
+    relaunched: list[tuple[Path, list[str]]] = []
+    covered: list[tuple[Path, str]] = []
+    hopped = setup_hop(
+        win_paths,
+        ["--extras"],
+        headless=False,
+        program=lambda: program,
+        relaunch=lambda exe, args: relaunched.append((exe, list(args))),
+        marker=lambda: tmp_path / "own.ready",
+        tk_root=_FakeTk,
+        starting=lambda root, marker, **kw: (root.run_after(), covered.append((marker, kw["text"]))),
+    )
+    assert hopped is (home == "install")
+    if hopped:
+        assert relaunched == [(program, ["--extras", "--ready-file", str(tmp_path / "own.ready")])]
+        assert covered == [(tmp_path / "own.ready", "Starting setup…")]
+    else:
+        assert relaunched == covered == []
+
+
+def test_hop_copy_failure_says_so_and_closes(tmp_path: Path, fake_dialogs: _FakeDialogs) -> None:
+    errors: list[str] = []
+    fake_dialogs.showerror = lambda _title, message, **_kw: errors.append(message)  # type: ignore[method-assign]
+    root = _FakeTk()
+
+    def fail() -> None:
+        raise OSError(28, "No space left on device")
+
+    hop_behind_window(
+        root, fail, tmp_path / "x.ready", starting=lambda r, *_a, **_kw: r.run_after(), dialogs=lambda: fake_dialogs
+    )
+    assert root.destroyed and "No space left" in errors[0]
+
+
+def test_hopped_window_waits_for_the_launcher_to_exit_before_extras(tmp_path: Path) -> None:
+    now = [0.0]
+    started: list[bool] = []
+    window = SimpleNamespace(
+        root=_FakeTk(),
+        handoff=ReadyHandoff(tmp_path / "x.ready", clock=lambda: now[0]),
+        install_button=_FakeLabel(),
+        installer=SimpleNamespace(extras=True),
+        start=lambda: started.append(True),
+    )
+    window._await_handoff = lambda: SetupWindow._await_handoff(cast(Any, window))
+    window._await_handoff()
+    assert started == [] and len(window.root.pending) == 1  # marker up; the launcher has not let go yet
+    (tmp_path / "x.ready").unlink()  # the launcher took it and exits
+    now[0] = 0.5
+    window.root.run_after()
+    assert started == []  # its exe unlocks within the grace
+    now[0] = 2.0
+    window.root.run_after()
+    assert started == [True] and window.install_button.state == "normal"
 
 
 def test_parse_args_takes_the_uninstall_ready_file() -> None:
@@ -978,7 +1071,7 @@ def test_uninstall_main_hops_to_temp_copy_when_run_from_install_dir(
         {},
         headless=True,
         confirmed=True,
-        current_exe=lambda: exe,
+        program=lambda: exe,
         winreg=_FakeReg,
         relaunch=lambda e, args: relaunch_from_temp(e, args, popen=popen, tempdir=tempdir),
         remove=lambda *_a, **_kw: pytest.fail("the temp copy removes"),
@@ -988,8 +1081,8 @@ def test_uninstall_main_hops_to_temp_copy_when_run_from_install_dir(
     assert not Path(args[0]).is_relative_to(win_paths.install_dir) and {"--uninstall", "--yes"} <= set(args[1:])
 
 
-def test_uninstall_main_self_deletes_only_after_success(tmp_path: Path, win_paths: InstallPaths) -> None:
-    exe = tmp_path / "temp" / "stt-faster-uninstall-x" / "Transcribe-Setup.exe"
+def test_uninstall_main_self_deletes_its_hop_copy_either_way(tmp_path: Path, win_paths: InstallPaths) -> None:
+    exe = tmp_path / "temp" / "stt-faster-setup-x" / "Transcribe-Setup.exe"
     deletes: list[Path] = []
 
     def locked(*_a: Any, **_kw: Any) -> None:
@@ -1001,16 +1094,16 @@ def test_uninstall_main_self_deletes_only_after_success(tmp_path: Path, win_path
             {},
             headless=True,
             confirmed=True,
-            current_exe=lambda: exe,
+            program=lambda: exe,
             winreg=_FakeReg,
             remove=remove,
             self_delete=lambda e, _env: deletes.append(e),
         )
 
     assert run(locked) == 1
-    assert deletes == []
+    assert deletes == [exe]  # a retry starts from the Start menu again
     assert run(lambda *_a, **_kw: None) == 0
-    assert deletes == [exe]
+    assert deletes == [exe, exe]
 
 
 @pytest.mark.parametrize("given", [None, "setup.ready"])
@@ -1028,11 +1121,11 @@ def test_uninstall_main_windowed_hop_forwards_or_covers_the_ready_file(
         ready_file=ready_file,
         tk_root=_FakeTk,
         winreg=_FakeReg,
-        current_exe=lambda: win_paths.setup_copy.resolve(),
+        program=lambda: win_paths.setup_copy.resolve(),
         relaunch=lambda _exe, args: relaunched.append(list(args)),
         remove=lambda *_a, **_kw: pytest.fail("the temp copy removes"),
         marker=lambda: tmp_path / "own.ready",
-        starting=lambda _root, marker: covered.append(marker),
+        starting=lambda root, marker, **_kw: (root.run_after(), covered.append(marker)),
     )
     expected = ready_file or tmp_path / "own.ready"
     assert code == 0
@@ -1064,14 +1157,14 @@ def test_uninstall_main_windowed_removes_in_its_window(win_paths: InstallPaths, 
         ready_file=ready,
         tk_root=_FakeTk,
         winreg=_FakeReg,
-        current_exe=lambda: exe,
+        program=lambda: exe,
         remove=remove,
         self_delete=lambda e, _env: deletes.append(e),
         window=window,
     )
     assert code == (0 if ok else 1)
     assert steps == ["Removing settings…"]
-    assert deletes == ([exe] if ok else [])
+    assert deletes == [exe]  # a no-op outside a hop folder
 
 
 def test_wait_for_marker_closes_on_the_marker_or_the_timeout(tmp_path: Path) -> None:
