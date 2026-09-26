@@ -87,6 +87,26 @@ STAGE_LABELS = {
 }
 
 
+def stage_plan(*, diarize: bool) -> tuple[str, ...]:
+    """The stages every file passes through, in order (``prepare`` is instant, so it is not listed)."""
+    return ("preprocess", "load model", "transcribe", *(("diarize",) if diarize else ()))
+
+
+def stage_checklist(stages: Sequence[str], event: ProgressEvent) -> list[tuple[str, str]]:
+    """``(state, line)`` per stage of the current file; state is ``done``, ``current`` or ``pending``."""
+    current = stages.index(event.stage) if event.stage in stages else -1  # prepare: everything still to come
+    rows: list[tuple[str, str]] = []
+    for index, stage in enumerate(stages):
+        label = STAGE_LABELS.get(stage, stage.capitalize())
+        if index < current:
+            rows.append(("done", f"✓ {label}"))
+        elif index == current:
+            rows.append(("current", f"▶ {label}" + (f" · {event.detail}" if event.detail else "")))
+        else:
+            rows.append(("pending", f"○ {label}"))
+    return rows
+
+
 def describe_progress(event: ProgressEvent) -> str:
     """One status line for ``event``: file position, stage, sub-step."""
     parts = [f"File {event.file}/{event.files}", STAGE_LABELS.get(event.stage, event.stage.capitalize())]

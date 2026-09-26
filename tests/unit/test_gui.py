@@ -14,7 +14,15 @@ import pytest
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.diarize.model import DIARIZATION_REPO, DIARIZATION_REVISION, DIARIZATION_SHA256
 from backend.processor import TranscriptionProcessor
-from backend.progress import EtaEstimator, JobEtaEstimator, ProgressEvent, format_progress, parse_progress
+from backend.progress import (
+    EtaEstimator,
+    JobEtaEstimator,
+    ProgressEvent,
+    describe_progress,
+    format_progress,
+    parse_progress,
+    stage_plan,
+)
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
 from backend.services.factory import ServiceFactory
@@ -32,7 +40,6 @@ from backend.gui import (
     build_env,
     cli_env,
     default_app_paths,
-    describe_progress,
     diarization_available,
     diarization_failure,
     find_outputs,
@@ -564,11 +571,26 @@ class _FakeBar:
         self.running = False
 
 
-def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
-    bar, detail = _FakeBar(), _FakeBar()
-    app = SimpleNamespace(
-        progress=bar, detail=detail, eta=EtaEstimator(), job_eta=JobEtaEstimator(), retrying=False, clock=lambda: 0.0
+def _app(*, diarize: bool) -> SimpleNamespace:
+    return SimpleNamespace(
+        progress=_FakeBar(),
+        detail=_FakeBar(),
+        stages=stage_plan(diarize=diarize),
+        step_rows=[_FakeBar() for _ in stage_plan(diarize=diarize)],
+        eta=EtaEstimator(),
+        job_eta=JobEtaEstimator(),
+        retrying=False,
+        clock=lambda: 0.0,
     )
+
+
+def _rows(app: SimpleNamespace) -> list[object]:
+    return [row.options["text"] for row in app.step_rows]
+
+
+def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
+    app = _app(diarize=True)
+    bar = app.progress
     show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
 
     show(app, ProgressEvent(1, 2, "transcribe", 30.0, 60.0))  # type: ignore[arg-type]
@@ -578,23 +600,38 @@ def test_bar_tracks_each_stage_and_pulses_on_a_bare_one() -> None:
     assert bar.options["maximum"] == 100  # at 1.0 ttk's pulse jumps end to end each tick
     show(app, ProgressEvent(1, 2, "diarize", 1.0, 4.0, "embeddings"))  # type: ignore[arg-type]
     assert (bar.options["mode"], bar.options["value"], bar.running) == ("determinate", 25.0, False)
-    assert detail.options["text"] == "File 1/2 · Identifying speakers · embeddings"
+
+
+def test_every_stage_of_the_file_is_listed_with_the_ones_still_to_come() -> None:
+    app = _app(diarize=True)
+    show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
+
+    show(app, ProgressEvent(1, 2, "transcribe", 0.0, 60.0))  # type: ignore[arg-type]
     app.clock = lambda: 60.0
-    show(app, ProgressEvent(1, 2, "diarize", 2.0, 4.0, "embeddings"))  # type: ignore[arg-type]
-    assert detail.options["text"] == "File 1/2 · Identifying speakers · embeddings · ~2 min left"
+    show(app, ProgressEvent(1, 2, "transcribe", 30.0, 60.0))  # type: ignore[arg-type]
+    assert app.detail.options["text"] == "File 1/2"
+    assert _rows(app) == [
+        "✓ Preprocessing",
+        "✓ Loading model",
+        "▶ Transcribing · ~1 min left",  # the stage's own ETA sits on its row, not above the stages still to come
+        "○ Identifying speakers",
+    ]
+    assert [row.options["foreground"] for row in app.step_rows] == ["gray", "gray", "", "gray"]
+    show(app, ProgressEvent(1, 2, "diarize", detail="embeddings"))  # type: ignore[arg-type]
+    assert _rows(app)[2:] == ["✓ Transcribing", "▶ Identifying speakers · embeddings"]
+    show(app, ProgressEvent(2, 2, "prepare"))  # type: ignore[arg-type]
+    assert app.detail.options["text"] == "File 2/2 · Preparing"
+    assert _rows(app) == ["○ Preprocessing", "○ Loading model", "○ Transcribing", "○ Identifying speakers"]
 
 
-def test_job_eta_replaces_the_stage_eta_once_a_file_has_finished() -> None:
-    bar, detail = _FakeBar(), _FakeBar()
-    app = SimpleNamespace(
-        progress=bar, detail=detail, eta=EtaEstimator(), job_eta=JobEtaEstimator(), retrying=False, clock=lambda: 0.0
-    )
+def test_job_eta_heads_the_list_once_a_file_has_finished() -> None:
+    app = _app(diarize=False)
     show = gui.TranscribeApp._show_progress  # pyright: ignore[reportPrivateUsage]
 
     show(app, ProgressEvent(1, 2, "prepare", durations=(600.0, 1200.0)))  # type: ignore[arg-type]
     app.clock = lambda: 300.0
     show(app, ProgressEvent(2, 2, "prepare"))  # type: ignore[arg-type]
-    assert detail.options["text"] == "File 2/2 · Preparing · ~10 min left (all)"
+    assert app.detail.options["text"] == "File 2/2 · Preparing · ~10 min left (all files)"
     app.retrying = True
     show(app, ProgressEvent(2, 2, "transcribe"))  # type: ignore[arg-type]
-    assert str(detail.options["text"]).startswith("File 2/2 · Transcribing (retry)")
+    assert str(app.detail.options["text"]).startswith("File 2/2 (retry)")
