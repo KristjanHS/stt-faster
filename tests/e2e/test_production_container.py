@@ -8,8 +8,7 @@ These tests verify that the production container (from root Dockerfile):
 5. Can be used for transcription
 6. Properly handles volumes and permissions
 
-Note: Some tests require HuggingFace authentication for gated models.
-Set HF_TOKEN environment variable or run: huggingface-cli login
+The diarize test mounts the host's speaker model read-only (`make diarization-model`).
 """
 
 from __future__ import annotations
@@ -21,6 +20,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+
+from backend.diarize.errors import DiarizationConfigError
+from backend.diarize.model import DIARIZATION_MODEL_DIR_ENV, resolve_model_dir
 
 if TYPE_CHECKING:
     from collections.abc import Generator
@@ -35,9 +37,23 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 DOCKERFILE_PATH = PROJECT_ROOT / "Dockerfile"
 IMAGE_NAME = "stt-faster:test-prod"
 DIARIZE_FIXTURE = PROJECT_ROOT / "tests" / "fixtures" / "audio" / "two_speakers_10s.wav"
+CONTAINER_MODEL_ROOT = "/models/diarization"
 
-# HuggingFace token is now provided via the hf_token fixture in tests/conftest.py
-# Tests requiring the token should accept it as a fixture parameter
+
+def container_model_mount(model_dir: Path) -> tuple[str, str]:
+    """(host dir to mount at CONTAINER_MODEL_ROOT, in-container model dir) for a resolved speaker model."""
+    if model_dir.parent.name == "snapshots":  # HF cache: mount the repo dir so the snapshot's ../../blobs links resolve
+        return str(model_dir.parent.parent), f"{CONTAINER_MODEL_ROOT}/snapshots/{model_dir.name}"
+    return str(model_dir), CONTAINER_MODEL_ROOT
+
+
+@pytest.fixture(scope="module")
+def speaker_model_dir() -> Path:
+    """Module-scoped so it runs (and skips) before the image build."""
+    try:
+        return resolve_model_dir()
+    except DiarizationConfigError as exc:
+        pytest.skip(f"speaker model not resolvable: {exc}")
 
 
 def _sanitize_command_for_logging(cmd: list[str]) -> str:
@@ -384,13 +400,9 @@ class TestProductionDiarization:
     @pytest.mark.slow
     def test_diarize_two_speakers_in_container(
         self,
+        speaker_model_dir: Path,
         production_image: str,
-        hf_token: str | None,
     ) -> None:
-        if not hf_token:
-            pytest.skip(
-                "HF_TOKEN/HUGGING_FACE_HUB_TOKEN required for pyannote diarization — see docs/diarization_setup.md"
-            )
         if not DIARIZE_FIXTURE.exists():
             pytest.skip(f"Fixture {DIARIZE_FIXTURE} absent — see tests/fixtures/audio/README.md")
 
@@ -407,6 +419,7 @@ class TestProductionDiarization:
             local_hf_cache = os.path.expanduser(os.getenv("HF_HOME", "~/.cache/hf"))
             data_dir = tmppath / ".local" / "share" / "stt-faster"
             data_dir.mkdir(parents=True)
+            model_host_dir, model_container_dir = container_model_mount(speaker_model_dir)
 
             # Mirror the English Windows bats (transcribe_english_*.bat):
             # `process /workspace --preset turbo --language en
@@ -430,8 +443,9 @@ class TestProductionDiarization:
                     (str(workspace), "/workspace"),
                     (local_hf_cache, "/home/appuser/.cache/hf"),
                     (str(data_dir), "/home/appuser/.local/share/stt-faster"),
+                    (model_host_dir, f"{CONTAINER_MODEL_ROOT}:ro"),
                 ],
-                env_vars={"HF_TOKEN": hf_token},
+                env_vars={DIARIZATION_MODEL_DIR_ENV: model_container_dir},
                 use_gpu=False,
                 timeout=900,
                 check=False,

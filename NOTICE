@@ -1,0 +1,29 @@
+stt-faster
+Copyright (c) 2025 Kristjan Sillmann. MIT License, see LICENSE.
+
+The installer (and `make diarization-model` / `make rnnoise-model`) downloads
+the third-party model files below. They are used unmodified and are not part
+of the stt-faster source.
+
+1. pyannote speaker-diarization-community-1
+   Authors:  pyannote (Hervé Bredin), pyannoteAI
+   Licence:  Creative Commons Attribution 4.0 International (CC-BY-4.0)
+             https://creativecommons.org/licenses/by/4.0/
+   Source:   https://huggingface.co/pyannote-community/speaker-diarization-community-1
+             revision 8a527374977391da736e0daaef26855d949d9685
+             (ungated mirror of pyannote/speaker-diarization-community-1)
+   Files:    config.yaml, README.md, segmentation/, embedding/, plda/, unmodified.
+             The model card (README.md) is kept beside the weights.
+   Parts:    segmentation/  pyannote segmentation (Alexis Plaquet, Hervé Bredin)
+             embedding/     WeSpeaker ResNet34-LM (Hongji Wang et al., WeNet),
+                            via pyannote/wespeaker-voxceleb-resnet34-LM
+             plda/          PLDA model and x-vector transform trained by
+                            BUT Speech@FIT for VBx (Federico Landini, Ján Profant,
+                            Mireia Diez, Lukáš Burget),
+                            https://github.com/BUTSpeechFIT/VBx
+
+2. RNNoise model sh.rnnn (somnolent-hogwash)
+   Author:   Gregor Richards
+   Source:   https://github.com/GregorR/rnnoise-models
+             commit 3eee541a283fd3b8f81b85b1748e3b9ccbefa04d,
+             somnolent-hogwash-2018-09-01/sh.rnnn, unmodified.

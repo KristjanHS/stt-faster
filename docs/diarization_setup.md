@@ -1,8 +1,8 @@
 # Diarization Setup
 
-stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) (model `pyannote/speaker-diarization-community-1`) to attribute each transcribed segment to a speaker. This is the default for the Windows bats (`transcribe_estonian_*.bat`, `transcribe_english_*.bat`) and for any direct `transcribe_manager.py process` run without `--no-diarize`. pyannote ships only with the `cpu`/`cu130` extras; on the lean GUI install `--diarize` warns and is skipped.
+stt-faster uses [pyannote.audio](https://github.com/pyannote/pyannote-audio) with the `speaker-diarization-community-1` pipeline to attribute each transcribed segment to a speaker. Diarization is on by default for the Windows bats and for `transcribe_manager.py process` (`--no-diarize` turns it off). pyannote ships with the `cpu`/`cu130` uv extras; a sync without either warns and skips `--diarize`.
 
-The model is HuggingFace-gated, so first-time setup is a one-time HF account + token + license-accept dance. After that the model is cached at `~/.cache/hf/` (WSL/Linux) or `%USERPROFILE%\.cache\hf\` (Windows) and reused across runs.
+No Hugging Face account or token is needed. The weights (about 33 MB) come from the ungated mirror `pyannote-community/speaker-diarization-community-1`, pinned to revision `8a527374977391da736e0daaef26855d949d9685` and sha256-verified at download. Transcription loads them from local disk only, never the network. Attribution: [NOTICE](../NOTICE).
 
 ## What diarization adds
 
@@ -21,56 +21,31 @@ The model is HuggingFace-gated, so first-time setup is a one-time HF account + t
 
 Defaults: `--diarize` on, `--num-speakers 2`. Override either at the CLI (`--no-diarize`, `--num-speakers N`).
 
-## One-time setup
+## Install the model (one step)
 
-### 1. Create a HuggingFace account and token
+- **Windows app:** the installer fetches it; Start ▸ Transcribe ▸ Repair restores it.
+- **Dev (WSL/Linux):** `make diarization-model` (with `make rnnoise-model` for denoising). It downloads into the HF cache — `$HF_HUB_CACHE`, else `$HF_HOME/hub`, else `~/.cache/huggingface/hub` — and a rerun downloads nothing.
 
-- Sign up at <https://huggingface.co/join>.
-- Generate a read-only access token at <https://huggingface.co/settings/tokens> (the default *Read* role is enough — no Write/Inference scope required).
+At run time the model resolves from `$STT_DIARIZATION_MODEL_DIR` if set, else the pinned snapshot in that same HF cache (`backend/diarize/model.py::resolve_model_dir`).
 
-### 2. Accept the pyannote model license
+### Air-gapped machines
 
-Open <https://huggingface.co/pyannote/speaker-diarization-community-1> while signed in and accept the gated-model terms. **This must be done with the same HF account whose token you'll use below** — accepting on a different account does nothing.
+Copy the snapshot dir `<hf cache>/models--pyannote-community--speaker-diarization-community-1/snapshots/8a527374977391da736e0daaef26855d949d9685/` with `cp -rL` (Linux snapshot files are symlinks into `../../blobs`) and point `STT_DIARIZATION_MODEL_DIR` at the copy.
 
-> **Upgrading from a previous stt-faster build that used `speaker-diarization-3.1`?** The license acceptance is **per model** — your existing 3.1 acceptance does **not** carry over. Accept community-1's terms separately or you'll get a `403` on first run (see [Troubleshooting](#troubleshooting)).
+### Docker
 
-The same applies to the upstream segmentation model that pyannote pulls in transitively: <https://huggingface.co/pyannote/segmentation-3.0>. Accept that one too.
-
-### 3. Expose the token to stt-faster
-
-stt-faster reads the token from either env var, in this order:
-
-1. `HF_TOKEN` (preferred)
-2. `HUGGINGFACE_HUB_TOKEN`
-
-Pick one and set it before launching the bats or the CLI.
-
-**WSL / Linux** (`~/.bashrc`, `~/.zshrc`, or a project `.env` file loaded by your shell):
+The image carries no models. Mount the host's model repo dir read-only and point the env var at its snapshot (the whole repo dir, so the snapshot's blob symlinks resolve):
 
 ```bash
-export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxx
+make diarization-model rnnoise-model
+docker run --rm \
+  -v "$PWD/audio:/workspace" \
+  -v "${HF_HUB_CACHE:-${HF_HOME:-$HOME/.cache/huggingface}/hub}/models--pyannote-community--speaker-diarization-community-1:/models/diarization:ro" \
+  -e STT_DIARIZATION_MODEL_DIR=/models/diarization/snapshots/8a527374977391da736e0daaef26855d949d9685 \
+  -v "$PWD/models/sh.rnnn:/models/sh.rnnn:ro" \
+  -e STT_PREPROCESS_RNNOISE_MODEL=/models/sh.rnnn \
+  stt-faster:latest process /workspace --diarize
 ```
-
-**Windows native** — set a *User* env var via `System Properties → Environment Variables → New…`:
-
-- Name: `HF_TOKEN`
-- Value: `hf_xxxxxxxxxxxxxxxxxxxx`
-
-Restart any open terminals (and re-open File Explorer if you launch bats by double-clicking) so they pick up the new var.
-
-### 4. Verify the setup
-
-Run the prefetch script — it downloads the Estonian, English, and pyannote weights into the cache, and surfaces token/license errors up front (before any transcription run):
-
-```bash
-# WSL / Linux
-.venv/bin/python scripts/prefetch_models.py
-
-# Windows native (run from the repo root)
-.venv\Scripts\python scripts\prefetch_models.py
-```
-
-On success the script ends with `Prefetch complete.` On failure you'll see a `DiarizationConfigError` traceback — jump to [Troubleshooting](#troubleshooting) and re-run.
 
 ## Runtime constraints
 
@@ -81,26 +56,17 @@ On success the script ends with `Prefetch complete.` On failure you'll see a `Di
 
 ## Troubleshooting
 
-### `DiarizationConfigError: HF_TOKEN is not set`
+### `DiarizationConfigError: Speaker model not installed`
 
-`HF_TOKEN` (and `HUGGINGFACE_HUB_TOKEN`) are both unset in the environment that launched the bat / CLI. Follow [step 3](#3-expose-the-token-to-stt-faster) and restart the terminal.
+Neither `$STT_DIARIZATION_MODEL_DIR` nor the HF cache holds the pinned snapshot. Run `make diarization-model` (dev) or Start ▸ Transcribe ▸ Repair (Windows). If you downloaded it under a different `HF_HOME`/`HF_HUB_CACHE`, run with that same value set.
 
-If the env var *is* set in your shell but the bat still complains, the Windows double-click launch context doesn't inherit shell `export`s — set the var as a *User* env var via System Properties, not just in `.bashrc`.
+### `DiarizationConfigError: STT_DIARIZATION_MODEL_DIR=… has no config.yaml`
 
-### `DiarizationConfigError: HF_TOKEN was rejected (401)`
+The variable points at the wrong dir: it must be the snapshot dir itself (the one holding `config.yaml`, `segmentation/`, `embedding/`, `plda/`).
 
-The token reached HuggingFace but was rejected. Either:
+### `DiarizationConfigError: corrupt download (…)`
 
-- The token was revoked or rotated. Generate a fresh one at <https://huggingface.co/settings/tokens> and replace the env var.
-- The token has the wrong scope. The default *Read* role is sufficient; *Fine-grained* tokens need at least *Read access to public gated repos*.
-
-### `DiarizationConfigError: HuggingFace returned 403 ... Accept the model license`
-
-The token is valid but the HF account behind it hasn't accepted the gated-model terms for `pyannote/speaker-diarization-community-1`. Re-do [step 2](#2-accept-the-pyannote-model-license), making sure you're signed in as the same account that owns the token.
-
-> If you previously ran stt-faster with `speaker-diarization-3.1` accepted, that acceptance does **not** carry over to community-1. The 403 here means "accept community-1 specifically", not "your token is bad".
-
-Also check `pyannote/segmentation-3.0` — pyannote pulls it transitively and the 403 can come from either model.
+A weight file failed its sha256 check; the snapshot was deleted. Rerun `make diarization-model` (or Start ▸ Transcribe ▸ Repair).
 
 ### `DiarizationRuntimeError: pyannote inference failed for <file>`
 
@@ -111,7 +77,7 @@ pyannote loaded but crashed on a specific file. This is per-file, not batch-leve
 
 ### GPU OOM (CUDA out of memory)
 
-community-1 needs roughly 2 GB VRAM on top of whisper at peak (similar footprint to 3.1). If your card is tight (≤4 GB):
+community-1 needs roughly 2 GB VRAM on top of whisper at peak. If your card is tight (≤4 GB):
 
 - Use a smaller whisper preset (`distil`, `et-32`) — frees more headroom for pyannote.
 - Force CPU on the diarize stage by unsetting CUDA: `CUDA_VISIBLE_DEVICES= .venv/bin/python scripts/transcribe_manager.py process ...` runs both whisper and pyannote on CPU.
@@ -134,4 +100,4 @@ community-1 is ~real-time on GPU and ~3-5× real-time on CPU. For batch runs of 
 
 - [docs/Transcription_solution.md](Transcription_solution.md) — full output format reference (TXT line shape, JSON schema with `speaker`).
 - [scripts/windows/README.md](../scripts/windows/README.md) — Windows launcher reference.
-- pyannote model card: <https://huggingface.co/pyannote/speaker-diarization-community-1>.
+- Model card: <https://huggingface.co/pyannote-community/speaker-diarization-community-1>.

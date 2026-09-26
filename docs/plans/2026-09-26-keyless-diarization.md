@@ -1,6 +1,6 @@
 # Keyless, offline speaker diarization
 
-**Status:** Stages 1-4 shipped (worktree-sec) — Stage 5 next.
+**Status:** Stages 1-4 shipped; Stage 5.1 (docs, NOTICE, e2e) shipped — Stage 5.2 (`scripts/windows/` bats) next, blocked on read permission.
 
 "Identify speakers" should need no Hugging Face account or token. Model weights are fetched once at install time from an ungated, revision-pinned mirror, and at transcription time they load from a local dir only.
 
@@ -12,7 +12,7 @@
 - Out of scope: sherpa-onnx, pyannoteAI precision-2 cloud tier (app must stay offline), removing torch.
 - Round 2 (owner, 2026-09-26): the app must never propose anything that needs a network connection. The in-app Extras panel and the installer's `--extras` mode are removed; every base install/repair ALWAYS installs the speaker libraries (`--extra cpu`) and the pinned model.
 - Round 2: RNNoise `sh.rnnn` is in scope. Install time prefetches it; the runtime never downloads and fails clearly if it is missing (Stage 4).
-- Open hedge to carry as `[AUDIT]` (not blocking code): the plda/ weights' licence is unstated in its README (BUT Speech@FIT VBx); owner to confirm before a public release.
+- Round 3 (owner, 2026-09-26): plda/ (BUT Speech@FIT VBx) and RNNoise `sh.rnnn` licences confirmed — NOTICE states plain attributions. Docker gets both models via a read-only host mount, never baked into the image.
 
 ## Pinned constants (checked against the HF tree API at the pinned revision, 2026-09-26)
 
@@ -121,9 +121,11 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 
 - `diarization_setup.md` is rewritten around one install step (`make diarization-model` / the installer), with no Extras panel, `STT_DIARIZATION_MODEL_DIR` for air-gapped copies (copy the snapshot dir), and a troubleshooting entry for "Speaker model not installed". The 401/403 sections are removed.
 - README privacy: the installer fetches every model (Whisper, diarization from the ungated HF mirror, RNNoise from GitHub); the app makes no network calls during transcription. Drop every "Extras" mention from README/docs.
-- `NOTICE` gives CC-BY-4.0 attribution: model name, authors (pyannote / Hervé Bredin, pyannoteAI), licence link, mirror repo + pinned revision, "unmodified". A `[AUDIT]` line records the plda/VBx licence as owner-unconfirmed. The downloaded `README.md` model card also stays beside the weights.
-- The docker bat drops the HF_TOKEN diarize fail-fast, which is also stale (it says "3.1"). The container must find the model: `[AUDIT]` check whether `_docker_run.bat` mounts an HF cache. If it doesn't, bake the snapshot into the image at build time via `fetch_model()` and set `STT_DIARIZATION_MODEL_DIR` in the Dockerfile.
+- `NOTICE` gives CC-BY-4.0 attribution: model name, authors (pyannote / Hervé Bredin, pyannoteAI), licence link, mirror repo + pinned revision, "unmodified"; plus plain attributions for plda/ (BUT Speech@FIT VBx) and RNNoise `sh.rnnn` (GregorR/rnnoise-models). The downloaded `README.md` model card also stays beside the weights.
+- The docker bat drops the HF_TOKEN diarize fail-fast (stale, says "3.1"), mounts the host models (diarization snapshot dir + `models/sh.rnnn`) read-only, and passes `STT_DIARIZATION_MODEL_DIR` + `STT_PREPROCESS_RNNOISE_MODEL` pointing at the mount. Dockerfile unchanged; host prep is `make diarization-model rnnoise-model`.
 - The e2e skip changes to "model not resolvable".
+- Stage 5.2 owed: `_docker_run.bat` guard+`:ro` mounts+env, `_transcribe.bat` :13-22 comments, `scripts/windows/README.md:44`, `transcribe_english_Online_docker.bat:14-15`; keep the Whisper HF_TOKEN passthrough.
+- Stage 5.2 gate: `make diarization-model` writes to WSL `$HF_HOME/hub`, but the bat runs on Windows — decide which host path it mounts.
 - Done when: `grep -rln "HF_TOKEN\|hf.co/settings/tokens\|accept the licen" README.md docs/*.md scripts backend installer` lists only intentional non-diarization hits (Whisper rate-limit notes and `tests/conftest.py` are left as they are).
 
 ## Stage 6: full verify, network-off e2e, review
@@ -145,7 +147,4 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 
 ## Open hedges
 
-- `[AUDIT]` plda/ licence (from the Rulings). The owner must confirm it before a public release. It does not block the code.
 - `[AUDIT]` The Stage 3 `HF_HUB_OFFLINE=1` assumes the installed Whisper snapshots have `refs/main` cached, which `hf download` writes. Stage 6 item 3 on Windows proves it.
-- `[AUDIT]` The Docker model path (Stage 5).
-- `[AUDIT]` RNNoise `sh.rnnn` licence: GregorR/rnnoise-models has no LICENSE file. The owner must confirm it before a public release.
