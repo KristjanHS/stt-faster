@@ -192,7 +192,7 @@ def run_pyannote(
     """Run pyannote speaker-diarization-community-1 on the given audio file.
 
     Returns a list of SpeakerTurn ordered by start time. Raises
-    DiarizationConfigError on HF_TOKEN/license failures (batch-aborting) and
+    DiarizationConfigError on HF_TOKEN/license failures and
     DiarizationRuntimeError on per-file pyannote crashes.
 
     ``audio_duration`` (seconds, optional) is retained for caller-side context

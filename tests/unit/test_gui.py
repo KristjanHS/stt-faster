@@ -10,15 +10,27 @@ from pathlib import Path
 
 import pytest
 
+from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
+from backend.processor import TranscriptionProcessor
+from backend.run_config import RunConfig
+from backend.run_log import JsonlRunLog
+from backend.services.factory import ServiceFactory
+from backend.services.interfaces import TranscriptionRequest, TranscriptionResult
 from backend.gui import (
+    EXTRAS_NEED_INSTALL_HINT,
     GUI_PROFILES,
+    PYANNOTE_MODULE,
     AppPaths,
     build_command,
     build_env,
     default_app_paths,
+    diarization_available,
+    diarization_failure,
+    extras_install_hint,
     find_outputs,
     read_device,
     run_job,
+    save_and_install,
     stage_files,
     sweep_stale_work_dirs,
     unique_destination,
@@ -44,7 +56,8 @@ class FakeRunner:
     """Stands in for the CLI subprocess: writes `<stem>.txt` per staged file unless told to fail.
 
     ``processed=True`` mimics the real CLI, which moves results into ``<work>/processed/``;
-    ``fail_stems`` (staged stems) produce no output, as when the CLI fails individual files.
+    ``fail_stems`` (staged stems) produce no output, as when the CLI fails individual files;
+    ``diarize_error`` fails every file of a ``--diarize`` run, logged as components.FileProcessor does.
     """
 
     def __init__(
@@ -55,12 +68,15 @@ class FakeRunner:
         fail_stems: set[str] | None = None,
         exit_code: int = 0,
         processed: bool = False,
+        diarize_error: Exception | None = None,
     ) -> None:
         self.fail_devices = fail_devices or set()
         self.exit_code_on_fail = exit_code_on_fail
         self.fail_stems = fail_stems or set()
         self.exit_code = exit_code
         self.processed = processed
+        self.diarize_error = diarize_error
+        self.envs: list[dict[str, str]] = []
         self.devices: list[str | None] = []
         self.commands: list[list[str]] = []
         self.staged_names: list[list[str]] = []
@@ -68,12 +84,18 @@ class FakeRunner:
     def __call__(self, cmd: list[str], env: dict[str, str], on_line: Callable[[str], None]) -> int:
         device = env.get("STT_DEVICE")
         self.devices.append(device)
+        self.envs.append(env)
         self.commands.append(cmd)
         work_dir = Path(cmd[cmd.index("process") + 1])
         inputs = sorted(p for p in work_dir.iterdir() if p.is_file())
         self.staged_names.append([p.name for p in inputs])
         if device in self.fail_devices:
             return self.exit_code_on_fail
+        if self.diarize_error is not None and "--diarize" in cmd:
+            error = self.diarize_error
+            for staged in inputs:
+                on_line(f"Failed to process {staged}: {type(error).__name__}: {error}")
+            return self.exit_code
         out_dir = work_dir / "processed" if self.processed else work_dir
         out_dir.mkdir(exist_ok=True)
         for staged in inputs:
@@ -278,3 +300,170 @@ def test_run_job_on_cpu_does_not_retry(paths: AppPaths, audio: Path) -> None:
     assert runner.devices == ["cpu"]
     assert not result.ok and result.missing == [audio]
     assert not audio.with_suffix(".txt").exists()
+
+
+def _speaker_flags(cmd: list[str]) -> list[str]:
+    return [arg for arg in cmd if arg in ("--diarize", "--no-diarize")]
+
+
+@pytest.mark.parametrize(
+    ("diarize", "speakers", "expected"),
+    [(True, 3, ["--diarize", "--num-speakers", "3"]), (True, 1, ["--no-diarize"]), (False, 3, ["--no-diarize"])],
+)
+def test_build_command_speaker_args(tmp_path: Path, diarize: bool, speakers: int, expected: list[str]) -> None:
+    # 1 speaker → --no-diarize: the CLI rejects --num-speakers < 2.
+    cmd = build_command(tmp_path, GUI_PROFILES["English"], timestamps=True, diarize=diarize, num_speakers=speakers)
+    assert cmd[cmd.index("txt") + 1 : cmd.index("--timestamps")] == expected
+
+
+def test_build_env_sets_hf_token_only_when_given() -> None:
+    assert build_env({}, device=None, ffmpeg_bin=None, hf_token="hf_abc")["HF_TOKEN"] == "hf_abc"
+    assert "HF_TOKEN" not in build_env({}, device=None, ffmpeg_bin=None, hf_token=None)
+
+
+@pytest.mark.parametrize(
+    ("installed", "token", "shown"),
+    [(True, "hf_abc", True), (True, " \n", False), (False, "hf_abc", False), (False, None, False)],
+)
+def test_identify_speakers_shown_iff_pyannote_and_token(
+    paths: AppPaths, installed: bool, token: str | None, shown: bool
+) -> None:
+    if token is not None:
+        paths.token_file.parent.mkdir(parents=True, exist_ok=True)
+        paths.token_file.write_text(token, encoding="utf-8")
+    probed: list[str] = []
+
+    def find_spec(name: str) -> object | None:
+        probed.append(name)
+        return object() if installed else None
+
+    assert diarization_available(paths.token_file, find_spec=find_spec) is shown
+    assert probed == [PYANNOTE_MODULE]
+
+
+def test_identify_speakers_hidden_when_pyannote_parent_is_missing(paths: AppPaths) -> None:
+    paths.token_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.token_file.write_text("hf_abc", encoding="utf-8")
+
+    def find_spec(name: str) -> object | None:
+        raise ModuleNotFoundError(name)
+
+    assert diarization_available(paths.token_file, find_spec=find_spec) is False
+
+
+def test_save_and_install_writes_token_then_launches_setup_extras(paths: AppPaths) -> None:
+    launched: list[list[str]] = []
+
+    def launch(cmd: list[str]) -> None:
+        assert paths.token_file.read_text(encoding="utf-8") == "hf_abc"  # saved before setup starts
+        launched.append(cmd)
+
+    save_and_install(paths, "  hf_abc\n", launch=launch)
+
+    assert launched == [[str(paths.install_dir / "Transcribe-Setup.exe"), "--extras"]]
+    assert paths.token_file == paths.config_file.parent / "hf_token"
+
+
+def test_extras_install_disabled_without_setup_exe(paths: AppPaths) -> None:
+    assert extras_install_hint(paths) == EXTRAS_NEED_INSTALL_HINT
+    _write(paths.setup_exe)
+    assert extras_install_hint(paths) is None
+
+
+def _save_token(paths: AppPaths, token: str = "hf_abc") -> None:
+    paths.token_file.parent.mkdir(parents=True, exist_ok=True)
+    paths.token_file.write_text(token, encoding="utf-8")
+
+
+@pytest.mark.parametrize("error_cls", [DiarizationConfigError, DiarizationRuntimeError])
+def test_run_job_diarization_failure_reruns_once_without_speakers(
+    paths: AppPaths, audio: Path, error_cls: type[Exception]
+) -> None:
+    _save_token(paths)
+    runner = FakeRunner(diarize_error=error_cls("HF_TOKEN was rejected (401)"), processed=True)
+
+    result = run_job(
+        [audio], GUI_PROFILES["Estonian"], timestamps=True, paths=paths, diarize=True, runner=runner, base_env={}
+    )
+
+    assert [_speaker_flags(cmd) for cmd in runner.commands] == [["--diarize"], ["--no-diarize"]]
+    assert runner.devices == [None, None]
+    assert runner.envs[0]["HF_TOKEN"] == "hf_abc"
+    assert result.ok and result.delivered == [audio.with_suffix(".txt")]
+    assert not result.fell_back_to_cpu and not paths.config_file.exists()
+    assert result.banner == "Speakers skipped: HF_TOKEN was rejected (401)"
+
+
+def test_run_job_non_diarization_failure_is_not_retried_without_speakers(paths: AppPaths, audio: Path) -> None:
+    write_config_value(paths.config_file, "device", "cpu")
+    runner = FakeRunner(fail_stems={"meeting"}, processed=True)
+
+    result = run_job(
+        [audio], GUI_PROFILES["Estonian"], timestamps=True, paths=paths, diarize=True, runner=runner, base_env={}
+    )
+
+    assert [_speaker_flags(cmd) for cmd in runner.commands] == [["--diarize"]]
+    assert result.missing == [audio] and result.speakers_skipped is None and result.banner == ""
+
+
+def test_run_job_cpu_and_diarization_retries_compose_once_each(paths: AppPaths, audio: Path) -> None:
+    runner = FakeRunner(fail_devices={None}, diarize_error=DiarizationConfigError("licence"), processed=True)
+
+    result = run_job(
+        [audio], GUI_PROFILES["Estonian"], timestamps=True, paths=paths, diarize=True, runner=runner, base_env={}
+    )
+
+    assert runner.devices == [None, "cpu", "cpu"]
+    assert [_speaker_flags(cmd) for cmd in runner.commands] == [["--diarize"], ["--diarize"], ["--no-diarize"]]
+    assert result.ok and result.fell_back_to_cpu and read_device(paths.config_file) == "cpu"
+    assert result.banner == "Speakers skipped: licence"
+
+
+def test_run_job_diarization_retry_that_fails_on_gpu_falls_back_to_cpu_without_speakers(
+    paths: AppPaths, audio: Path
+) -> None:
+    write_config_value(paths.config_file, "device", "cuda")
+    runner = FakeRunner(diarize_error=DiarizationConfigError("licence"), processed=True)
+
+    def gpu_breaks_after_first(cmd: list[str], env: dict[str, str], on_line: Callable[[str], None]) -> int:
+        if len(runner.commands) == 1:  # the diarized GPU run got as far as pyannote
+            runner.fail_devices.add("cuda")
+        return runner(cmd, env, on_line)
+
+    result = run_job(
+        [audio],
+        GUI_PROFILES["Estonian"],
+        timestamps=True,
+        paths=paths,
+        diarize=True,
+        runner=gpu_breaks_after_first,
+        base_env={},
+    )
+
+    assert runner.devices == ["cuda", "cuda", "cpu"]
+    assert [_speaker_flags(cmd) for cmd in runner.commands] == [["--diarize"], ["--no-diarize"], ["--no-diarize"]]
+    assert result.ok and result.fell_back_to_cpu
+
+
+class _DiarizationFailingService:
+    def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
+        raise DiarizationConfigError("HuggingFace returned 403")
+
+
+def test_diarization_failure_parses_the_real_per_file_failure_log(
+    tmp_path: Path, audio: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    processor = TranscriptionProcessor(
+        transcription_service=_DiarizationFailingService(),
+        run_log=JsonlRunLog(tmp_path / "runs.jsonl"),
+        file_mover=ServiceFactory.create_file_mover(),
+        output_writer=ServiceFactory.create_output_writer(),
+        run_config=RunConfig.from_env_and_variant(audio.parent, None),
+        disable_file_moving=True,
+    )
+
+    with caplog.at_level(logging.ERROR, logger="backend.components"):
+        assert processor.process_file(str(audio)).status == "failed"
+
+    reasons = [diarization_failure(record.getMessage()) for record in caplog.records]
+    assert "HuggingFace returned 403" in reasons
