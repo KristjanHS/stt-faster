@@ -32,6 +32,15 @@ all="$*"
 echo "gh ${all//$'\n'/ }" >> "$FAKE_LOG"
 [[ "$1 $2" != "auth status" ]] || exit "${FAKE_GH_AUTH_RC:-0}"
 [[ "$1 $2" != "release create" ]] || exit "${FAKE_GH_CREATE_RC:-0}"
+if [[ "$1 $2" == "release list" ]]; then
+  [[ -z "${FAKE_RELEASES:-}" ]] || printf '%s\n' $FAKE_RELEASES
+  exit "${FAKE_GH_LIST_RC:-0}"
+fi
+if [[ "$1 $2" == "release view" ]]; then
+  [[ " ${FAKE_EXE_TAGS:-} " != *" $3 "* ]] || echo "Transcribe-Setup.exe"
+  echo "notes.txt"
+fi
+[[ "$1 $2" != "release delete-asset" ]] || exit "${FAKE_GH_DELETE_RC:-0}"
 exit 0
 """
 
@@ -128,3 +137,37 @@ def test_failure_after_first_change_prints_recovery(tmp_path: Path, fake_env: di
     result, _, _ = _run(tmp_path, fake_env=fake_env)
     assert result.returncode != 0
     assert f"to recover: {hint}" in result.stderr
+
+
+OLD_RELEASES = "v1.1.0 v1.0.4 v1.0.3 v1.0.2 v1.0.1 v1.0.0 v0.9.0"  # newest first, as `gh release list` prints
+
+
+def _deleted(calls: list[str]) -> list[str]:
+    return [c.split()[3] for c in calls if c.startswith("gh release delete-asset")]
+
+
+def test_prunes_exe_from_all_but_newest_five_releases(tmp_path: Path) -> None:
+    fake_env = {"FAKE_RELEASES": OLD_RELEASES, "FAKE_EXE_TAGS": "v1.0.4 v1.0.3 v1.0.2 v1.0.1 v1.0.0"}
+    result, calls, _ = _run(tmp_path, fake_env=fake_env)
+    assert result.returncode == 0, result.stderr
+    assert _deleted(calls) == ["v1.0.0"]  # v0.9.0 is past the cut but carries no exe
+    assert "gh release delete-asset v1.0.0 Transcribe-Setup.exe --yes" in calls
+    create = next(i for i, c in enumerate(calls) if c.startswith("gh release create"))
+    delete = next(i for i, c in enumerate(calls) if c.startswith("gh release delete-asset"))
+    assert create < delete  # never prune before the new release is out
+
+
+def test_five_or_fewer_releases_prune_nothing(tmp_path: Path) -> None:
+    fake_env = {"FAKE_RELEASES": "v1.1.0 v1.0.4 v1.0.3 v1.0.2 v1.0.1", "FAKE_EXE_TAGS": "v1.0.4 v1.0.3 v1.0.2 v1.0.1"}
+    result, calls, _ = _run(tmp_path, fake_env=fake_env)
+    assert result.returncode == 0, result.stderr
+    assert _deleted(calls) == []
+
+
+@pytest.mark.parametrize("fake_env", [{"FAKE_GH_DELETE_RC": "1"}, {"FAKE_GH_LIST_RC": "1"}])
+def test_prune_failure_only_warns(tmp_path: Path, fake_env: dict[str, str]) -> None:
+    fake_env = {"FAKE_RELEASES": OLD_RELEASES, "FAKE_EXE_TAGS": "v1.0.0 v0.9.0", **fake_env}
+    result, _, _ = _run(tmp_path, fake_env=fake_env)
+    assert result.returncode == 0, result.stderr
+    assert "warning" in result.stderr
+    assert "to recover" not in result.stderr
