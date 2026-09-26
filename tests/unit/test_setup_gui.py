@@ -42,6 +42,7 @@ from installer.setup_gui import (
     InstallPaths,
     PYTHON_VERSION,
     ModelSpec,
+    RETRY_NOTE,
     ReadyHandoff,
     SetupWindow,
     Stalled,
@@ -76,6 +77,7 @@ from installer.setup_gui import (
     read_config,
     register_uninstall,
     relaunch_from_temp,
+    unlink_when_released,
     remove_shortcuts_script,
     download_progress,
     run_process,
@@ -1091,6 +1093,12 @@ def test_wait_for_marker_closes_on_the_marker_or_the_timeout(tmp_path: Path) -> 
     root.run_after()
     assert root.destroyed
 
+    stuck = tmp_path / "stuck.ready"
+    stuck.mkdir()  # taken, but its unlink raises: still close
+    root = _FakeTk()
+    wait_for_marker(root, stuck, timeout=20, clock=lambda: now[0])
+    assert root.destroyed
+
 
 def test_ready_handoff_waits_for_the_waiter_to_let_go(tmp_path: Path) -> None:
     marker = tmp_path / "setup.ready"
@@ -1112,6 +1120,20 @@ def test_ready_handoff_waits_for_the_waiter_to_let_go(tmp_path: Path) -> None:
     assert not handoff.done() and marker.exists()
     now[0] = 15.0
     assert handoff.done() and not marker.exists()
+
+    handoff = ReadyHandoff(tmp_path / "gone" / "x.ready", clock=lambda: now[0])  # can't signal: only the cap
+    assert not handoff.done()
+    now[0] = 19.9
+    assert not handoff.done()
+    now[0] = 20.0
+    assert handoff.done()
+
+    stuck = tmp_path / "stuck.ready"
+    stuck.mkdir()  # unlink raises: done() must still return, or _poll's chain dies with it
+    handoff = ReadyHandoff(stuck, clock=lambda: now[0])
+    assert not handoff.done()
+    now[0] = 25.0
+    assert handoff.done()
 
 
 @pytest.mark.parametrize("error", [None, InstallError("locked"), OSError("boom")])
@@ -1268,13 +1290,14 @@ def test_run_process_holds_byte_bar_and_ticks_elapsed() -> None:
 
 
 @pytest.mark.parametrize("moving", [False, True], ids=["stuck-bar", "moving-bar"])
-def test_run_process_stops_a_stalled_download(moving: bool) -> None:
+def test_run_process_stops_a_stalled_download(moving: bool, tmp_path: Path) -> None:
     # hf re-printing an unchanged bar is still a stall; a bar that moves is not
     script = (
-        "import sys, time\n"
+        "import os, sys, time\n"
+        f"open({str(tmp_path / 'pid')!r}, 'w').write(str(os.getpid()))\n"
         "for i in range(10):\n"
         f"    n = i if {moving} else 0\n"
-        "    print(f'Downloading (incomplete total...):  1%| | {n + 1}.00M/75.5M [00:01, 3.50MB/s]', flush=True)\n"
+        "    print(f'Downloading (incomplete total...):  1%| | {n + 1}.00M/75.5M [00:0{i}, {i}.50MB/s]', flush=True)\n"
         "    time.sleep(0.25)\n"
     )
     started = time.monotonic()
@@ -1287,6 +1310,7 @@ def test_run_process_stops_a_stalled_download(moving: bool) -> None:
     with pytest.raises(Stalled, match="no progress for 0:01"):
         run()
     assert time.monotonic() - started < 2.4  # stopped before the script's own 2.5 s end
+    assert _gone(int((tmp_path / "pid").read_text()))  # killed, not left to finish on its own
 
 
 def test_stalled_model_retries_once_without_xet_after_clearing_the_partial(paths: InstallPaths) -> None:
@@ -1295,15 +1319,35 @@ def test_stalled_model_retries_once_without_xet_after_clearing_the_partial(paths
     part.parent.mkdir(parents=True)
     part.write_bytes(b"\0" * 8)
     runs: list[tuple[str | None, bool]] = []
+    shown: list[str] = []
 
-    def runner(_cmd: list[str], env: dict[str, str], *_a: Any) -> None:
+    def runner(_cmd: list[str], env: dict[str, str], report: Callable[[float | None, str], None], *_a: Any) -> None:
         runs.append((env.get("HF_HUB_DISABLE_XET"), part.exists()))
         if len(runs) == 1:
             raise Stalled("Download stalled")
+        report(None, "")
+        report(0.1, "8.00M/75.5M · 0:03")
 
     installer = Installer(paths=paths, env={}, runner=runner, seeder=lambda *_a: False, model_size=lambda *_a: None)
-    installer.fetch_model(spec, lambda *_a: None)
+    installer.fetch_model(spec, lambda _f, text: shown.append(text))
     assert runs == [(None, True), ("1", False)]  # the HTTP retry never resumes xet's holed partial
+    assert shown[-2:] == [RETRY_NOTE, f"{RETRY_NOTE} · 8.00M/75.5M · 0:03"]  # why the bar restarted stays visible
+
+
+def test_unlink_when_released_waits_out_a_dying_holder(tmp_path: Path) -> None:
+    held = [2]
+    sleeps: list[float] = []
+
+    def unlink(_p: Path) -> None:
+        if held[0]:
+            held[0] -= 1
+            raise PermissionError("[WinError 32] used by another process")
+
+    unlink_when_released(tmp_path / "a.incomplete", unlink=unlink, sleep=sleeps.append)
+    assert held == [0] and sleeps == [0.25, 0.25]
+    held[0] = 99
+    with pytest.raises(PermissionError):
+        unlink_when_released(tmp_path / "a.incomplete", attempts=3, unlink=unlink, sleep=sleeps.append)
 
 
 def _gone(pid: int) -> bool:
