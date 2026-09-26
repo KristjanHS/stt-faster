@@ -1,4 +1,4 @@
-"""Pyannote pipeline loader + inference, with HF_TOKEN/license error mapping.
+"""Pyannote pipeline loader + inference; the model loads from a local dir, never the network.
 
 The pipeline is constructed in local scope and goes out of scope on return
 so its CUDA allocations can be released alongside `torch.cuda.empty_cache()`
@@ -19,6 +19,7 @@ import os
 import time
 import warnings
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 # pyannote.audio 4.x imports torchcodec at module load wrapped in try/except;
@@ -33,6 +34,7 @@ warnings.filterwarnings("ignore", message=r"std\(\): degrees of freedom.*", cate
 os.environ.setdefault("PYANNOTE_METRICS_ENABLED", "0")
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
+from backend.diarize.model import resolve_model_dir
 from backend.diarize.pipeline import SpeakerTurn
 
 if TYPE_CHECKING:
@@ -40,7 +42,6 @@ if TYPE_CHECKING:
 
 LOGGER = logging.getLogger(__name__)
 
-PYANNOTE_MODEL = "pyannote/speaker-diarization-community-1"
 # Mirrors backend/transcribe.py PROGRESS_LOG_INTERVAL_SECONDS — duplicated
 # rather than imported to keep diarize free of cross-module coupling.
 PROGRESS_LOG_INTERVAL_SECONDS = 60.0
@@ -136,10 +137,6 @@ class _DiarizeProgressHook:
         self._last_log_time = now
 
 
-def _read_hf_token(env: Mapping[str, str] = os.environ) -> str | None:
-    return env.get("HF_TOKEN") or env.get("HUGGINGFACE_HUB_TOKEN")
-
-
 def _import_pipeline_class() -> Any:
     """Lazy `pyannote.audio.Pipeline` import (~5s: torch + sklearn + hf_hub)."""
     from pyannote.audio import Pipeline  # type: ignore[import-untyped]
@@ -209,57 +206,33 @@ def run_pyannote(
     env: Mapping[str, str] = os.environ,
     import_pipeline: Callable[[], Any] = _import_pipeline_class,
     on_progress: ProgressCallback | None = None,
+    resolve_model: Callable[[Mapping[str, str]], Path] = resolve_model_dir,
 ) -> list[SpeakerTurn]:
     """Run pyannote speaker-diarization-community-1 on the given audio file.
 
     Returns a list of SpeakerTurn ordered by start time. Raises
-    DiarizationConfigError on HF_TOKEN/license failures and
+    DiarizationConfigError when the model is not installed and
     DiarizationRuntimeError on per-file pyannote crashes.
 
     ``audio_duration`` (seconds, optional) is retained for caller-side context
     around the surrounding 🎙️/✅ bookend lines; the per-stage progress lines
     emitted via pyannote's hook protocol do not render it.
     """
-    token = _read_hf_token(env)
-    if not token:
-        raise DiarizationConfigError(
-            f"HF_TOKEN is not set. The {PYANNOTE_MODEL} model is HuggingFace-gated; "
-            "see docs/diarization_setup.md for one-time token + model-license setup."
-        )
-
+    model_dir = resolve_model(env)
     try:
-        from huggingface_hub.errors import HfHubHTTPError
-
         pipeline_cls = import_pipeline()
     except ImportError as exc:
         raise DiarizationConfigError(
             f"pyannote.audio is not installed: {exc}. Re-sync with `--extra cpu` or `--extra cu130`."
         ) from exc
 
-    try:
-        pipeline = pipeline_cls.from_pretrained(PYANNOTE_MODEL, token=token)  # type: ignore[reportUnknownMemberType]
-    except HfHubHTTPError as exc:
-        status = getattr(exc.response, "status_code", None)
-        if status == 401:
-            raise DiarizationConfigError(
-                f"HF_TOKEN was rejected (401) fetching {PYANNOTE_MODEL}. "
-                "Verify the token at https://huggingface.co/settings/tokens; "
-                "see docs/diarization_setup.md."
-            ) from exc
-        if status == 403:
-            raise DiarizationConfigError(
-                f"HuggingFace returned 403 for {PYANNOTE_MODEL}. Accept the model "
-                f"license at https://huggingface.co/{PYANNOTE_MODEL}; "
-                "see docs/diarization_setup.md."
-            ) from exc
-        raise DiarizationConfigError(f"HuggingFace error loading {PYANNOTE_MODEL}: {exc}") from exc
-    # Non-HF load failures (OSError, CUDA init, etc.) propagate as-is — they are not
+    pipeline = pipeline_cls.from_pretrained(str(model_dir))  # type: ignore[reportUnknownMemberType]
+    # Load failures (OSError, CUDA init, etc.) propagate as-is — they are not
     # config errors. processor.py's per-file try/except handles them as file-level
     # failures, not batch aborts.
     if pipeline is None:
         raise DiarizationConfigError(
-            f"Pipeline.from_pretrained returned None for {PYANNOTE_MODEL} (silent auth/download failure); "
-            "see docs/diarization_setup.md."
+            f"Pipeline.from_pretrained returned None for {model_dir}; see docs/diarization_setup.md."
         )
 
     import torch

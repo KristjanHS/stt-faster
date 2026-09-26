@@ -1,4 +1,4 @@
-"""Unit tests for backend.diarize.pyannote_runner — HF token / license error mapping."""
+"""Unit tests for backend.diarize.pyannote_runner — model loading + audio decode."""
 
 from __future__ import annotations
 
@@ -14,71 +14,48 @@ from typing import Any
 import pytest
 
 from backend.diarize.errors import DiarizationConfigError
-
-
-def _make_http_error(status_code: int) -> Exception:
-    from huggingface_hub.errors import HfHubHTTPError
-
-    # Bypass HfHubHTTPError.__init__ (which reads response.headers); set attrs directly.
-    exc = HfHubHTTPError.__new__(HfHubHTTPError)
-    Exception.__init__(exc, f"{status_code} error")
-    response = type("R", (), {"status_code": status_code, "headers": {}})()
-    exc.response = response  # type: ignore[assignment]
-    exc.server_message = None
-    return exc
+from backend.diarize.model import NOT_INSTALLED
 
 
 def _stub_pipeline_import(from_pretrained_impl: Any) -> Any:
     # Fake for run_pyannote's `import_pipeline` seam, standing in for the lazy
     # `from pyannote.audio import Pipeline`. The real import costs ~5s (loads
-    # torch + sklearn + hf_hub); these error-mapping tests never exercise
+    # torch + sklearn + hf_hub); these model-load tests never exercise
     # pyannote internals, so paying it is pure overhead.
     stub_pipeline = type("Pipeline", (), {"from_pretrained": staticmethod(from_pretrained_impl)})
     return lambda: stub_pipeline
 
 
-class TestRunPyannoteErrors:
-    def test_missing_hf_token_raises_config_error(self) -> None:
+def _missing_model(_env: Any) -> Path:
+    raise DiarizationConfigError(NOT_INSTALLED)
+
+
+class TestRunPyannoteModelLoad:
+    def test_missing_model_raises_config_error_before_importing_pyannote(self) -> None:
         from backend.diarize.pyannote_runner import run_pyannote
 
-        with pytest.raises(DiarizationConfigError) as exc_info:
-            run_pyannote("fake.wav", env={})
-        assert "HF_TOKEN" in str(exc_info.value)
-        assert "docs/diarization_setup.md" in str(exc_info.value)
+        def no_import() -> Any:
+            raise AssertionError("pyannote must not be imported when the model is missing")
 
-    def test_huggingface_401_maps_to_config_error_with_token_url(self) -> None:
+        with pytest.raises(DiarizationConfigError, match="Speaker model not installed"):
+            run_pyannote("fake.wav", env={}, import_pipeline=no_import, resolve_model=_missing_model)
+
+    def test_loads_resolved_dir_without_token(self, tmp_path: Path) -> None:
         from backend.diarize.pyannote_runner import run_pyannote
 
-        def raise_401(*_: Any, **__: Any) -> Any:
-            raise _make_http_error(401)
+        calls: list[tuple[tuple[Any, ...], dict[str, Any]]] = []
 
-        with pytest.raises(DiarizationConfigError) as exc_info:
+        def record(*args: Any, **kwargs: Any) -> None:
+            calls.append((args, kwargs))
+
+        with pytest.raises(DiarizationConfigError, match="returned None"):
             run_pyannote(
                 "fake.wav",
-                env={"HF_TOKEN": "fake-token"},
-                import_pipeline=_stub_pipeline_import(raise_401),
+                env={"HF_TOKEN": "must-not-be-sent"},
+                import_pipeline=_stub_pipeline_import(record),
+                resolve_model=lambda _env: tmp_path,
             )
-        msg = str(exc_info.value)
-        assert "401" in msg
-        assert "huggingface.co/settings/tokens" in msg
-        assert "docs/diarization_setup.md" in msg
-
-    def test_huggingface_403_maps_to_config_error_with_model_url(self) -> None:
-        from backend.diarize.pyannote_runner import run_pyannote
-
-        def raise_403(*_: Any, **__: Any) -> Any:
-            raise _make_http_error(403)
-
-        with pytest.raises(DiarizationConfigError) as exc_info:
-            run_pyannote(
-                "fake.wav",
-                env={"HF_TOKEN": "fake-token"},
-                import_pipeline=_stub_pipeline_import(raise_403),
-            )
-        msg = str(exc_info.value)
-        assert "403" in msg
-        assert "pyannote/speaker-diarization-community-1" in msg
-        assert "docs/diarization_setup.md" in msg
+        assert calls == [((str(tmp_path),), {})]
 
 
 def _write_silent_wav(path: Path, *, sample_rate: int, channels: int, seconds: float) -> None:
