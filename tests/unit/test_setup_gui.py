@@ -42,6 +42,7 @@ from installer.setup_gui import (
     InstallPaths,
     PYTHON_VERSION,
     ModelSpec,
+    ReadyHandoff,
     SetupWindow,
     Stalled,
     Task,
@@ -499,10 +500,12 @@ def test_spawned_processes_never_run_inside_what_they_delete(
         dialogs=lambda: fake_dialogs,
         logger=logging.Logger("test"),
         install_button=_FakeLabel(),
+        launch_button=_FakeLabel(),
         summary=_FakeLabel(),
     )
     SetupWindow.uninstall(cast(Any, window))
     assert not window.root.destroyed and window.summary.text == "Starting uninstall…"  # until the child's window
+    assert window.install_button.state == window.launch_button.state == "disabled"
     assert "--ready-file" in popen_calls[2][0]
     cwds = [Path(kw["cwd"]) for _args, kw in popen_calls]
     assert cwds == [Path(tempdir()), temp_exe.parent.parent, Path(tempdir())]
@@ -652,6 +655,11 @@ def test_finish_registers_uninstall_and_tool_links_only_with_setup_copy(paths: I
     installer.finish(lambda *_a: None)
     assert list(reg.keys) == [UNINSTALL_KEY]
     assert "'Repair Transcribe.lnk'" in scripts[-1] and "'Uninstall Transcribe.lnk'" in scripts[-1]
+
+
+def test_parse_args_takes_the_uninstall_ready_file() -> None:
+    assert parse_args(["--uninstall", "--yes", "--ready-file", "C:/Temp/x.ready"]).ready_file == Path("C:/Temp/x.ready")
+    assert parse_args(["--uninstall"]).ready_file is None
 
 
 def test_parse_args_extras_only_alone() -> None:
@@ -852,9 +860,11 @@ def test_setup_opens_the_app_outside_its_venv(
 class _FakeLabel:
     def __init__(self) -> None:
         self.text = ""
+        self.state = ""
 
     def config(self, **kw: Any) -> None:
         self.text = kw.get("text", self.text)
+        self.state = kw.get("state", self.state)
 
     def pack(self, **_kw: Any) -> None:
         self.shown = True
@@ -1082,20 +1092,44 @@ def test_wait_for_marker_closes_on_the_marker_or_the_timeout(tmp_path: Path) -> 
     assert root.destroyed
 
 
+def test_ready_handoff_waits_for_the_waiter_to_let_go(tmp_path: Path) -> None:
+    marker = tmp_path / "setup.ready"
+    now = [0.0]
+    handoff = ReadyHandoff(marker, clock=lambda: now[0])
+    assert not handoff.done() and marker.exists()  # signalled: the waiter may close
+    marker.unlink()  # the waiter took it at t=0.5 and is exiting
+    now[0] = 0.5
+    assert not handoff.done()
+    now[0] = 1.4
+    assert not handoff.done()
+    now[0] = 1.5
+    assert handoff.done()
+
+    handoff = ReadyHandoff(marker, clock=lambda: now[0])  # nobody takes it (the waiter already timed out)
+    now[0] = 10.0
+    assert not handoff.done()
+    now[0] = 14.9
+    assert not handoff.done() and marker.exists()
+    now[0] = 15.0
+    assert handoff.done() and not marker.exists()
+
+
 @pytest.mark.parametrize("error", [None, InstallError("locked"), OSError("boom")])
 def test_uninstall_window_shows_steps_then_the_result(tmp_path: Path, error: Exception | None) -> None:
-    ready = tmp_path / "setup.ready"
-
     def remove(step: Callable[[str], None]) -> None:
         step("Removing settings…")
         if error is not None:
             raise error
 
     status, close = _FakeLabel(), _FakeLabel()
+    spawned: list[Callable[[], None]] = []
+    let_go = [False]
     window = SimpleNamespace(
         root=_FakeTk(),
         remove=remove,
-        ready_file=ready,
+        handoff=SimpleNamespace(done=lambda: let_go[0]),
+        spawn=spawned.append,
+        started=False,
         events=queue.Queue(),
         done=False,
         ok=False,
@@ -1104,9 +1138,13 @@ def test_uninstall_window_shows_steps_then_the_result(tmp_path: Path, error: Exc
         close_button=close,
     )
     window._poll = lambda: UninstallWindow._poll(cast(Any, window))
-    window.events.put(("step", "Removing app files and models…"))
+    window._work = lambda: UninstallWindow._work(cast(Any, window))
     UninstallWindow._poll(cast(Any, window))
-    assert status.text == "Removing app files and models…" and ready.exists()  # the setup window may close
+    assert spawned == []  # the setup window may still hold the install dir
+    let_go[0] = True
+    window.events.put(("step", "Removing app files and models…"))
+    window.root.run_after()
+    assert spawned == [window._work] and status.text == "Removing app files and models…"
     UninstallWindow._on_close(cast(Any, window))
     assert not window.root.destroyed  # X is ignored while removing
 

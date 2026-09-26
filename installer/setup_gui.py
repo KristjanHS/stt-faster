@@ -871,13 +871,54 @@ def show_starting(root: Any, marker: Path) -> None:
     root.mainloop()
 
 
+HANDOFF_GRACE = 1.0  # seconds after the waiter took the marker, for its process to exit and unlock its exe
+HANDOFF_CAP = 5.0  # seconds after signalling before removing anyway
+
+
+class ReadyHandoff:
+    """The remover's side of ``--ready-file``: signal our window is up, then wait for the waiter to let go.
+
+    The waiter may run from the install dir, so removing before it exits leaves its exe behind.
+    """
+
+    def __init__(self, marker: Path, *, clock: Callable[[], float] = time.monotonic) -> None:
+        self.marker = marker
+        self.clock = clock
+        self.signalled: float | None = None
+        self.taken: float | None = None
+
+    def done(self) -> bool:
+        now = self.clock()
+        if self.signalled is None:
+            try:
+                self.marker.touch()
+            except OSError:
+                LOGGER.warning("Could not create %s", self.marker)
+            self.signalled = now
+        if self.taken is None and not self.marker.exists():
+            self.taken = now
+        if (self.taken is None or now < self.taken + HANDOFF_GRACE) and now < self.signalled + HANDOFF_CAP:
+            return False
+        self.marker.unlink(missing_ok=True)
+        return True
+
+
 class UninstallWindow:
     """``--uninstall``'s window: a status line + busy bar while ``remove`` runs on a worker, then the result."""
 
-    def __init__(self, root: Any, remove: Callable[[Callable[[str], None]], None], *, ready_file: Path | None) -> None:
+    def __init__(
+        self,
+        root: Any,
+        remove: Callable[[Callable[[str], None]], None],
+        *,
+        ready_file: Path | None,
+        spawn: Callable[[Callable[[], None]], None] = lambda work: threading.Thread(target=work, daemon=True).start(),
+    ) -> None:
         self.root = root
         self.remove = remove
-        self.ready_file = ready_file
+        self.handoff = ReadyHandoff(ready_file) if ready_file is not None else None
+        self.spawn = spawn
+        self.started = False
         self.events: queue.Queue[tuple[str, str]] = queue.Queue()
         self.done = False
         self.ok = False
@@ -894,7 +935,6 @@ class UninstallWindow:
         self.bar.start(15)
         self.close_button = ttk.Button(frame, text="Close", command=root.destroy)  # packed with the result
         root.deiconify()
-        threading.Thread(target=self._work, daemon=True).start()
         root.after(100, self._poll)
 
     def _work(self) -> None:
@@ -910,12 +950,9 @@ class UninstallWindow:
             self.events.put(("done", "Transcribe was removed."))
 
     def _poll(self) -> None:
-        if self.ready_file is not None:  # this window is up: the one that started us can close
-            try:
-                self.ready_file.touch()
-            except OSError:
-                LOGGER.warning("Could not create %s", self.ready_file)
-            self.ready_file = None
+        if not self.started and (self.handoff is None or self.handoff.done()):
+            self.started = True
+            self.spawn(self._work)
         while not self.events.empty():
             kind, text = self.events.get()
             self.status.config(text=text)
@@ -1475,6 +1512,7 @@ class SetupWindow:
         cmd = [*self_command(), "--uninstall", "--yes", "--ready-file", str(ready)]
         self.popen(cmd, cwd=self.tempdir(), creationflags=NO_WINDOW)  # not the install dir
         self.install_button.config(state="disabled")
+        self.launch_button.config(state="disabled")
         self.summary.config(text="Starting uninstall…")
         wait_for_marker(self.root, ready)  # stay up until the uninstall's own window is
 
