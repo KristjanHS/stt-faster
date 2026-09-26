@@ -4,7 +4,7 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 from urllib.parse import urlparse
 
 import ffmpeg  # type: ignore[import-untyped, unused-ignore]
@@ -91,6 +91,8 @@ def _process_with_ffmpeg_python(
     target_sample_rate: int,
     target_channels: int,
     filter_graph: str,
+    *,
+    ffmpeg_module: Any = ffmpeg,
 ) -> None:
     """Process audio using ffmpeg-python library.
 
@@ -99,10 +101,10 @@ def _process_with_ffmpeg_python(
     internal upsampling operations.
     """
     try:
-        stream = ffmpeg.input(str(input_path))  # type: ignore[assignment, no-untyped-call]
+        stream = ffmpeg_module.input(str(input_path))  # type: ignore[assignment, no-untyped-call]
         # Note: ar (sample rate) is set after af (filter) to ensure final output
         # is at target_sample_rate even if loudnorm does internal resampling
-        stream = ffmpeg.output(  # type: ignore[assignment, no-untyped-call]
+        stream = ffmpeg_module.output(  # type: ignore[assignment, no-untyped-call]
             stream,  # type: ignore[arg-type]
             str(output_path),
             ac=target_channels,
@@ -110,8 +112,8 @@ def _process_with_ffmpeg_python(
             ar=target_sample_rate,  # -ar 16000 applied after filters to guarantee final sample rate
             sample_fmt="s16",
         )
-        ffmpeg.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[no-untyped-call]
-    except ffmpeg.Error as exc:  # type: ignore[misc]
+        ffmpeg_module.run(stream, overwrite_output=True, quiet=True, capture_stderr=True)  # type: ignore[no-untyped-call]
+    except ffmpeg_module.Error as exc:  # type: ignore[misc]
         stderr = exc.stderr.decode() if exc.stderr else "unknown error"  # type: ignore[union-attr]
         raise StepExecutionError("ffmpeg_pipeline", f"ffmpeg failed: {stderr}") from exc
     except Exception as exc:
@@ -127,6 +129,8 @@ def run_ffmpeg_pipeline(
     loudnorm_preset: str = "default",
     rnnoise_model: str | None = None,
     run_cmd: Callable[..., object] | None = None,  # Deprecated, kept for compatibility
+    *,
+    ffmpeg_module: Any = ffmpeg,
 ) -> StepMetrics:
     """Run the ffmpeg pipeline (decode/resample -> RNNoise -> loudnorm).
 
@@ -144,6 +148,7 @@ def run_ffmpeg_pipeline(
         rnnoise_model: Optional path to RNNoise model file
         rnnoise_mix: RNNoise mix level (0.0 to 1.0)
         run_cmd: Deprecated parameter, kept for backward compatibility
+        ffmpeg_module: The ffmpeg-python module (injectable for tests)
 
     Returns:
         StepMetrics with processing duration
@@ -177,6 +182,7 @@ def run_ffmpeg_pipeline(
             target_sample_rate=target_sample_rate,
             target_channels=target_channels,
             filter_graph=filter_graph,
+            ffmpeg_module=ffmpeg_module,
         )
     except StepExecutionError:
         raise
