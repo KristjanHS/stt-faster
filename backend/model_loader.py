@@ -7,7 +7,7 @@ GPU->CPU fallback and environment-based device configuration.
 import logging
 import os
 import time
-from typing import Callable, Optional, cast
+from typing import Callable, Literal, Optional, cast
 
 from faster_whisper import WhisperModel
 
@@ -56,14 +56,30 @@ def _log_gpu_fallback_banner(
     LOGGER.warning("\n".join(lines))
 
 
+TorchBuild = Literal["absent", "cpu", "cuda"]
+
+
+def _detect_torch_build() -> TorchBuild:
+    try:
+        import torch
+    except ImportError:
+        return "absent"
+    return "cuda" if torch.version.cuda else "cpu"
+
+
 class DeviceSelector:
     """Selects the appropriate device (CPU/GPU) for model loading.
 
     Device selection priority:
     1. STT_DEVICE environment variable (accepts device[/compute_type], e.g., cuda/float16)
-    2. Preferred device from configuration
-    3. Auto-fallback to CPU if GPU fails (handled by ModelLoader)
+    2. CPU when the venv holds the CPU torch variant: its first CUDA encode can
+       ``abort()`` natively (no cuBLAS for system cuDNN), which (4) cannot catch
+    3. Preferred device from configuration
+    4. Auto-fallback to CPU if GPU fails (handled by ModelLoader)
     """
+
+    def __init__(self, torch_build: Callable[[], TorchBuild] = _detect_torch_build):
+        self._torch_build = torch_build
 
     def select(self, config: ModelConfig) -> tuple[DeviceType, ComputeType]:
         """Select device and compute type based on environment and preferences.
@@ -98,6 +114,13 @@ class DeviceSelector:
                 LOGGER.info("Using device from STT_DEVICE env: %s (compute=%s)", device, compute_type)
                 return device, compute_type
             LOGGER.warning("Ignoring STT_DEVICE=%s because '%s' is not a supported device", raw_env, device)
+
+        if config.device == "cuda" and self._torch_build() == "cpu":
+            LOGGER.warning(
+                "CPU torch variant installed -- using CPU instead of the preset's cuda "
+                "(run `make use-gpu` for GPU, or set STT_DEVICE=cuda to force it)."
+            )
+            return "cpu", "int8"
 
         # Use preferred device and compute type from config
         return config.device, config.compute_type
