@@ -115,5 +115,5 @@ repos:
         name: "No monkeypatch / mock.patch in tests"
         description: "Inject a defaulted param/field and build fakes in fixtures instead"
         language: pygrep
-        entry: (?i:monkeypatch)|\bpatch(\.\w+)?\(|@(mock\.)?patch\b
+        entry: (?i:monkeypatch)|\bpatch(\.\w+)?\s*\(|@(mock\.)?patch\b|\bpatch\s+as\b|\bsys\.modules\[[^\]]+\]\s*=|\bsetattr\(
         files: ^tests/.*\.py$
