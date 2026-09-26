@@ -421,7 +421,8 @@ def isolated_env(base: Mapping[str, str], paths: InstallPaths) -> dict[str, str]
     """uv's cache + Pythons and every HF cache inside the install dir; inherited values never win."""
     hf = paths.hf_home
     return {
-        **base,
+        # A machine-wide SSLKEYLOGFILE that isn't writable makes every Python TLS client raise PermissionError.
+        **{key: value for key, value in base.items() if key.upper() != "SSLKEYLOGFILE"},
         "UV_CACHE_DIR": str(paths.uv_cache),
         "UV_PYTHON_INSTALL_DIR": str(paths.python_dir),
         "UV_PYTHON_INSTALL_BIN": "0",  # no python.exe shim in ~/.local/bin (`uv help python install`)

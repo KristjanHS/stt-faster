@@ -324,6 +324,13 @@ def test_deps_command_uses_lean_gui_install(paths: InstallPaths) -> None:
     }
 
 
+@pytest.mark.parametrize("key", ["SSLKEYLOGFILE", "SslKeyLogFile"])
+def test_isolated_env_drops_an_inherited_ssl_key_log(paths: InstallPaths, key: str) -> None:
+    # An unwritable SSLKEYLOGFILE broke `hf download` on a user's Windows machine (ssl.create_default_context).
+    env = isolated_env({key: r"\\?\Volume{ba5fbc33}\virtual_file.log", "A": "1"}, paths)
+    assert key not in env and env["A"] == "1"
+
+
 def test_isolated_env_overrides_inherited_caches(paths: InstallPaths) -> None:
     env = isolated_env({"HF_HUB_CACHE": "/shared/hub", "HF_HOME": "/shared", "UV_CACHE_DIR": "/shared/uv"}, paths)
     for key in ("UV_CACHE_DIR", "UV_PYTHON_INSTALL_DIR", "HF_HOME", "HF_HUB_CACHE", "HF_XET_CACHE"):
