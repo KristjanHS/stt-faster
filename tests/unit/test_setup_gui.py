@@ -1558,7 +1558,7 @@ def test_start_saves_the_editable_checkbox_on_repair(paths: InstallPaths) -> Non
         gpu_check=object(),
         install_button=SimpleNamespace(config=lambda **_kw: None),
         summary=SimpleNamespace(config=lambda **_kw: None),
-        launch_button=SimpleNamespace(config=lambda **_kw: None),
+        launch_button=_FakeLabel(),
         log_link=SimpleNamespace(pack_forget=lambda: None),
         rows={},
         tails={},
@@ -1567,7 +1567,9 @@ def test_start_saves_the_editable_checkbox_on_repair(paths: InstallPaths) -> Non
         _work=lambda _events: None,
         _poll=lambda: None,
     )
+    window.launch_button.config(state="normal")  # an existing install opens without a repair first
     SetupWindow.start(cast(Any, window))
+    assert window.launch_button.state == "disabled"  # never open the app while the run replaces its venv
     assert installer.gpu is True  # repair saves the (editable) checkbox
     window.gpu_check = None
     SetupWindow.start(cast(Any, window))
