@@ -377,7 +377,7 @@ def test_process_all_files(
     lines: list[str] = []
     bar = _ClosingBar()
     reporter = ProgressReporter(enabled=True, write=lines.append, bar=bar)
-    results = processor.process_all_files([str(audio1), str(audio2)], reporter=reporter)
+    results = processor.process_all_files([str(audio1), str(audio2)], reporter=reporter, probe=lambda _path: 60.0)
     assert bar.closed  # the terminal bar is torn down once the file loop ends
 
     assert results["succeeded"] == 2
@@ -385,6 +385,7 @@ def test_process_all_files(
     assert len(results["file_stats"]) == 2
     events = [parse_progress(line) for line in lines]
     assert [(e.file, e.files, e.stage) for e in events if e is not None] == [(1, 2, "prepare"), (2, 2, "prepare")]
+    assert all(e is not None and e.durations == (60.0, 60.0) for e in events)  # feeds the GUI's job ETA
     assert all(stat.status == "completed" for stat in results["file_stats"])
     assert mock_transcription_service.transcribe.call_count == 2
 

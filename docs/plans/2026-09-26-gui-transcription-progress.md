@@ -38,8 +38,11 @@ Wire format: `@@progress {"file": 2, "files": 3, "stage": "diarize", "detail": "
 - GUI label appends `· ~6 min left` from `EtaEstimator`: the current stage's rate, after `ETA_MIN_SECONDS`; no wire change.
 - TTY stdout without `STT_PROGRESS` → `RichProgressBar` replaces the `⌛` log lines; piped output unchanged.
 
-## Backlog
+## Rung 4 — whole-job ETA (ruled 2026-09-26)
 
-- **Whole-job ETA** — needs the durations of later files (emit `durations` in `start_file`); ruled out of rung 3.
-- **Retry file numbering** — a retry resets the bar to indeterminate with a `Retrying…` label, then counts
-  `File 1/k` over the retried subset only; mapping back onto the original N would need the GUI to pass offsets.
+- `process_all_files` probes durations via `inspect_audio` (only when `reporter.enabled` and >1 file) → `durations` on `start_file`.
+- GUI `JobEtaEstimator`: wall s per audio s over finished files × audio left; replaces the stage ETA as `~N min left (all)`; none before file 1 ends, never for 1 file; terminal bar unchanged.
+
+## Rung 5 — retry numbering (ruled 2026-09-26)
+
+- `run_job` renumbers a retry batch's `@@progress` lines onto the original list (`File 4/5`), dropping `durations`; GUI appends ` (retry)` after a `Retrying…` line. No backend change.

@@ -3,10 +3,13 @@
 import logging
 import time
 from pathlib import Path
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Union
 
 from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, summarize_run
 from backend.run_config import RunConfig
+from backend.preprocess.errors import PreprocessError
+from backend.preprocess.io import inspect_audio
 from backend.progress import REPORTER, ProgressReporter
 from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
@@ -21,6 +24,14 @@ if TYPE_CHECKING:
     from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
+
+
+def probe_duration(path: str) -> float | None:
+    """Audio seconds of ``path`` via ffprobe, or None when it can't be read."""
+    try:
+        return inspect_audio(Path(path)).duration
+    except PreprocessError:
+        return None
 
 
 class TranscriptionProcessor:
@@ -160,7 +171,12 @@ class TranscriptionProcessor:
         """
         return self._file_processor.process_file(file_path)
 
-    def process_all_files(self, file_paths: list[str], reporter: ProgressReporter = REPORTER) -> dict[str, Any]:
+    def process_all_files(
+        self,
+        file_paths: list[str],
+        reporter: ProgressReporter = REPORTER,
+        probe: Callable[[str], float | None] = probe_duration,
+    ) -> dict[str, Any]:
         """Process all files in the provided list.
 
         Args:
@@ -179,9 +195,11 @@ class TranscriptionProcessor:
         failed = 0
         stats: list[FileProcessingStats] = []
 
+        # Only the GUI channel consumes durations (its whole-job ETA); a lone file has no "later" to estimate.
+        durations = [probe(path) for path in file_paths] if reporter.enabled and len(file_paths) > 1 else None
         try:
             for index, file_path in enumerate(file_paths, start=1):
-                reporter.start_file(index, len(file_paths))
+                reporter.start_file(index, len(file_paths), durations)
                 result = self.process_file(file_path)
                 stats.append(result)
                 if result.status == "completed":
