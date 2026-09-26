@@ -56,7 +56,7 @@ def mock_ffmpeg() -> MagicMock:
 
 
 def _loader(module: MagicMock) -> Callable[[], Any]:
-    """Build the ``ffmpeg_module`` loader the steps call instead of ``import ffmpeg``."""
+    """Build the ``ffmpeg_loader`` loader the steps call instead of ``import ffmpeg``."""
     return lambda: module
 
 
@@ -75,7 +75,7 @@ class TestLoudnormOnly:
             target_sample_rate=16000,
             target_channels=1,
             loudnorm_preset="default",
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify ffmpeg.input was called
@@ -120,7 +120,7 @@ class TestLoudnormOnly:
                 output_path=output_file,
                 target_sample_rate=16000,
                 target_channels=1,
-                ffmpeg_module=_loader(mock_ffmpeg),
+                ffmpeg_loader=_loader(mock_ffmpeg),
             )
 
         assert "ffmpeg failed" in str(excinfo.value).lower()
@@ -141,7 +141,7 @@ class TestVolumeWithLimiter:
             target_sample_rate=16000,
             target_channels=1,
             volume_db=3.0,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify volume filter was called
@@ -181,7 +181,7 @@ class TestPeakNormalize2Pass:
             target_channels=1,
             target_db=-3.0,
             max_gain_db=3.0,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify two calls to ffmpeg.run (volumedetect + processing)
@@ -216,7 +216,7 @@ class TestLoudnormWithHighpass:
             target_sample_rate=16000,
             target_channels=1,
             loudnorm_preset="default",
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify highpass filter was called
@@ -247,7 +247,7 @@ class TestDynaudnormOnly:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify dynaudnorm filter was called
@@ -273,7 +273,7 @@ class TestHighlowAformLoudnorm:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify highpass filter was called
@@ -308,7 +308,7 @@ class TestHighlowNosamplLoudnorm:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify highpass and lowpass filters were called
@@ -345,7 +345,7 @@ class TestAresamplLoudnormFixed:
             target_i=-24.0,
             target_tp=-2.0,
             target_lra=15.0,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify aresample filter was called with osr (not ar)
@@ -380,7 +380,7 @@ class TestAresamplLoudnormFixed2:
             target_i=-24.0,
             target_tp=-2.0,
             target_lra=15.0,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify aresample filter was called with osr and precision
@@ -417,7 +417,7 @@ class TestAresamplLoudnormFixed2:
                 target_i=-24.0,
                 target_tp=-2.0,
                 target_lra=15.0,
-                ffmpeg_module=_loader(mock_ffmpeg),
+                ffmpeg_loader=_loader(mock_ffmpeg),
             )
 
         assert "ffmpeg failed" in str(excinfo.value).lower()
@@ -437,7 +437,7 @@ class TestLoudnorm2PassLinear:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify loudnorm filter was called with linear and dual_mono
@@ -465,7 +465,7 @@ class TestLimiterOnly:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify alimiter filter was called
@@ -492,7 +492,7 @@ class TestSoxPeakNormalize:
             target_sample_rate=16000,
             target_channels=1,
             target_db=-3.0,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify volume filter was called with target dB
@@ -521,7 +521,7 @@ class TestCompressorWithLimiter:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify compand filter was called
@@ -552,7 +552,7 @@ class TestDynaudnormConservative:
             output_path=output_file,
             target_sample_rate=16000,
             target_channels=1,
-            ffmpeg_module=_loader(mock_ffmpeg),
+            ffmpeg_loader=_loader(mock_ffmpeg),
         )
 
         # Verify dynaudnorm filter was called with conservative parameters
