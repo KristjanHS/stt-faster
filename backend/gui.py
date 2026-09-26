@@ -31,6 +31,7 @@ from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeErr
 from backend.progress import (
     PROGRESS_ENV,
     EtaEstimator,
+    JobEtaEstimator,
     ProgressEvent,
     describe_progress,
     format_eta,
@@ -580,6 +581,7 @@ class TranscribeApp:
         self.detail = ttk.Label(frame, text="")
         self.detail.pack(anchor="w", pady=(8, 0))
         self.eta = EtaEstimator()
+        self.job_eta = JobEtaEstimator()
         self.clock: Callable[[], float] = time.monotonic
         self.status = ttk.Label(frame, text="", foreground="gray")
         self.status.pack(anchor="w", pady=(4, 0))
@@ -652,6 +654,7 @@ class TranscribeApp:
         self.banner.config(text="")
         self.detail.config(text="Starting…")
         self.eta = EtaEstimator()
+        self.job_eta = JobEtaEstimator()
         self.progress.config(mode="indeterminate", value=0)
         self.progress.start(12)
         self.running = True
@@ -715,6 +718,7 @@ class TranscribeApp:
                 self.progress.config(mode="indeterminate", value=0)
                 self.progress.start(12)
                 self.eta = EtaEstimator()
+                self.job_eta = JobEtaEstimator()
             elif kind == "line" and str(payload).strip().lstrip("│╭╰─┃━"):  # skip Rich table borders
                 self.status.config(text=str(payload)[-90:])
             elif kind in ("done", "error"):
@@ -734,8 +738,12 @@ class TranscribeApp:
                 self.progress.config(mode="determinate")
             self.progress.config(value=fraction * 100)  # default maximum=100; 1.0 makes the pulse jump end to end
         text = describe_progress(event)
-        if (seconds := self.eta.seconds_left(event, self.clock())) is not None:
-            text += f" · {format_eta(seconds)}"
+        now = self.clock()
+        stage_left = self.eta.seconds_left(event, now)
+        if (job_left := self.job_eta.seconds_left(event, now)) is not None:
+            text += f" · {format_eta(job_left)} (all)"
+        elif stage_left is not None:
+            text += f" · {format_eta(stage_left)}"
         self.detail.config(text=text)
 
     def _finish(self, payload: object) -> None:

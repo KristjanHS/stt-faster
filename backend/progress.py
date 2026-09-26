@@ -12,7 +12,7 @@ import json
 import os
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -33,6 +33,7 @@ class ProgressEvent:
     done: float | None = None
     total: float | None = None
     detail: str | None = None  # sub-step within the stage, e.g. a pyannote step name
+    durations: tuple[float | None, ...] | None = None  # audio seconds per file, on a ``prepare`` event only
 
     @property
     def stage_fraction(self) -> float | None:
@@ -56,9 +57,25 @@ def parse_progress(line: str) -> ProgressEvent | None:
             done=None if data.get("done") is None else float(data["done"]),
             total=None if data.get("total") is None else float(data["total"]),
             detail=None if data.get("detail") is None else str(data["detail"]),
+            durations=None
+            if data.get("durations") is None
+            else tuple(None if d is None else float(d) for d in data["durations"]),
         )
     except (ValueError, KeyError, TypeError):
         return None
+
+
+def format_progress(event: ProgressEvent) -> str:
+    """The ``@@progress`` line for ``event`` — the inverse of :func:`parse_progress`."""
+    payload: dict[str, object] = {"file": event.file, "files": event.files, "stage": event.stage}
+    if event.detail is not None:
+        payload["detail"] = event.detail
+    if event.done is not None:
+        payload["done"] = round(event.done, 1)
+        payload["total"] = None if event.total is None else round(event.total, 1)
+    if event.durations is not None:
+        payload["durations"] = [None if d is None else round(d, 1) for d in event.durations]
+    return PROGRESS_PREFIX + json.dumps(payload)
 
 
 STAGE_LABELS = {
@@ -99,6 +116,37 @@ class EtaEstimator:
             return None
         rate = (event.done - done_then) / elapsed
         return max(event.total - event.done, 0.0) / rate
+
+
+@dataclass
+class JobEtaEstimator:
+    """Seconds left in the whole job: wall time per audio second over finished files × the audio still to go."""
+
+    _durations: tuple[float | None, ...] | None = None
+    _file: int | None = None
+    _file_start: float = 0.0
+    _spent: float = 0.0  # wall seconds over finished files of known duration
+    _audio_done: float = 0.0
+
+    def seconds_left(self, event: ProgressEvent, now: float) -> float | None:
+        if event.durations is not None:
+            self._durations = event.durations
+        durations = self._durations
+        if event.file != self._file:
+            finished = self._file
+            if finished is not None and durations and event.file == finished + 1 and len(durations) >= finished:
+                if (seconds := durations[finished - 1]) is not None and seconds > 0:
+                    self._spent += now - self._file_start
+                    self._audio_done += seconds
+            self._file, self._file_start = event.file, now
+        if not durations or len(durations) != event.files or event.files < 2 or self._audio_done <= 0:
+            return None
+        remaining = durations[event.file - 1 :]
+        if any(seconds is None for seconds in remaining):
+            return None
+        rate = self._spent / self._audio_done
+        current, *later = (seconds or 0.0 for seconds in remaining)
+        return max(rate * current - (now - self._file_start), 0.0) + rate * sum(later)
 
 
 def format_eta(seconds: float) -> str:
@@ -175,9 +223,11 @@ class ProgressReporter:
     files: int = 0
     _last_emit: float | None = None
 
-    def start_file(self, index: int, total: int) -> None:
+    def start_file(self, index: int, total: int, durations: Sequence[float | None] | None = None) -> None:
+        """Enter file ``index`` of ``total``; ``durations`` (audio seconds per file) feed the GUI's job ETA."""
         self.file, self.files = index, total
-        self.stage("prepare")
+        event = ProgressEvent(index, total, "prepare", durations=None if durations is None else tuple(durations))
+        self._emit(event, force=True)
 
     @property
     def draws_bar(self) -> bool:
@@ -222,15 +272,8 @@ class ProgressReporter:
         self._last_emit = now
         if self.bar is not None:
             self.bar.update(event)
-        if not self.enabled:
-            return
-        payload: dict[str, object] = {"file": event.file, "files": event.files, "stage": event.stage}
-        if event.detail is not None:
-            payload["detail"] = event.detail
-        if event.done is not None:
-            payload["done"] = round(event.done, 1)
-            payload["total"] = None if event.total is None else round(event.total, 1)
-        self.write(PROGRESS_PREFIX + json.dumps(payload))
+        if self.enabled:
+            self.write(format_progress(event))
 
 
 REPORTER = ProgressReporter()

@@ -15,10 +15,12 @@ from backend.progress import (
     ETA_MIN_SECONDS,
     MIN_INTERVAL_SECONDS,
     EtaEstimator,
+    JobEtaEstimator,
     ProgressEvent,
     ProgressReporter,
     RichProgressBar,
     format_eta,
+    format_progress,
     parse_progress,
 )
 from backend.transcribe import _collect_segments  # pyright: ignore[reportPrivateUsage]
@@ -185,6 +187,41 @@ def test_eta_extrapolates_the_stage_rate_after_a_warm_up_and_resets_per_stage() 
     assert eta.seconds_left(ProgressEvent(1, 1, "diarize", 1.0, 4.0, "embeddings"), now=111.0) is None
     assert eta.seconds_left(ProgressEvent(1, 1, "diarize", 3.0, 4.0, "embeddings"), now=121.0) == pytest.approx(5.0)
     assert eta.seconds_left(ProgressEvent(1, 1, "diarize", 0.0, 4.0, "embeddings"), now=130.0) is None  # restart
+
+
+def test_job_eta_learns_the_audio_rate_from_finished_files() -> None:
+    eta, durations = JobEtaEstimator(), (60.0, 120.0, 180.0)
+    assert eta.seconds_left(ProgressEvent(1, 3, "prepare", durations=durations), now=0.0) is None
+    assert eta.seconds_left(ProgressEvent(1, 3, "transcribe", 30.0, 60.0), now=20.0) is None  # no file finished yet
+    # file 1 took 30 s for 60 s of audio → 0.5 s/s; files 2+3 hold 300 s of audio
+    assert eta.seconds_left(ProgressEvent(2, 3, "prepare", durations=durations), now=30.0) == pytest.approx(150.0)
+    assert eta.seconds_left(ProgressEvent(2, 3, "transcribe", 10.0, 120.0), now=40.0) == pytest.approx(140.0)
+    # files 1+2 took 100 s for 180 s of audio; file 3 holds 180 s
+    assert eta.seconds_left(ProgressEvent(3, 3, "prepare"), now=100.0) == pytest.approx(100.0)
+
+
+@pytest.mark.parametrize(
+    "durations",
+    [(60.0,), (60.0, None), None],
+    ids=["single-file", "unknown-later-duration", "no-durations"],
+)
+def test_job_eta_stays_silent_without_a_later_known_duration(durations: tuple[float | None, ...] | None) -> None:
+    eta, files = JobEtaEstimator(), 1 if durations is None else len(durations)
+    eta.seconds_left(ProgressEvent(1, files, "prepare", durations=durations), now=0.0)
+    last = ProgressEvent(files, files, "transcribe", 1.0, 60.0)
+    if files > 1:
+        eta.seconds_left(ProgressEvent(2, files, "prepare"), now=30.0)
+    assert eta.seconds_left(last, now=40.0) is None
+
+
+def test_start_file_carries_durations_on_its_prepare_event_only() -> None:
+    reporter, lines = _reporter()
+    reporter.start_file(1, 2, [61.04, None])
+    reporter.advance("transcribe", 5.0, 61.0, force=True)
+    first, second = (parse_progress(line) for line in lines)
+    assert first is not None and first.durations == (61.0, None)
+    assert second is not None and second.durations is None
+    assert parse_progress(format_progress(first)) == first
 
 
 @pytest.mark.parametrize(
