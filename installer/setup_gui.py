@@ -1369,8 +1369,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         _setup_logging(None, console=args.headless)
         return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes)
     _setup_logging(paths.log_file, console=args.headless)
-    if os.environ.get("SSLKEYLOGFILE"):  # isolated_env drops it; the value hints at its source
-        LOGGER.warning("Ignoring inherited SSLKEYLOGFILE=%s", os.environ["SSLKEYLOGFILE"])
+    # Bitdefender sets it in Chrome, so a setup opened from the download bar inherits it; dropped here, our own
+    # downloads and the Transcribe it launches never see it either (isolated_env still guards passed-in envs).
+    if keylog := os.environ.pop("SSLKEYLOGFILE", ""):
+        LOGGER.warning("Ignoring inherited SSLKEYLOGFILE=%s", keylog)
     installer = Installer(paths=paths, source=args.source, clean=args.clean, extras=args.extras)
     if args.headless:
         installer.gpu = headless_gpu(installer, cpu=args.cpu)
