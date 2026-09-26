@@ -112,8 +112,8 @@ repos:
   - repo: local
     hooks:
       - id: no-monkeypatch
-        name: "No monkeypatch in tests"
+        name: "No monkeypatch / mock.patch in tests"
         description: "Inject a defaulted param/field and build fakes in fixtures instead"
         language: pygrep
-        entry: (?i)monkeypatch
+        entry: (?i:monkeypatch)|\bpatch(\.\w+)?\(|@(mock\.)?patch\b
         files: ^tests/.*\.py$
