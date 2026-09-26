@@ -125,7 +125,8 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 - The docker bat drops the HF_TOKEN diarize fail-fast (stale, says "3.1"), mounts the host models (diarization snapshot dir + `models/sh.rnnn`) read-only, and passes `STT_DIARIZATION_MODEL_DIR` + `STT_PREPROCESS_RNNOISE_MODEL` pointing at the mount. Dockerfile unchanged; host prep is `make diarization-model rnnoise-model`.
 - The e2e skip changes to "model not resolvable".
 - Stage 5.2 owed: `_docker_run.bat` guard+`:ro` mounts+env, `_transcribe.bat` :13-22 comments, `scripts/windows/README.md:44`, `transcribe_english_Online_docker.bat:14-15`; keep the Whisper HF_TOKEN passthrough.
-- Stage 5.2 gate: `make diarization-model` writes to WSL `$HF_HOME/hub`, but the bat runs on Windows — decide which host path it mounts.
+- Stage 5.2 host path (owner: Docker users always have WSL): prep is WSL `make diarization-model rnnoise-model`; the bat resolves the WSL paths at run time via `wsl wslpath -w`, no hardcoded distro/user.
+- Stage 5.2 falsifier: with the WSL model dir renamed, a `DIARIZE=1` docker bat run exits 1 naming `make diarization-model`; untested — Docker Desktop accepting a `\\wsl.localhost\…` `-v` source.
 - Done when: `grep -rln "HF_TOKEN\|hf.co/settings/tokens\|accept the licen" README.md docs/*.md scripts backend installer` lists only intentional non-diarization hits (Whisper rate-limit notes and `tests/conftest.py` are left as they are).
 
 ## Stage 6: full verify, network-off e2e, review
