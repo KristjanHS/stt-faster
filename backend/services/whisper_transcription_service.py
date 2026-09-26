@@ -1,7 +1,7 @@
 """Concrete implementation of TranscriptionService using faster-whisper."""
 
 import logging
-from typing import Callable
+from typing import Any, Callable
 
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult
@@ -27,12 +27,15 @@ class WhisperTranscriptionService:
         transcription_config: TranscriptionConfig,
         diarize: bool = True,
         num_speakers: int = 2,
+        model_picker: Callable[[str], Any] | None = None,
     ):
         self._preprocess_config = preprocess_config
         self._preprocess_runner = preprocess_runner
         self._transcription_config = transcription_config
         self._diarize = diarize
         self._num_speakers = num_speakers
+        # Override for backend.transcribe.pick_model (test seam); None = real loader.
+        self._model_picker = model_picker
 
     def transcribe(self, request: TranscriptionRequest) -> TranscriptionResult:
         """Transcribe audio and return result with metrics."""
@@ -64,6 +67,7 @@ class WhisperTranscriptionService:
                 metrics_collector=_collect,
                 diarize=self._diarize,
                 num_speakers=self._num_speakers,
+                model_picker=self._model_picker,
             )
         elif is_minimal:
             # For minimal config, use the internal function that omits parameters
@@ -77,6 +81,7 @@ class WhisperTranscriptionService:
                 metrics_collector=_collect,
                 diarize=self._diarize,
                 num_speakers=self._num_speakers,
+                model_picker=self._model_picker,
             )
         else:
             # Use standard transcription with full config and metrics collection
@@ -90,6 +95,7 @@ class WhisperTranscriptionService:
                 metrics_collector=_collect,
                 diarize=self._diarize,
                 num_speakers=self._num_speakers,
+                model_picker=self._model_picker,
             )
 
         return TranscriptionResult(metrics=metrics_container.get("value"), payload=payload)

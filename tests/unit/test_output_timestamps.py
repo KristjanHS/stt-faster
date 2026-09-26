@@ -5,11 +5,10 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 from typer.testing import CliRunner
 
-from backend.cli.transcription_commands import app
+from backend.cli.transcription_commands import create_app
 from backend.services.json_output_writer import JsonOutputWriter
 from backend.transcribe import format_segments_as_text
 
@@ -38,8 +37,12 @@ def test_writer_honours_include_timestamps(tmp_path: Path) -> None:
 
 def _invoke_process(tmp_path: Path, *flags: str) -> argparse.Namespace:
     captured: list[argparse.Namespace] = []
-    with patch("backend.cli.transcription_commands.cmd_process", side_effect=lambda a: captured.append(a) or 0):
-        result = CliRunner().invoke(app, [str(tmp_path), *flags])
+
+    def fake_process(a: argparse.Namespace) -> int:
+        captured.append(a)
+        return 0
+
+    result = CliRunner().invoke(create_app(process_fn=fake_process), [str(tmp_path), *flags])
     assert result.exit_code == 0, result.output
     return captured[0]
 

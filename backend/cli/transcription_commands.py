@@ -11,7 +11,7 @@ import subprocess  # nosec B404
 from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Callable
 
 import typer
 
@@ -30,9 +30,6 @@ from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
 
 LOGGER = logging.getLogger(__name__)
-
-# Create Typer app for unified CLI
-app = typer.Typer(name="transcribe", help="Transcription processing commands")
 
 
 def _get_git_commit_hash() -> str | None:
@@ -215,6 +212,7 @@ def _process_single_variant(
     variant: Any,  # noqa: ANN401
     *,
     run_log_path: Path | None = None,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> int:
     """Process files with a single variant.
 
@@ -223,6 +221,7 @@ def _process_single_variant(
         input_folder: Path to input folder
         variant: Variant instance
         run_log_path: JSONL run-log location; ``None`` = XDG default.
+        model_picker: Override for :func:`backend.transcribe.pick_model`; ``None`` = real loader.
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -259,6 +258,7 @@ def _process_single_variant(
             output_format=args.output_format,
             diarize=args.diarize,
             num_speakers=args.num_speakers,
+            model_picker=model_picker,
         )
         run_log = ServiceFactory.create_run_log(run_log_path)
         file_mover = ServiceFactory.create_file_mover()
@@ -297,6 +297,7 @@ def _run_single_variant(
     run_folder: Path,
     *,
     run_log_path: Path | None = None,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Process one variant inside a multi-variant run.
 
@@ -325,6 +326,7 @@ def _run_single_variant(
             output_format=args.output_format,
             diarize=args.diarize,
             num_speakers=args.num_speakers,
+            model_picker=model_picker,
         )
         run_log = ServiceFactory.create_run_log(run_log_path)
         file_mover = ServiceFactory.create_file_mover()
@@ -399,6 +401,7 @@ def _process_multi_variant(
     variants: list[Any],  # noqa: ANN401
     *,
     run_log_path: Path | None = None,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> int:
     """Process files with multiple variants.
 
@@ -407,6 +410,7 @@ def _process_multi_variant(
         input_folder: Path to input folder
         variants: List of variant instances
         run_log_path: JSONL run-log location; ``None`` = XDG default.
+        model_picker: Override for :func:`backend.transcribe.pick_model`; ``None`` = real loader.
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -425,7 +429,9 @@ def _process_multi_variant(
     all_results: dict[int, dict[str, Any]] = {}
 
     for variant in variants:
-        variant_meta, results = _run_single_variant(variant, args, input_folder, run_folder, run_log_path=run_log_path)
+        variant_meta, results = _run_single_variant(
+            variant, args, input_folder, run_folder, run_log_path=run_log_path, model_picker=model_picker
+        )
         all_variant_metadata.append(variant_meta)
         all_results[variant.number] = results
 
@@ -466,13 +472,24 @@ def _pyannote_installed() -> bool:
         return False
 
 
-def cmd_process(args: argparse.Namespace, *, run_log_path: Path | None = None) -> int:
+def cmd_process(
+    args: argparse.Namespace,
+    *,
+    run_log_path: Path | None = None,
+    model_picker: Callable[[str], Any] | None = None,
+    pyannote_installed: Callable[[], bool] = _pyannote_installed,
+    process_single_variant: Callable[..., int] = _process_single_variant,
+) -> int:
     """Process audio files in the specified folder.
 
     Args:
         args: Parsed command-line arguments
         run_log_path: JSONL run-log location (test seam); ``None`` resolves the
             XDG default via :func:`backend.config.get_default_run_log_path`.
+        model_picker: Override for :func:`backend.transcribe.pick_model` (test
+            seam); ``None`` = the real loader.
+        pyannote_installed: Probe for the optional pyannote.audio dependency (test seam).
+        process_single_variant: Single-variant runner (test seam).
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -490,7 +507,7 @@ def cmd_process(args: argparse.Namespace, *, run_log_path: Path | None = None) -
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
-    if getattr(args, "diarize", False) and not _pyannote_installed():
+    if getattr(args, "diarize", False) and not pyannote_installed():
         console.print(
             "[yellow]Warning:[/yellow] pyannote.audio is not installed — continuing WITHOUT speaker "
             "diarization. Re-sync with `--extra cpu` (or `--extra cu130`) to enable it."
@@ -510,46 +527,62 @@ def cmd_process(args: argparse.Namespace, *, run_log_path: Path | None = None) -
 
     # If single variant, use original behavior (backward compatible)
     if len(variants) == 1:
-        return _process_single_variant(args, input_folder, variants[0], run_log_path=run_log_path)
+        return process_single_variant(
+            args, input_folder, variants[0], run_log_path=run_log_path, model_picker=model_picker
+        )
     else:
         # Multi-variant mode
-        return _process_multi_variant(args, input_folder, variants, run_log_path=run_log_path)
+        return _process_multi_variant(
+            args, input_folder, variants, run_log_path=run_log_path, model_picker=model_picker
+        )
 
 
-@app.command()
-def process(
-    input_folder: Annotated[str, typer.Argument(help="Path to input folder containing audio files")],
-    preset: Annotated[str, typer.Option("--preset", "-p", help="Model preset name")] = "et-large",
-    language: Annotated[str | None, typer.Option("--language", "-l", help="Language code")] = None,
-    output_format: Annotated[
-        str, typer.Option("--output-format", "-f", help="Output format: txt, json, or both")
-    ] = "both",
-    variant: Annotated[int | None, typer.Option("--variant", "-v", help="Variant number")] = None,
-    variants: Annotated[str | None, typer.Option("--variants", help="Comma-separated list of variant numbers")] = None,
-    verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose output")] = False,
-    diarize: Annotated[
-        bool, typer.Option("--diarize/--no-diarize", help="Run pyannote speaker diarization (default: enabled)")
-    ] = True,
-    num_speakers: Annotated[int, typer.Option("--num-speakers", help="Number of speakers to diarize")] = 2,
-    timestamps: Annotated[
-        bool, typer.Option("--timestamps/--no-timestamps", help="Prefix TXT lines with segment times (default: on)")
-    ] = True,
-) -> None:
-    """Process audio files in the specified folder."""
+def create_app(*, process_fn: Callable[[argparse.Namespace], int] = cmd_process) -> typer.Typer:
+    """Build the ``transcribe`` Typer app; ``process_fn`` receives the parsed namespace (test seam)."""
+    cli = typer.Typer(name="transcribe", help="Transcription processing commands")
 
-    # Create argparse-like namespace for backward compatibility
-    args = argparse.Namespace()
-    args.input_folder = input_folder
-    args.preset = preset
-    args.language = language
-    args.output_format = output_format
-    args.variant = variant
-    args.variants = variants
-    args.verbose = verbose
-    args.diarize = diarize
-    args.num_speakers = num_speakers
-    args.timestamps = timestamps
+    def process(
+        input_folder: Annotated[str, typer.Argument(help="Path to input folder containing audio files")],
+        preset: Annotated[str, typer.Option("--preset", "-p", help="Model preset name")] = "et-large",
+        language: Annotated[str | None, typer.Option("--language", "-l", help="Language code")] = None,
+        output_format: Annotated[
+            str, typer.Option("--output-format", "-f", help="Output format: txt, json, or both")
+        ] = "both",
+        variant: Annotated[int | None, typer.Option("--variant", "-v", help="Variant number")] = None,
+        variants: Annotated[
+            str | None, typer.Option("--variants", help="Comma-separated list of variant numbers")
+        ] = None,
+        verbose: Annotated[bool, typer.Option("--verbose", "-v", help="Verbose output")] = False,
+        diarize: Annotated[
+            bool, typer.Option("--diarize/--no-diarize", help="Run pyannote speaker diarization (default: enabled)")
+        ] = True,
+        num_speakers: Annotated[int, typer.Option("--num-speakers", help="Number of speakers to diarize")] = 2,
+        timestamps: Annotated[
+            bool, typer.Option("--timestamps/--no-timestamps", help="Prefix TXT lines with segment times (default: on)")
+        ] = True,
+    ) -> None:
+        """Process audio files in the specified folder."""
 
-    exit_code = cmd_process(args)
-    if exit_code != 0:
-        raise typer.Exit(exit_code)
+        # Create argparse-like namespace for backward compatibility
+        args = argparse.Namespace()
+        args.input_folder = input_folder
+        args.preset = preset
+        args.language = language
+        args.output_format = output_format
+        args.variant = variant
+        args.variants = variants
+        args.verbose = verbose
+        args.diarize = diarize
+        args.num_speakers = num_speakers
+        args.timestamps = timestamps
+
+        exit_code = process_fn(args)
+        if exit_code != 0:
+            raise typer.Exit(exit_code)
+
+    cli.command()(process)
+    return cli
+
+
+# Typer app for the unified CLI
+app = create_app()

@@ -6,7 +6,6 @@ import argparse
 import tomllib
 from pathlib import Path
 from typing import Any
-from unittest.mock import patch
 
 from backend.cli import transcription_commands
 
@@ -49,11 +48,10 @@ def _run_process(tmp_path: Path, *, pyannote: bool) -> argparse.Namespace:
         captured.append(a)
         return 0
 
-    with (
-        patch.object(transcription_commands, "_pyannote_installed", return_value=pyannote),
-        patch.object(transcription_commands, "_process_single_variant", side_effect=fake_single),
-    ):
-        assert transcription_commands.cmd_process(args) == 0
+    exit_code = transcription_commands.cmd_process(
+        args, pyannote_installed=lambda: pyannote, process_single_variant=fake_single
+    )
+    assert exit_code == 0
     return captured[0]
 
 
