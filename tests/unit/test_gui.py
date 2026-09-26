@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 
 from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
+from backend.diarize.model import DIARIZATION_REPO, DIARIZATION_REVISION, DIARIZATION_SHA256
 from backend.processor import TranscriptionProcessor
 from backend.progress import EtaEstimator, JobEtaEstimator, ProgressEvent, format_progress, parse_progress
 from backend.run_config import RunConfig
@@ -23,24 +24,21 @@ from backend import gui
 from types import SimpleNamespace
 
 from backend.gui import (
-    EXTRAS_NEED_INSTALL_HINT,
     GUI_PROFILES,
     PYANNOTE_MODULE,
     AppPaths,
     attach_missing_streams,
     build_command,
     build_env,
+    cli_env,
     default_app_paths,
     describe_progress,
     diarization_available,
     diarization_failure,
-    extras_install_hint,
     find_outputs,
     read_device,
-    read_hf_token,
     renumber_progress,
     run_job,
-    save_and_install,
     stage_files,
     sweep_stale_work_dirs,
     unique_destination,
@@ -200,8 +198,13 @@ def test_build_env_points_hf_caches_at_installed_models_over_inherited(tmp_path:
     inherited = {"HF_HUB_CACHE": "/shared/hub", "HF_HOME": "/shared"}
     assert build_env(inherited, device=None, ffmpeg_bin=None, hf_home=hf) == {**inherited, **_py_env()}  # no dir yet
     hf.mkdir()
-    env = build_env(inherited, device=None, ffmpeg_bin=None, hf_home=hf)
-    assert (env["HF_HOME"], env["HF_HUB_CACHE"], env["HF_XET_CACHE"]) == (str(hf), str(hf / "hub"), str(hf / "xet"))
+    assert build_env(inherited, device=None, ffmpeg_bin=None, hf_home=hf) == {
+        **_py_env(),
+        "HF_HOME": str(hf),
+        "HF_HUB_CACHE": str(hf / "hub"),
+        "HF_XET_CACHE": str(hf / "xet"),
+        "HF_HUB_OFFLINE": "1",
+    }  # installed: cache-only, and never a token
 
 
 def _py_env() -> dict[str, str]:
@@ -338,64 +341,39 @@ def test_build_command_speaker_args(tmp_path: Path, diarize: bool, speakers: int
     assert cmd[cmd.index("txt") + 1 : cmd.index("--timestamps")] == expected
 
 
-def test_build_env_sets_hf_token_only_when_given() -> None:
-    assert build_env({}, device=None, ffmpeg_bin=None, hf_token="hf_abc")["HF_TOKEN"] == "hf_abc"
-    assert "HF_TOKEN" not in build_env({}, device=None, ffmpeg_bin=None, hf_token=None)
+def _install_speaker_model(paths: AppPaths) -> None:
+    snapshot = paths.hf_home / "hub" / f"models--{DIARIZATION_REPO.replace('/', '--')}" / "snapshots"
+    for name in ("config.yaml", *DIARIZATION_SHA256):
+        _write(snapshot / DIARIZATION_REVISION / name)
 
 
 @pytest.mark.parametrize(
-    ("installed", "token", "shown"),
-    [(True, "hf_abc", True), (True, " \n", False), (False, "hf_abc", False), (False, None, False)],
+    ("installed", "model", "shown"),
+    [(True, True, True), (True, False, False), (False, True, False)],
 )
-def test_identify_speakers_shown_iff_pyannote_and_token(
-    paths: AppPaths, installed: bool, token: str | None, shown: bool
+def test_identify_speakers_shown_iff_pyannote_and_the_cli_env_resolves_the_model(
+    paths: AppPaths, installed: bool, model: bool, shown: bool
 ) -> None:
-    if token is not None:
-        paths.token_file.parent.mkdir(parents=True, exist_ok=True)
-        paths.token_file.write_text(token, encoding="utf-8")
+    paths.hf_home.mkdir(parents=True)
+    if model:
+        _install_speaker_model(paths)
     probed: list[str] = []
 
     def find_spec(name: str) -> object | None:
         probed.append(name)
         return object() if installed else None
 
-    assert diarization_available(paths.token_file, find_spec=find_spec) is shown
+    assert diarization_available(cli_env({}, paths, None), find_spec=find_spec) is shown
     assert probed == [PYANNOTE_MODULE]
 
 
 def test_identify_speakers_hidden_when_pyannote_parent_is_missing(paths: AppPaths) -> None:
-    paths.token_file.parent.mkdir(parents=True, exist_ok=True)
-    paths.token_file.write_text("hf_abc", encoding="utf-8")
+    _install_speaker_model(paths)
 
     def find_spec(name: str) -> object | None:
         raise ModuleNotFoundError(name)
 
-    assert diarization_available(paths.token_file, find_spec=find_spec) is False
-
-
-def test_save_and_install_writes_token_then_launches_setup_extras(paths: AppPaths) -> None:
-    launched: list[tuple[list[str], str]] = []
-
-    def launch(cmd: list[str], cwd: str) -> None:
-        assert paths.token_file.read_text(encoding="utf-8") == "hf_abc"  # saved before setup starts
-        launched.append((cmd, cwd))
-
-    save_and_install(paths, "  hf_abc\n", launch=launch)
-
-    [(cmd, cwd)] = launched
-    assert cmd == [str(paths.install_dir / ".venv" / "Scripts" / "stt-faster-setup.exe"), "--extras"]
-    # The shortcut parks the app in venv\Scripts; setup inheriting that cwd sees the app as "still open".
-    assert not Path(cwd).resolve().is_relative_to(paths.install_dir / ".venv")
-    assert paths.token_file == paths.config_file.parent / "hf_token"
-
-
-def test_read_hf_token_strips_bom_and_treats_unreadable_as_none(paths: AppPaths) -> None:
-    paths.token_file.parent.mkdir(parents=True)
-    paths.token_file.write_text("\ufeffhf_abc\r\n", encoding="utf-8")  # Notepad's UTF-8 BOM
-    assert read_hf_token(paths.token_file) == "hf_abc"
-    paths.token_file.unlink()
-    paths.token_file.mkdir()  # a directory: read_text raises OSError
-    assert read_hf_token(paths.token_file) == ""
+    assert diarization_available(cli_env({}, paths, None), find_spec=find_spec) is False
 
 
 @pytest.mark.parametrize("plat", ["win32", "linux"])
@@ -404,28 +382,14 @@ def test_app_and_installer_agree_on_shared_paths(tmp_path: Path, plat: str) -> N
     app = gui.default_app_paths(env, plat)
     setup = setup_gui.default_install_paths(env, plat)
     assert app.config_file == setup.config_file
-    assert app.token_file == setup.hf_token_file
-    windows_setup = setup_gui.InstallPaths(setup.install_dir, setup.config_file, windows=True)
-    assert app.setup_exe == windows_setup.setup_exe  # extras needs the installed (Windows) app anyway
-
-
-def test_extras_install_disabled_without_setup_exe(paths: AppPaths) -> None:
-    assert extras_install_hint(paths) == EXTRAS_NEED_INSTALL_HINT
-    _write(paths.setup_exe)
-    assert extras_install_hint(paths) is None
-
-
-def _save_token(paths: AppPaths, token: str = "hf_abc") -> None:
-    paths.token_file.parent.mkdir(parents=True, exist_ok=True)
-    paths.token_file.write_text(token, encoding="utf-8")
+    assert app.hf_home == setup.hf_home
 
 
 @pytest.mark.parametrize("error_cls", [DiarizationConfigError, DiarizationRuntimeError])
 def test_run_job_diarization_failure_reruns_once_without_speakers(
     paths: AppPaths, audio: Path, error_cls: type[Exception]
 ) -> None:
-    _save_token(paths)
-    runner = FakeRunner(diarize_error=error_cls("HF_TOKEN was rejected (401)"), processed=True)
+    runner = FakeRunner(diarize_error=error_cls("Speaker model not installed"), processed=True)
 
     result = run_job(
         [audio], GUI_PROFILES["Estonian"], timestamps=True, paths=paths, diarize=True, runner=runner, base_env={}
@@ -433,14 +397,12 @@ def test_run_job_diarization_failure_reruns_once_without_speakers(
 
     assert [_speaker_flags(cmd) for cmd in runner.commands] == [["--diarize"], ["--no-diarize"]]
     assert runner.devices == [None, None]
-    assert runner.envs[0]["HF_TOKEN"] == "hf_abc"
     assert result.ok and result.delivered == [audio.with_suffix(".txt")]
     assert not result.fell_back_to_cpu and not paths.config_file.exists()
-    assert result.banner == "Speakers skipped: HF_TOKEN was rejected (401)"
+    assert result.banner == "Speakers skipped: Speaker model not installed"
 
 
 def test_run_job_retry_progress_continues_the_jobs_file_count(paths: AppPaths, tmp_path: Path) -> None:
-    _save_token(paths)
     files = [_write(tmp_path / f"{name}.mp3") for name in ("a", "b", "c")]
     runner = FakeRunner(
         diarize_error=DiarizationRuntimeError("CUDA out of memory"),

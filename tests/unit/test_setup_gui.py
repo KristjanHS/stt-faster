@@ -14,7 +14,6 @@ import threading
 import time
 import tomllib
 import urllib.error
-import urllib.request
 import zipfile
 from collections.abc import Callable
 from email.message import Message
@@ -27,8 +26,6 @@ import pytest
 from backend.diarize import model as diarize_model
 from backend.gui import default_app_paths
 from installer.setup_gui import (
-    HF_AUTH_HELP,
-    HF_TOKEN_PROBE_URL,
     HF_TOOL_PINS,
     MODELS,
     UNINSTALL_KEY,
@@ -37,7 +34,6 @@ from installer.setup_gui import (
     app_env,
     GpuInfo,
     Cancelled,
-    CommandFailed,
     Events,
     FFMPEG_BINARIES,
     Installer,
@@ -68,7 +64,6 @@ from installer.setup_gui import (
     extract_named,
     extract_zip_stripped,
     hf_hub_cache,
-    hf_token_status,
     is_installed,
     isolated_env,
     latest_release_zip,
@@ -731,11 +726,11 @@ def test_relaunch_from_temp_takes_the_scripts_python_along(
         f.parent.mkdir(parents=True, exist_ok=True)
         f.write_bytes(b"")
     env = {"PATH": "C:/Windows", "__PYVENV_LAUNCHER__": "C:/venv/Scripts/pythonw.exe"}
-    relaunch_from_temp(script, ["--extras"], popen=popen, tempdir=tempdir, runtime=runtime, env=env)
+    relaunch_from_temp(script, ["--clean"], popen=popen, tempdir=tempdir, runtime=runtime, env=env)
     ((cmd, kw),) = popen_calls
     hop = Path(cmd[2]).parent
     assert hop.name.startswith("stt-faster-setup-") and hop.parent == Path(tempdir())
-    assert cmd == [str(hop / "python" / "pythonw.exe"), "-I", str(hop / "setup_gui.py"), "--extras"]
+    assert cmd == [str(hop / "python" / "pythonw.exe"), "-I", str(hop / "setup_gui.py"), "--clean"]
     assert (hop / "python" / "Lib" / "os.py").is_file() and not (hop / "python" / "Lib" / "site-packages").exists()
     assert kw["env"] == {"PATH": "C:/Windows"}  # else the copy would start as the venv it left
 
@@ -747,7 +742,7 @@ def test_setup_hop_only_from_the_install_dir(win_paths: InstallPaths, tmp_path: 
     covered: list[tuple[Path, str]] = []
     hopped = setup_hop(
         win_paths,
-        ["--extras"],
+        ["--clean"],
         headless=False,
         program=lambda: program,
         relaunch=lambda exe, args: relaunched.append((exe, list(args))),
@@ -757,7 +752,7 @@ def test_setup_hop_only_from_the_install_dir(win_paths: InstallPaths, tmp_path: 
     )
     assert hopped is (home == "install")
     if hopped:
-        assert relaunched == [(program, ["--extras", "--ready-file", str(tmp_path / "own.ready")])]
+        assert relaunched == [(program, ["--clean", "--ready-file", str(tmp_path / "own.ready")])]
         assert covered == [(tmp_path / "own.ready", "Starting setup…")]
     else:
         assert relaunched == covered == []
@@ -784,38 +779,28 @@ def test_hop_copy_failure_says_so_and_closes(tmp_path: Path, fake_dialogs: _Fake
     assert root.destroyed and "No space left" in errors[0]
 
 
-def test_hopped_window_waits_for_the_launcher_to_exit_before_extras(tmp_path: Path) -> None:
+def test_hopped_window_waits_for_the_launcher_to_exit_before_enabling_install(tmp_path: Path) -> None:
     now = [0.0]
-    started: list[bool] = []
     window = SimpleNamespace(
         root=_FakeTk(),
         handoff=ReadyHandoff(tmp_path / "x.ready", clock=lambda: now[0]),
         install_button=_FakeLabel(),
-        installer=SimpleNamespace(extras=True),
-        start=lambda: started.append(True),
     )
     window._await_handoff = lambda: SetupWindow._await_handoff(cast(Any, window))
     window._await_handoff()
-    assert started == [] and len(window.root.pending) == 1  # marker up; the launcher has not let go yet
+    assert window.install_button.state == "" and len(window.root.pending) == 1  # the launcher has not let go yet
     (tmp_path / "x.ready").unlink()  # the launcher took it and exits
     now[0] = 0.5
     window.root.run_after()
-    assert started == []  # its exe unlocks within the grace
+    assert window.install_button.state == ""  # its exe unlocks within the grace
     now[0] = 2.0
     window.root.run_after()
-    assert started == [True] and window.install_button.state == "normal"
+    assert window.install_button.state == "normal"
 
 
 def test_parse_args_takes_the_uninstall_ready_file() -> None:
     assert parse_args(["--uninstall", "--yes", "--ready-file", "C:/Temp/x.ready"]).ready_file == Path("C:/Temp/x.ready")
     assert parse_args(["--uninstall"]).ready_file is None
-
-
-def test_parse_args_extras_only_alone() -> None:
-    assert parse_args(["--extras", "--headless"]).extras is True
-    assert parse_args([]).extras is False
-    with pytest.raises(SystemExit):
-        parse_args(["--extras", "--clean"])
 
 
 def test_base_install_fetches_and_verifies_the_pinned_speaker_model_without_a_token(paths: InstallPaths) -> None:
@@ -838,160 +823,31 @@ def test_base_install_fetches_and_verifies_the_pinned_speaker_model_without_a_to
     assert verified == [(snapshot / DIARIZATION_MODEL.revision, DIARIZATION_SHA256)]
 
 
-class _ExtrasRun:
-    """An installed ``paths`` plus a recording runner / launcher for ``--extras`` runs."""
-
-    def __init__(self, paths: InstallPaths, *, token: str | None = "hf_abc", model_output: str | None = None) -> None:
-        paths.uv_exe.parent.mkdir(parents=True)
-        paths.uv_exe.write_bytes(b"uv")
-        paths.app_dir.mkdir(parents=True)
-        if token is not None:
-            paths.hf_token_file.parent.mkdir(parents=True, exist_ok=True)
-            paths.hf_token_file.write_text(token, encoding="utf-8")
-        self.paths = paths
-        self.model_output = model_output
-        self.runs: list[tuple[list[str], dict[str, str]]] = []
-        self.launches: list[InstallPaths] = []
-        self.states: dict[str, tuple[str, str]] = {}
-        self.lock = threading.Lock()
-
-    def runner(self, cmd: list[str], env: dict[str, str], *_a: Any) -> None:
-        with self.lock:
-            self.runs.append((list(cmd), dict(env)))
-        if self.model_output is not None and DIARIZATION_MODEL.repo_id in cmd:
-            raise CommandFailed(self.model_output.splitlines()[-1], self.model_output)
-
-    def installer(self, **kw: Any) -> Installer:
-        return Installer(
-            paths=self.paths,
-            env={},
-            extras=True,
-            runner=self.runner,
-            seeder=lambda *_a: False,
-            model_size=lambda *_a: None,
-            launch=self.launches.append,
-            **{"token_status": lambda _token: 200, "verify": lambda *_a: None, **kw},
-        )
-
-    def events(self) -> Events:
-        def state(key: str, value: str, message: str) -> None:
-            with self.lock:
-                self.states[key] = (value, message)
-
-        return Events(progress=lambda *_a: None, state=state)
+def _touch(path: Path) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(b"x")
+    return path
 
 
-def test_extras_success_writes_flag_then_relaunches(paths: InstallPaths) -> None:
-    run = _ExtrasRun(paths, token="  hf_abc\n")
-    assert run.installer().run(run.events()) is True
-    (deps_cmd, _), (model_cmd, model_env) = sorted(run.runs, key=lambda r: DIARIZATION_MODEL.repo_id in r[0])
-    assert deps_cmd[deps_cmd.index("gui") + 1 : deps_cmd.index("gui") + 3] == ["--extra", "cpu"]
-    assert model_cmd[model_cmd.index("download") + 1] == DIARIZATION_MODEL.repo_id
-    assert "HF_TOKEN" not in model_env and model_env["HF_HUB_DISABLE_IMPLICIT_TOKEN"] == "1"
-    assert model_env["HF_HOME"] == str(paths.hf_home)
-    assert read_config(paths.config_file).get("extras") == "diarization"
-    assert run.launches == [paths]
-
-
-@pytest.mark.parametrize("token", [None, " \n"], ids=["missing", "blank"])
-def test_extras_without_token_fails_before_any_command(paths: InstallPaths, token: str | None) -> None:
-    run = _ExtrasRun(paths, token=token)
-    with pytest.raises(InstallError, match="No Hugging Face token"):
-        run.installer().run(run.events())
-    assert run.runs == [] and run.launches == []
-    assert "extras" not in read_config(paths.config_file)
-
-
-@pytest.mark.parametrize(
-    "output",
-    [
-        "Traceback ...\nhuggingface_hub.errors.GatedRepoError: 403 Client Error.\nCannot access gated repo for url x",
-        "requests.exceptions.HTTPError: 401 Client Error: Unauthorized for url: https://huggingface.co/api",
-    ],
-    ids=["403-licence", "401-token"],
-)
-def test_extras_auth_failure_explains_fixes_and_stays_off(paths: InstallPaths, output: str) -> None:
-    run = _ExtrasRun(paths, model_output=output)
-    assert run.installer().run(run.events()) is False
-    state, message = run.states[DIARIZATION_MODEL.repo_id]
-    assert state == "failed"
-    assert "https://hf.co/pyannote/speaker-diarization-community-1" in message and "hf.co/settings/tokens" in message
-    assert run.states["extras"][0] == "skipped"
-    assert "extras" not in read_config(paths.config_file)
-    assert run.launches == []
-
-
-def test_extras_other_download_failure_keeps_its_own_message(paths: InstallPaths) -> None:
-    run = _ExtrasRun(paths, model_output="OSError: [Errno 28] No space left on device")
-    assert run.installer().run(run.events()) is False
-    assert run.states[DIARIZATION_MODEL.repo_id] == ("failed", "OSError: [Errno 28] No space left on device")
-
-
-def test_extras_waits_for_the_app_to_close_then_gives_up(paths: InstallPaths) -> None:
-    now = [0.0]
-
-    def sleep(seconds: float) -> None:
-        now[0] += seconds
-
-    open_for = [3]
-
-    def in_use(_p: InstallPaths) -> bool:
-        open_for[0] -= 1
-        return open_for[0] >= 0
-
-    run = _ExtrasRun(paths)
-    assert run.installer(in_use=in_use, sleep=sleep, clock=lambda: now[0], close_timeout=10).run(run.events())
-    assert now[0] == 1.5  # three polls while the app was still closing
-    run = _ExtrasRun(InstallPaths(paths.install_dir.with_name("b"), paths.config_file, windows=True))
-    stuck = run.installer(in_use=lambda _p: True, sleep=sleep, clock=lambda: now[0], close_timeout=10)
-    with pytest.raises(InstallError, match="Close Transcribe first"):
-        stuck.run(run.events())
-    assert run.runs == [] and run.launches == []
-
-
-@pytest.mark.parametrize("status", [401, 403])
-def test_extras_rejected_token_fails_before_any_command(paths: InstallPaths, status: int) -> None:
-    run = _ExtrasRun(paths)
-    checked: list[str] = []
-
-    def token_status(token: str) -> int:
-        checked.append(token)
-        return status
-
-    with pytest.raises(InstallError) as caught:
-        run.installer(token_status=token_status).run(run.events())
-    assert str(caught.value) == HF_AUTH_HELP
-    assert checked == ["hf_abc"] and run.runs == [] and run.launches == []
-
-
-@pytest.mark.parametrize("status", [200, None], ids=["ok", "offline"])
-def test_extras_token_check_only_blocks_on_a_refusal(paths: InstallPaths, status: int | None) -> None:
-    run = _ExtrasRun(paths)
-    assert run.installer(token_status=lambda _t: status).run(run.events()) is True
-    assert len(run.runs) == 2 and run.launches == [paths]
-
-
-def test_hf_token_status_heads_the_gated_config_with_the_token() -> None:
-    seen: list[urllib.request.Request] = []
-
-    def answer(outcome: Any) -> Callable[..., Any]:
-        def urlopen(request: urllib.request.Request, *, timeout: float) -> Any:
-            seen.append(request)
-            if isinstance(outcome, BaseException):
-                raise outcome
-            return contextlib.nullcontext(SimpleNamespace(status=outcome))
-
-        return urlopen
-
-    refused = urllib.error.HTTPError(HF_TOKEN_PROBE_URL, 401, "Unauthorized", Message(), None)
-    assert hf_token_status("hf_abc", urlopen=answer(refused)) == 401
-    assert hf_token_status("hf_abc", urlopen=answer(urllib.error.URLError("offline"))) is None
-    assert hf_token_status("hf_abc", urlopen=answer(TimeoutError())) is None
-    assert hf_token_status("hf_abc", urlopen=answer(200)) == 200
-    request = seen[0]
-    assert (request.get_method(), request.full_url) == ("HEAD", HF_TOKEN_PROBE_URL)
-    assert request.get_header("Authorization") == "Bearer hf_abc"
-    assert HF_TOKEN_PROBE_URL.startswith(f"https://huggingface.co/{DIARIZATION_MODEL.repo_id}/")
+def test_every_run_removes_the_saved_token_and_the_old_gated_model(tmp_path: Path) -> None:
+    paths = InstallPaths(install_dir=tmp_path / "inst", config_file=tmp_path / "cfg" / "config", windows=False)
+    token = _touch(paths.config_file.parent / "hf_token")
+    gated = model_cache_dir(paths.hf_home / "hub", "pyannote/speaker-diarization-community-1")
+    _touch(gated / "snapshots" / "old" / "config.yaml")
+    kept = _touch(model_cache_dir(paths.hf_home / "hub", DIARIZATION_MODEL.repo_id) / "refs" / "main")
+    installer = Installer(
+        paths=paths,
+        source=str(tmp_path / "no-such-source"),  # the run then fails at "app", after the migration
+        env={},
+        runner=lambda *_a: None,
+        seeder=lambda *_a: False,
+        model_size=lambda *_a: None,
+        in_use=lambda _p: False,
+        verify=lambda *_a: None,
+    )
+    assert installer.run(Events(progress=lambda *_a: None, state=lambda *_a: None)) is False
+    assert not token.exists() and not gated.exists()
+    assert kept.is_file()
 
 
 def test_app_env_drops_tcl_paths_into_setups_unpack_dir(tmp_path: Path) -> None:
@@ -1033,7 +889,7 @@ def test_pre_task_error_stays_in_the_final_summary(paths: InstallPaths) -> None:
 
     summary, log_link = _FakeLabel(), _FakeLabel()
     window = SimpleNamespace(
-        installer=SimpleNamespace(run=run, extras=False, paths=paths),
+        installer=SimpleNamespace(run=run, paths=paths),
         events=queue.Queue(),
         failure="",
         running=True,
