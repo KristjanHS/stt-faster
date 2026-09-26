@@ -1,6 +1,7 @@
 """File processing logic for transcription automation."""
 
 import logging
+import math
 import time
 from pathlib import Path
 from collections.abc import Callable
@@ -8,8 +9,7 @@ from typing import TYPE_CHECKING, Any, Union
 
 from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, summarize_run
 from backend.run_config import RunConfig
-from backend.preprocess.errors import PreprocessError
-from backend.preprocess.io import inspect_audio
+from backend.preprocess.io import AudioInfo, inspect_audio
 from backend.progress import REPORTER, ProgressReporter
 from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
@@ -26,12 +26,14 @@ if TYPE_CHECKING:
 LOGGER = logging.getLogger(__name__)
 
 
-def probe_duration(path: str) -> float | None:
-    """Audio seconds of ``path`` via ffprobe, or None when it can't be read."""
+def probe_duration(path: str, inspect: Callable[[Path], AudioInfo] = inspect_audio) -> float | None:
+    """Audio seconds of ``path`` via ffprobe, or None when it can't be read — never raises (it only feeds an ETA)."""
     try:
-        return inspect_audio(Path(path)).duration
-    except PreprocessError:
+        seconds = inspect(Path(path)).duration
+    except Exception:  # noqa: BLE001 - a bad file fails later in its own isolated process_file
+        LOGGER.debug("Duration probe failed for %s", path, exc_info=True)
         return None
+    return seconds if seconds is not None and math.isfinite(seconds) else None
 
 
 class TranscriptionProcessor:
@@ -199,7 +201,7 @@ class TranscriptionProcessor:
         durations = [probe(path) for path in file_paths] if reporter.enabled and len(file_paths) > 1 else None
         try:
             for index, file_path in enumerate(file_paths, start=1):
-                reporter.start_file(index, len(file_paths), durations)
+                reporter.start_file(index, len(file_paths), durations if index == 1 else None)
                 result = self.process_file(file_path)
                 stats.append(result)
                 if result.status == "completed":

@@ -139,7 +139,9 @@ class JobEtaEstimator:
                     self._spent += now - self._file_start
                     self._audio_done += seconds
             self._file, self._file_start = event.file, now
-        if not durations or len(durations) != event.files or event.files < 2 or self._audio_done <= 0:
+        if not durations or len(durations) != event.files or event.files < 2 or not 1 <= event.file <= event.files:
+            return None
+        if self._audio_done <= 0:
             return None
         remaining = durations[event.file - 1 :]
         if any(seconds is None for seconds in remaining):
