@@ -31,6 +31,7 @@ from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
+from tkinter import font as tkfont
 from tkinter import ttk
 from typing import Any
 
@@ -581,6 +582,22 @@ def gpu_capable(info: GpuInfo | None) -> bool:
     return info is not None and info.vram_mib >= MIN_GPU_VRAM_MIB and info.driver >= MIN_GPU_DRIVER
 
 
+def fit_tail(text: str, pixels: int, measure: Callable[[str], int]) -> str:
+    """The longest end of text that fits pixels, with a leading ellipsis when cut — the newest output is last."""
+    if pixels <= 1:  # not laid out yet
+        return text[-40:]
+    if measure(text) <= pixels:
+        return text
+    lo, hi = 1, len(text)  # the smallest start index whose "…" + tail fits
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if measure("…" + text[mid:]) <= pixels:
+            hi = mid
+        else:
+            lo = mid + 1
+    return "…" + text[lo:]
+
+
 def gpu_summary(info: GpuInfo | None) -> str:
     if info is None:
         return "No NVIDIA graphics card found: transcription runs on the CPU."
@@ -1103,6 +1120,7 @@ class SetupWindow:
         self.logger = logging.getLogger() if logger is None else logger  # the root logger holds logs\setup.log
         self.events: queue.Queue[tuple[str, str, float | None, str]] = queue.Queue()
         self.rows: dict[str, tuple[ttk.Progressbar, ttk.Label]] = {}
+        self.tails: dict[str, str] = {}  # a row's full progress line, re-fitted to its label on resize
         self.running = False
         self.failure = ""  # first failed task's message, shown in the summary
 
@@ -1141,13 +1159,14 @@ class SetupWindow:
 
         grid = ttk.Frame(frame)
         grid.pack(fill="x", pady=12)
-        grid.columnconfigure(1, weight=1)
+        grid.columnconfigure(2, weight=1)  # a wider window shows more of each status line
         for row, task in enumerate(installer.tasks()):
             ttk.Label(grid, text=task.label).grid(row=row, column=0, sticky="w", padx=(0, 8), pady=2)
             bar = ttk.Progressbar(grid, mode="determinate", maximum=1.0, length=220)
             bar.grid(row=row, column=1, sticky="ew", pady=2)
             status = ttk.Label(grid, text="waiting", foreground="gray", width=24)
-            status.grid(row=row, column=2, sticky="w", padx=(8, 0))
+            status.grid(row=row, column=2, sticky="ew", padx=(8, 0))
+            status.bind("<Configure>", lambda _e, key=task.key: self._show_tail(key))
             self.rows[task.key] = (bar, status)
 
         buttons = ttk.Frame(frame)
@@ -1199,6 +1218,7 @@ class SetupWindow:
             bar.stop()
             bar.config(mode="determinate", value=0)
             status.config(text="waiting")
+        self.tails.clear()
         events = Events(
             progress=lambda key, fraction, text: self.events.put(("progress", key, fraction, text)),
             state=lambda key, state, message: self.events.put(("state", key, None, f"{state}\t{message}")),
@@ -1215,6 +1235,12 @@ class SetupWindow:
             ok = False
         self.events.put(("finished", "", None, "ok" if ok else "failed"))
 
+    def _show_tail(self, key: str) -> None:
+        text = self.tails.get(key)
+        if text is not None:
+            status = self.rows[key][1]
+            status.config(text=fit_tail(text, status.winfo_width(), tkfont.nametofont("TkDefaultFont").measure))
+
     def _poll(self) -> None:
         while not self.events.empty():
             kind, key, fraction, text = self.events.get()
@@ -1227,7 +1253,8 @@ class SetupWindow:
                 else:
                     bar.stop()
                     bar.config(mode="determinate", value=fraction)
-                status.config(text=text[-40:])
+                self.tails[key] = text
+                self._show_tail(key)
             elif kind == "state":
                 bar, status = self.rows[key]
                 state, _, message = text.partition("\t")
@@ -1236,7 +1263,8 @@ class SetupWindow:
                 if state != "running":
                     bar.stop()
                     bar.config(mode="determinate", value=1.0 if state == "done" else 0)
-                    status.config(text={"done": "✓ done", "skipped": "skipped"}.get(state, f"✗ {message}"[:40]))
+                    self.tails.pop(key, None)  # the label clips a long failure at its end; the summary has it all
+                    status.config(text={"done": "✓ done", "skipped": "skipped"}.get(state, f"✗ {message}"))
             elif kind == "summary":
                 self.failure = self.failure or text  # a pre-task error; _finished would otherwise drop it
                 self.summary.config(text=text)
