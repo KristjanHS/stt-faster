@@ -251,6 +251,22 @@ def fetch_json(url: str) -> Any:
         return json.loads(response.read().decode("utf-8"))
 
 
+HF_TOKEN_PROBE_URL = f"https://huggingface.co/{DIARIZATION_MODEL.repo_id}/resolve/main/config.yaml"
+
+
+def hf_token_status(token: str, *, urlopen: Callable[..., Any] = urllib.request.urlopen) -> int | None:
+    """HTTP status of an authenticated HEAD on the gated model's config; None when no answer came back."""
+    headers = {"User-Agent": USER_AGENT, "Authorization": f"Bearer {token}"}
+    request = urllib.request.Request(HF_TOKEN_PROBE_URL, headers=headers, method="HEAD")
+    try:
+        with urlopen(request, timeout=15) as response:  # noqa: S310  # nosec B310 - fixed https URL
+            return int(response.status)
+    except urllib.error.HTTPError as error:
+        return error.code
+    except OSError:  # URLError, timeouts: offline here says nothing about the token
+        return None
+
+
 def latest_release_zip(fetch: Callable[[str], Any] = fetch_json, repo: str = GITHUB_REPO) -> str:
     try:
         release = fetch(f"https://api.github.com/repos/{repo}/releases/latest")
@@ -842,7 +858,8 @@ def run_process(
 
 
 def launch_gui(paths: InstallPaths, *, popen: Callable[..., Any] = subprocess.Popen) -> None:
-    popen([str(paths.gui_exe)], creationflags=NO_WINDOW)
+    # Never cwd inside the venv: a process parked in Scripts makes app_in_use report "open".
+    popen([str(paths.gui_exe)], cwd=str(paths.install_dir), creationflags=NO_WINDOW)
 
 
 @dataclass
@@ -863,6 +880,7 @@ class Installer:
     clock: Callable[[], float] = time.monotonic
     close_timeout: float = 60.0  # the app quits right after starting --extras
     hf_token: str = field(default="", repr=False)  # read from hf_token_file when an --extras run starts
+    token_status: Callable[[str], int | None] = hf_token_status
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
         def on_progress(done: int, total: int | None) -> None:
@@ -993,6 +1011,10 @@ class Installer:
             if not self.paths.uv_exe.is_file() or not self.paths.app_dir.is_dir():
                 raise InstallError("Transcribe is not installed yet. Run Transcribe-Setup first.")
             self.hf_token = read_hf_token(self.paths.hf_token_file)
+            status = self.token_status(self.hf_token)
+            LOGGER.info("Hugging Face token check: %s", status if status is not None else "no answer")
+            if status in (401, 403):  # fail before the long deps sync; other answers leave it to fetch_diarization
+                raise InstallError(HF_AUTH_HELP)
             self.wait_closed()
         elif self.in_use(self.paths):
             raise InstallError("Close Transcribe first, then retry.")
@@ -1136,6 +1158,7 @@ class SetupWindow:
                     bar.config(mode="determinate", value=1.0 if state == "done" else 0)
                     status.config(text={"done": "✓ done", "skipped": "skipped"}.get(state, f"✗ {message}"[:40]))
             elif kind == "summary":
+                self.failure = self.failure or text  # a pre-task error; _finished would otherwise drop it
                 self.summary.config(text=text)
             else:
                 self._finished(text == "ok")
