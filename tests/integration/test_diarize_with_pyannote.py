@@ -7,7 +7,7 @@ container-backed pipeline. The Docker pipeline equivalent is
 
 Plan: docs/plans/archived/2026-05-21-diarization-txt-default-design.md §6.
 
-Skips cleanly when ``HF_TOKEN`` / ``HUGGINGFACE_HUB_TOKEN`` is unset or
+Skips cleanly when the speaker model is not installed (`make diarization-model`) or
 when the licensed fixture (`tests/fixtures/audio/two_speakers_10s.wav`)
 isn't present locally — see `tests/fixtures/audio/README.md` for
 sourcing options.
@@ -15,12 +15,13 @@ sourcing options.
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
 import pytest
 
+from backend.diarize.errors import DiarizationConfigError
+from backend.diarize.model import resolve_model_dir
 from backend.transcribe import format_segments_as_text, transcribe
 
 FIXTURE_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "audio" / "two_speakers_10s.wav"
@@ -29,8 +30,12 @@ TXT_LINE_RE = re.compile(
 )
 
 
-def _hf_token_present() -> bool:
-    return bool(os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN"))
+def _model_installed() -> bool:
+    try:
+        resolve_model_dir()
+    except DiarizationConfigError:
+        return False
+    return True
 
 
 @pytest.mark.slow
@@ -40,8 +45,8 @@ class TestDiarizeE2E:
 
     @pytest.fixture(autouse=True)
     def _skip_if_missing_prereqs(self) -> None:
-        if not _hf_token_present():
-            pytest.skip("HF_TOKEN/HUGGINGFACE_HUB_TOKEN unset — see docs/diarization_setup.md")
+        if not _model_installed():
+            pytest.skip("speaker model not installed — run `make diarization-model`")
         if not FIXTURE_PATH.exists():
             pytest.skip(
                 f"Fixture {FIXTURE_PATH} absent — see tests/fixtures/audio/README.md for sourcing",
