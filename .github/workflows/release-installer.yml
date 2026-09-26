@@ -34,6 +34,8 @@ jobs:
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
       EXE: dist/Transcribe-Setup.exe
+      # Not `inputs.attach != false`: a release event has no inputs, and null == false after expression coercion.
+      ATTACH: ${{ github.event_name == 'release' || (inputs.attach && !inputs.skip_signing) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -105,14 +107,14 @@ jobs:
           if ($status -ne 'Valid') { throw "Authenticode status of $env:EXE is $status" }
 
       - name: Attach to the release
-        if: inputs.skip_signing != true && inputs.attach != false
+        if: env.ATTACH == 'true'
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload $env:TAG $env:EXE --clobber
 
       - name: SmartScreen submission reminder (unsigned rebuild)
-        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID == '' && inputs.skip_signing != true && inputs.attach != false
+        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID == '' && env.ATTACH == 'true'
         shell: pwsh
         run: >-
           Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned Transcribe-Setup.exe attached to $env:TAG — submit it at https://www.microsoft.com/en-us/wdsi/filesubmission (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)."
