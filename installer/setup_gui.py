@@ -933,6 +933,20 @@ def launch_gui(paths: InstallPaths, *, popen: Callable[..., Any] = subprocess.Po
     popen([str(paths.gui_exe)], cwd=str(paths.install_dir), creationflags=NO_WINDOW)
 
 
+def open_file(
+    path: Path,
+    *,
+    windows: bool,
+    popen: Callable[..., Any] = subprocess.Popen,
+    startfile: Callable[[str], None] | None = getattr(os, "startfile", None),
+) -> None:
+    """Open path in its default app (Notepad for setup.log on Windows)."""
+    if windows and startfile is not None:
+        startfile(str(path))
+    else:
+        popen(["xdg-open", str(path)])  # nosec B603 B607 - fixed command, our own log path
+
+
 @dataclass
 class Installer:
     paths: InstallPaths
@@ -1177,6 +1191,10 @@ class SetupWindow:
         self.launch_button.pack(side="right")
         self.summary = ttk.Label(frame, text="", foreground="gray", wraplength=480)
         self.summary.pack(anchor="w", pady=(8, 0))
+        link_font = tkfont.nametofont("TkDefaultFont").copy()
+        link_font.configure(underline=True)
+        self.log_link = ttk.Label(frame, text="", foreground="#0066cc", cursor="hand2", font=link_font)
+        self.log_link.bind("<Button-1>", lambda _e: self.open_log())  # packed only once a run has failed
         self.mode.trace_add("write", self._on_mode)
         if installer.extras:  # the app asked for this run and has already quit
             root.after(100, self.start)
@@ -1214,6 +1232,7 @@ class SetupWindow:
         self.installer.cancel.clear()
         self.install_button.config(state="disabled")
         self.summary.config(text="Installing…")
+        self.log_link.pack_forget()
         for bar, status in self.rows.values():
             bar.stop()
             bar.config(mode="determinate", value=0)
@@ -1285,8 +1304,16 @@ class SetupWindow:
         else:
             log = self.installer.paths.log_file
             reason = f"\n{self.failure}\n" if self.failure else " "
-            self.summary.config(text=f"Setup did not finish.{reason}Details: {log}")
+            self.summary.config(text=f"Setup did not finish.{reason}Details are in the setup log:")
+            self.log_link.config(text=str(log))
+            self.log_link.pack(anchor="w")
             self.install_button.config(text="Retry", state="normal")
+
+    def open_log(self) -> None:
+        try:
+            open_file(self.installer.paths.log_file, windows=self.installer.paths.windows, popen=self.popen)
+        except OSError as error:
+            self.summary.config(text=f"Could not open the setup log ({error}). Find it at:")
 
     def launch(self) -> None:
         launch_gui(self.installer.paths, popen=self.popen)
