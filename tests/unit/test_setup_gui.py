@@ -75,6 +75,7 @@ from installer.setup_gui import (
     register_uninstall,
     relaunch_from_temp,
     remove_shortcuts_script,
+    download_progress,
     run_process,
     run_tasks,
     save_device,
@@ -608,6 +609,7 @@ def test_fetch_model_uses_install_cache_and_seeds_only_without_clean(tmp_path: P
     installer.fetch_model(spec, lambda *_a: None)
     assert seeds == [(tmp_path / "shared" / "hub" / "models--Org--name", paths.hf_home / "hub" / "models--Org--name")]
     assert runs[0][1]["HF_HUB_CACHE"] == str(paths.hf_home / "hub")
+    assert runs[0][1]["TQDM_POSITION"] == "-1"  # hf then prints its aggregate byte bar
     installer.clean = True
     installer.fetch_model(spec, lambda *_a: None)
     assert len(seeds) == 1 and runs[1][0][-1] == "--force-download"
@@ -1032,6 +1034,46 @@ def test_run_process_failure_reports_last_line() -> None:
     with pytest.raises(InstallError) as caught:
         run_process(cmd, os.environ, lambda *_a: None, threading.Event())
     assert str(caught.value) == "boom-line"
+
+
+# captured from `hf download Systran/faster-whisper-tiny` (huggingface_hub 1.2.1, TQDM_POSITION=-1), ANSI stripped
+HF_BAR_LINES = [
+    ("Downloading (incomplete total...): 0.00B [00:00, ?B/s]", None, "0.00B"),
+    ("Fetching 6 files:  17%|█▋        | 1/6 [00:00<00:01,  3.58it/s]", ..., ""),
+    (
+        "Downloading (incomplete total...):  15%|█▍        | 11.2M/75.5M [00:03<00:18, 3.50MB/s]",
+        11.2 / 75.5,
+        "11.2M/75.5M",
+    ),
+    ("Downloading (incomplete total...):   0%|          | 3.47k/75.5M [00:00<2:55:39, 7.17kB/s]", 3470 / 75.5e6, ""),
+    ("Downloading (incomplete total...): 78.2MB [00:09, 9.58MB/s]", None, "78.2MB"),
+    ("Download complete: : 78.2MB [00:09, 8.67MB/s]", None, "78.2MB"),
+    ("Downloading numpy (15.2MiB)", ..., ""),  # uv's own lines never read as the hf bar
+]
+
+
+@pytest.mark.parametrize(("line", "fraction", "text"), HF_BAR_LINES)
+def test_download_progress_reads_hf_byte_bar(line: str, fraction: float | None, text: str) -> None:
+    parsed = download_progress(line)
+    if fraction is ...:
+        assert parsed is None
+        return
+    assert parsed is not None
+    assert parsed[0] == (None if fraction is None else pytest.approx(fraction))
+    if text:
+        assert parsed[1] == text
+
+
+def test_run_process_holds_byte_bar_and_ticks_elapsed() -> None:
+    bar = "Downloading (incomplete total...):  15%| | 11.2M/75.5M [00:03<00:18, 3.50MB/s]"
+    script = f"import sys, time; sys.stdout.write('\\x1b[A{bar}\\x1b[A\\n'); sys.stdout.flush(); time.sleep(1.5)"
+    reports: list[tuple[float | None, str]] = []
+    run_process(
+        [sys.executable, "-c", script], os.environ, lambda f, t: reports.append((f, t)), threading.Event(), lambda: 0.9
+    )
+    held = [(f, t) for f, t in reports if t.startswith("11.2M/75.5M · 0:0")]
+    assert held and all(f == pytest.approx(11.2 / 75.5) for f, _t in held)  # the bar, not poll()'s dir size
+    assert len({t for _f, t in held}) >= 2  # the elapsed ticker moves while hf prints nothing
 
 
 def _gone(pid: int) -> bool:
