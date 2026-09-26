@@ -18,6 +18,7 @@ import logging
 import os
 import time
 import warnings
+from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING, Any, cast
 
 # pyannote.audio 4.x imports torchcodec at module load wrapped in try/except;
@@ -64,14 +65,15 @@ class _DiarizeProgressHook:
       transcription progress logger.
     """
 
-    def __init__(self, audio_duration: float | None) -> None:
+    def __init__(self, audio_duration: float | None, *, clock: Callable[[], float] = time.time) -> None:
         self._audio_duration = audio_duration
+        self._clock = clock
         self._start_time = 0.0
         self._last_log_time = 0.0
         self._last_step: str | None = None
 
     def __enter__(self) -> "_DiarizeProgressHook":
-        self._start_time = time.time()
+        self._start_time = self._clock()
         self._last_log_time = self._start_time
         self._last_step = None
         return self
@@ -87,7 +89,7 @@ class _DiarizeProgressHook:
         total: int | None = None,
         completed: int | None = None,
     ) -> None:
-        now = time.time()
+        now = self._clock()
         elapsed_min = (now - self._start_time) / 60
         if step_name != self._last_step:
             LOGGER.info(
@@ -114,8 +116,15 @@ class _DiarizeProgressHook:
         self._last_log_time = now
 
 
-def _read_hf_token() -> str | None:
-    return os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+def _read_hf_token(env: Mapping[str, str] = os.environ) -> str | None:
+    return env.get("HF_TOKEN") or env.get("HUGGINGFACE_HUB_TOKEN")
+
+
+def _import_pipeline_class() -> Any:
+    """Lazy `pyannote.audio.Pipeline` import (~5s: torch + sklearn + hf_hub)."""
+    from pyannote.audio import Pipeline  # type: ignore[import-untyped]
+
+    return Pipeline
 
 
 def _release_cuda() -> None:
@@ -177,6 +186,8 @@ def run_pyannote(
     *,
     num_speakers: int = 2,
     audio_duration: float | None = None,
+    env: Mapping[str, str] = os.environ,
+    import_pipeline: Callable[[], Any] = _import_pipeline_class,
 ) -> list[SpeakerTurn]:
     """Run pyannote speaker-diarization-community-1 on the given audio file.
 
@@ -188,7 +199,7 @@ def run_pyannote(
     around the surrounding 🎙️/✅ bookend lines; the per-stage progress lines
     emitted via pyannote's hook protocol do not render it.
     """
-    token = _read_hf_token()
+    token = _read_hf_token(env)
     if not token:
         raise DiarizationConfigError(
             f"HF_TOKEN is not set. The {PYANNOTE_MODEL} model is HuggingFace-gated; "
@@ -197,14 +208,15 @@ def run_pyannote(
 
     try:
         from huggingface_hub.errors import HfHubHTTPError
-        from pyannote.audio import Pipeline  # type: ignore[import-untyped]
+
+        pipeline_cls = import_pipeline()
     except ImportError as exc:
         raise DiarizationConfigError(
             f"pyannote.audio is not installed: {exc}. Re-sync with `--extra cpu` or `--extra cu130`."
         ) from exc
 
     try:
-        pipeline = Pipeline.from_pretrained(PYANNOTE_MODEL, token=token)  # type: ignore[reportUnknownMemberType]
+        pipeline = pipeline_cls.from_pretrained(PYANNOTE_MODEL, token=token)  # type: ignore[reportUnknownMemberType]
     except HfHubHTTPError as exc:
         status = getattr(exc.response, "status_code", None)
         if status == 401:
