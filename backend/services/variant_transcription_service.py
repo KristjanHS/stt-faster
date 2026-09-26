@@ -1,6 +1,7 @@
 """Variant-aware transcription service implementation."""
 
 import logging
+from typing import Any, Callable
 
 from backend.preprocess.config import PreprocessConfig
 from backend.services.interfaces import TranscriptionRequest, TranscriptionResult, TranscriptionService
@@ -28,6 +29,7 @@ class VariantTranscriptionService:
         base_transcription_service: TranscriptionService | None = None,
         diarize: bool = True,
         num_speakers: int = 2,
+        model_picker: Callable[[str], Any] | None = None,
     ):
         self.variant = variant
         self.preset = preset
@@ -35,6 +37,8 @@ class VariantTranscriptionService:
         self.output_format = output_format
         self._diarize = diarize
         self._num_speakers = num_speakers
+        # Override for backend.transcribe.pick_model (test seam); None = real loader.
+        self._model_picker = model_picker
 
         # Build preprocessing config
         self.preprocess_config = PreprocessConfig()  # Use defaults
@@ -85,6 +89,7 @@ class VariantTranscriptionService:
                 metrics_collector=_collect,
                 diarize=self._diarize,
                 num_speakers=self._num_speakers,
+                model_picker=self._model_picker,
             )
         elif is_minimal:
             # For minimal config, use the internal function that omits parameters
@@ -100,6 +105,7 @@ class VariantTranscriptionService:
                 metrics_collector=_collect,
                 diarize=self._diarize,
                 num_speakers=self._num_speakers,
+                model_picker=self._model_picker,
             )
         else:
             # Use standard transcription
@@ -115,6 +121,7 @@ class VariantTranscriptionService:
                 metrics_collector=_collect,
                 diarize=self._diarize,
                 num_speakers=self._num_speakers,
+                model_picker=self._model_picker,
             )
 
         return TranscriptionResult(metrics=metrics_container.get("value"), payload=payload)

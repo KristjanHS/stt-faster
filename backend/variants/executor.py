@@ -574,6 +574,7 @@ def _run_transcription(
     diarize: bool = False,
     num_speakers: int = 2,
     diarize_runner: Any = None,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     """Shared scaffolding for the baseline/minimal executor paths.
 
@@ -597,6 +598,8 @@ def _run_transcription(
             no-speech heuristic using thresholds from ``transcribe_kwargs``.
         log_label: Short human-readable label ("baseline" / "minimal") woven into
             the pre-call DEBUG line.
+        model_picker: Override for :func:`backend.transcribe.pick_model` (test
+            seam); ``None`` = the real loader.
     """
     overall_start = time.time()
     preprocess_result = preprocess_runner(path, preprocess_config)
@@ -605,7 +608,7 @@ def _run_transcription(
         console.print(f"[cyan]🎧 Input duration:[/cyan] {duration_hint / 60:.1f} minutes (from metadata)")
         LOGGER.debug("Input duration: %.1f minutes (from metadata)", duration_hint / 60)
 
-    model = pick_model(preset)
+    model = (model_picker or pick_model)(preset)
     LOGGER.info("Model loaded, ready for transcription")
 
     if applied_language:
@@ -759,6 +762,7 @@ def transcribe_with_baseline_params(
     diarize: bool = False,
     num_speakers: int = 2,
     diarize_runner: Any = None,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     """Transcribe with baseline parameters, using faster-whisper library defaults.
 
@@ -821,6 +825,7 @@ def transcribe_with_baseline_params(
         diarize=diarize,
         num_speakers=num_speakers,
         diarize_runner=diarize_runner,
+        model_picker=model_picker,
     )
 
 
@@ -862,6 +867,7 @@ def transcribe_with_minimal_params(
     diarize: bool = False,
     num_speakers: int = 2,
     diarize_runner: Any = None,
+    model_picker: Callable[[str], Any] | None = None,
 ) -> dict[str, Any]:
     """Transcribe with minimal parameters, omitting those that differ between defaults.
 
@@ -948,4 +954,5 @@ def transcribe_with_minimal_params(
         diarize=diarize,
         num_speakers=num_speakers,
         diarize_runner=diarize_runner,
+        model_picker=model_picker,
     )

@@ -55,13 +55,14 @@ class TestProcessCommand:
         """Integration test: CLI → Processor → JSONL run log with mocked model loading.
 
         This test validates the integration between CLI and processor layers
-        by mocking only the external dependency (model loading from HuggingFace).
+        by faking only the external dependency (model loading from HuggingFace),
+        injected through the ``model_picker`` seam.
         Isolates the JSONL run log to ``tmp_path`` via the ``run_log_path`` seam
         so the run doesn't pollute the user's real ``~/.local/share/stt-faster/runs.jsonl``.
         """
         import os
         import sys
-        from unittest.mock import MagicMock, patch
+        from unittest.mock import MagicMock
 
         xdg_data_home = tmp_path / "xdg_data"
         xdg_data_home.mkdir()
@@ -78,38 +79,28 @@ class TestProcessCommand:
                 ["process", str(cli_test_folder), "--preset", "turbo", "--no-diarize"],
             )
 
-            with (
-                patch("backend.variants.executor.pick_model") as mock_pick_model_executor,
-                patch("backend.transcribe.pick_model") as mock_pick_model_transcribe,
-            ):
-                mock_model = MagicMock()
-                mock_model.transcribe.return_value = (
-                    [MagicMock(id=1, start=0.0, end=1.0, text="test", speaker=None)],
-                    MagicMock(language="en", language_probability=0.99, duration=1.0),
-                )
-                mock_pick_model_executor.return_value = mock_model
-                mock_pick_model_transcribe.return_value = mock_model
+            mock_model = MagicMock()
+            mock_model.transcribe.return_value = (
+                [MagicMock(id=1, start=0.0, end=1.0, text="test", speaker=None)],
+                MagicMock(language="en", language_probability=0.99, duration=1.0),
+            )
+            mock_pick_model = MagicMock(return_value=mock_model)
 
-                result = cmd_process(args, run_log_path=run_log_path)
+            result = cmd_process(args, run_log_path=run_log_path, model_picker=mock_pick_model)
 
-                assert result == 0
+            assert result == 0
 
-                # The variant executor calls pick_model once per file
-                total_calls = mock_pick_model_executor.call_count + mock_pick_model_transcribe.call_count
-                assert total_calls == 3, (
-                    f"Expected 3 calls, got {total_calls} "
-                    f"(executor: {mock_pick_model_executor.call_count}, "
-                    f"transcribe: {mock_pick_model_transcribe.call_count})"
-                )
+            # The variant executor calls pick_model once per file
+            assert mock_pick_model.call_count == 3, f"Expected 3 calls, got {mock_pick_model.call_count}"
 
-                # I-2 review fix: assert the JSONL append actually happened.
-                # Without this, a regression in run_log.append (bad path, IO
-                # failure swallowed) would not be caught here.
-                from backend.run_log import JsonlRunLog
+            # I-2 review fix: assert the JSONL append actually happened.
+            # Without this, a regression in run_log.append (bad path, IO
+            # failure swallowed) would not be caught here.
+            from backend.run_log import JsonlRunLog
 
-                run_log = JsonlRunLog(xdg_data_home / "stt-faster" / "runs.jsonl")
-                appended = run_log.tail(1)
-                assert len(appended) == 1
-                assert appended[0]["preset"] == "turbo"
+            run_log = JsonlRunLog(xdg_data_home / "stt-faster" / "runs.jsonl")
+            appended = run_log.tail(1)
+            assert len(appended) == 1
+            assert appended[0]["preset"] == "turbo"
         finally:
             sys.path.remove(scripts_path)

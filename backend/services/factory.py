@@ -1,7 +1,7 @@
 """Factory for creating service instances."""
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING, Any, Callable
 
 from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.orchestrator import PreprocessResult, preprocess_audio
@@ -34,8 +34,13 @@ class ServiceFactory:
         output_format: str = "txt",
         diarize: bool = True,
         num_speakers: int = 2,
+        model_picker: Callable[[str], Any] | None = None,
     ) -> TranscriptionService:
-        """Create transcription service with default implementations."""
+        """Create transcription service with default implementations.
+
+        ``model_picker`` overrides :func:`backend.transcribe.pick_model` (test
+        seam); ``None`` = the real loader.
+        """
         if variant is not None:
             # Create variant-aware service
             return VariantTranscriptionService(
@@ -45,6 +50,7 @@ class ServiceFactory:
                 output_format=output_format,
                 diarize=diarize,
                 num_speakers=num_speakers,
+                model_picker=model_picker,
             )
 
         # Create standard service with defaults
@@ -61,6 +67,7 @@ class ServiceFactory:
             transcription_config=transcription_config,
             diarize=diarize,
             num_speakers=num_speakers,
+            model_picker=model_picker,
         )
 
     @staticmethod
