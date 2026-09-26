@@ -39,16 +39,18 @@ REM The whole HF repo dir is mounted: snapshot files are symlinks into ../../blo
 set "DOCKER_MODEL_ARGS="
 set "STT_DIAR_REPO_WIN="
 set "STT_RNNOISE_WIN="
-for /f "usebackq delims=" %%p in (`wsl -e bash -c "wslpath -w \"${HF_HUB_CACHE:-$HOME/.cache/hf/hub}/models--pyannote-community--speaker-diarization-community-1\" 2>/dev/null"`) do set "STT_DIAR_REPO_WIN=%%p"
 for /f "usebackq delims=" %%p in (`wsl -e wslpath -w "!STT_WSL_REPO!/models/sh.rnnn" 2^>nul`) do set "STT_RNNOISE_WIN=%%p"
 
 if "!STT_DIARIZE_ON!"=="1" (
+    REM Checked inside WSL: config.yaml is a Linux symlink into ../../blobs.
     REM pragma: allowlist nextline secret
-    if not exist "!STT_DIAR_REPO_WIN!\snapshots\8a527374977391da736e0daaef26855d949d9685\config.yaml" (
+    wsl -e bash -c "test -f \"$HOME/.cache/hf/hub/models--pyannote-community--speaker-diarization-community-1/snapshots/8a527374977391da736e0daaef26855d949d9685/config.yaml\""
+    if errorlevel 1 (
         echo [stt-faster] ERROR: speaker model not installed in WSL.
         echo [stt-faster] Run once in WSL:  cd !STT_WSL_REPO! ^&^& make diarization-model
         exit /b 1
     )
+    for /f "usebackq delims=" %%p in (`wsl -e bash -c "wslpath -w \"$HOME/.cache/hf/hub/models--pyannote-community--speaker-diarization-community-1\""`) do set "STT_DIAR_REPO_WIN=%%p"
     REM pragma: allowlist nextline secret
     set "DOCKER_MODEL_ARGS=-v "!STT_DIAR_REPO_WIN!:/models/diarization:ro" -e STT_DIARIZATION_MODEL_DIR=/models/diarization/snapshots/8a527374977391da736e0daaef26855d949d9685"
 )
@@ -56,7 +58,7 @@ if "!STT_DIARIZE_ON!"=="1" (
 if exist "!STT_RNNOISE_WIN!" (
     set "DOCKER_MODEL_ARGS=!DOCKER_MODEL_ARGS! -v "!STT_RNNOISE_WIN!:/models/sh.rnnn:ro" -e STT_PREPROCESS_RNNOISE_MODEL=/models/sh.rnnn"
 ) else (
-    echo [stt-faster] RNNoise model not found in WSL ^(variants that denoise will fail^) - run: make rnnoise-model
+    echo [stt-faster] RNNoise model not found in WSL - run: make rnnoise-model
 )
 
 docker run --rm ^

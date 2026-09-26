@@ -24,9 +24,9 @@ Defaults: `--diarize` on, `--num-speakers 2`. Override either at the CLI (`--no-
 ## Install the model (one step)
 
 - **Windows app:** the installer fetches it; Start ▸ Transcribe ▸ Repair restores it.
-- **Dev (WSL/Linux):** `make diarization-model` (with `make rnnoise-model` for denoising). It downloads into the HF cache — `$HF_HUB_CACHE`, else `$HF_HOME/hub`, else `~/.cache/huggingface/hub` — and a rerun downloads nothing.
+- **Dev (WSL/Linux):** `make diarization-model` (with `make rnnoise-model` for denoising). It downloads into the HF cache — `$HF_HUB_CACHE`, else `$HF_HOME/hub`, else `~/.cache/hf/hub` (the path the Windows bats read) — and a rerun downloads nothing.
 
-At run time the model resolves from `$STT_DIARIZATION_MODEL_DIR` if set, else the pinned snapshot in that same HF cache (`backend/diarize/model.py::resolve_model_dir`).
+At run time the model resolves from `$STT_DIARIZATION_MODEL_DIR` if set, else the pinned snapshot in the HF cache of the running env — export `HF_HOME=~/.cache/hf` when calling the CLI directly (`backend/diarize/model.py::resolve_model_dir`).
 
 ### Air-gapped machines
 

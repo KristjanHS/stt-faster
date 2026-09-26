@@ -103,8 +103,11 @@ def verify_snapshot(model_dir: Path, sha256: Mapping[str, str] = DIARIZATION_SHA
     ]
     if not bad:
         return
+    blobs = model_dir.parent.parent.resolve() / "blobs"
     for name in sha256:
-        (model_dir / name).resolve().unlink(missing_ok=True)
+        target = (model_dir / name).resolve()
+        if target.is_relative_to(blobs):  # never a file linked in from outside the cache
+            target.unlink(missing_ok=True)
     shutil.rmtree(model_dir, ignore_errors=True)
     raise DiarizationConfigError(f"corrupt download ({', '.join(bad)}) — rerun `make diarization-model`")
 

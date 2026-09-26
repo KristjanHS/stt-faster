@@ -1,6 +1,6 @@
 # Keyless, offline speaker diarization
 
-**Status:** Stages 1-5 shipped — Stage 6 (verify, network-off e2e, review) next.
+**Status:** Stages 1-6 shipped (Linux verify, network-off e2e, review fixes) — owner Windows eyeballs + the RNNoise `[USER DECISION]` remain.
 
 "Identify speakers" should need no Hugging Face account or token. Model weights are fetched once at install time from an ungated, revision-pinned mirror, and at transcription time they load from a local dir only.
 
@@ -148,4 +148,6 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 
 ## Open hedges
 
+- `[USER DECISION]` RNNoise install task: `models/sh.rnnn` is git-tracked (ships in the zipball), no built-in variant runs `arnndn`, yet `rnnoise` is in `finish.needs` (`installer/setup_gui.py:1511-1513`).
+  Options: drop the task + GUI env + docker mount; keep it but drop it from `finish.needs`; keep as is.
 - `[AUDIT]` The Stage 3 `HF_HUB_OFFLINE=1` assumes the installed Whisper snapshots have `refs/main` cached, which `hf download` writes. Stage 6 item 3 on Windows proves it.
