@@ -14,6 +14,7 @@ from rich.console import Console
 from backend.model_config import get_preset
 from backend.preprocess.config import PreprocessConfig
 from backend.preprocess.orchestrator import PreprocessResult
+from backend.progress import REPORTER, ProgressReporter
 from backend.transcribe import (
     FLOAT_PRECISION,
     TranscriptionMetrics,
@@ -363,6 +364,7 @@ def _collect_executor_segments(
     total_audio_duration: float | None,
     no_speech_threshold: float | None,
     logprob_threshold: float | None,
+    reporter: ProgressReporter = REPORTER,
 ) -> tuple[list[dict[str, Any]], int, list[dict[str, Any]]]:
     """Drain the faster-whisper segment iterator for the baseline/minimal paths.
 
@@ -421,6 +423,10 @@ def _collect_executor_segments(
             start_time=transcribe_start,
             last_log_time=last_progress_log,
         )
+        reporter.advance("transcribe", audio_processed, total_audio_duration)
+
+    # The loop's last advance usually falls inside the throttle window; land the file at its end.
+    reporter.advance("transcribe", total_audio_duration or audio_processed, total_audio_duration, force=True)
 
     return segment_payloads, skip_count, skip_windows
 

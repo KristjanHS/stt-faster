@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Union
 
 from backend.components import FileMoverPolicy, FileProcessor, FolderScanner, summarize_run
 from backend.run_config import RunConfig
+from backend.progress import REPORTER, ProgressReporter
 from backend.run_log import JsonlRunLog
 from backend.services.interfaces import (
     FileMover,
@@ -159,7 +160,7 @@ class TranscriptionProcessor:
         """
         return self._file_processor.process_file(file_path)
 
-    def process_all_files(self, file_paths: list[str]) -> dict[str, Any]:
+    def process_all_files(self, file_paths: list[str], reporter: ProgressReporter = REPORTER) -> dict[str, Any]:
         """Process all files in the provided list.
 
         Args:
@@ -178,7 +179,8 @@ class TranscriptionProcessor:
         failed = 0
         stats: list[FileProcessingStats] = []
 
-        for file_path in file_paths:
+        for index, file_path in enumerate(file_paths, start=1):
+            reporter.start_file(index, len(file_paths))
             result = self.process_file(file_path)
             stats.append(result)
             if result.status == "completed":

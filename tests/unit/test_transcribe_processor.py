@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from backend.progress import ProgressReporter, parse_progress
 from backend.processor import TranscriptionProcessor
 from backend.run_config import RunConfig
 from backend.run_log import JsonlRunLog
@@ -373,11 +374,15 @@ def test_process_all_files(
         output_writer=ServiceFactory.create_output_writer(),
         run_config=run_config,
     )
-    results = processor.process_all_files([str(audio1), str(audio2)])
+    lines: list[str] = []
+    reporter = ProgressReporter(enabled=True, write=lines.append)
+    results = processor.process_all_files([str(audio1), str(audio2)], reporter=reporter)
 
     assert results["succeeded"] == 2
     assert results["failed"] == 0
     assert len(results["file_stats"]) == 2
+    events = [parse_progress(line) for line in lines]
+    assert [(e.file, e.files, e.stage) for e in events if e is not None] == [(1, 2, "prepare"), (2, 2, "prepare")]
     assert all(stat.status == "completed" for stat in results["file_stats"])
     assert mock_transcription_service.transcribe.call_count == 2
 
