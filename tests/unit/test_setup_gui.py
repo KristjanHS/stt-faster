@@ -43,6 +43,7 @@ from installer.setup_gui import (
     PYTHON_VERSION,
     ModelSpec,
     SetupWindow,
+    Stalled,
     Task,
     app_in_use,
     classify_source,
@@ -1226,6 +1227,45 @@ def test_run_process_holds_byte_bar_and_ticks_elapsed() -> None:
     held = [(f, t) for f, t in reports if t.startswith("11.2M/75.5M · 0:0")]
     assert held and all(f == pytest.approx(11.2 / 75.5) for f, _t in held)  # the bar, not poll()'s dir size
     assert len({t for _f, t in held}) >= 2  # the elapsed ticker moves while hf prints nothing
+
+
+@pytest.mark.parametrize("moving", [False, True], ids=["stuck-bar", "moving-bar"])
+def test_run_process_stops_a_stalled_download(moving: bool) -> None:
+    # hf re-printing an unchanged bar is still a stall; a bar that moves is not
+    script = (
+        "import sys, time\n"
+        "for i in range(10):\n"
+        f"    n = i if {moving} else 0\n"
+        "    print(f'Downloading (incomplete total...):  1%| | {n + 1}.00M/75.5M [00:01, 3.50MB/s]', flush=True)\n"
+        "    time.sleep(0.25)\n"
+    )
+    started = time.monotonic()
+    run = lambda: run_process(  # noqa: E731
+        [sys.executable, "-c", script], os.environ, lambda *_a: None, threading.Event(), None, 1.0
+    )
+    if moving:
+        run()
+        return
+    with pytest.raises(Stalled, match="no progress for 0:01"):
+        run()
+    assert time.monotonic() - started < 2.4  # stopped before the script's own 2.5 s end
+
+
+def test_stalled_model_retries_once_without_xet_after_clearing_the_partial(paths: InstallPaths) -> None:
+    spec = MODELS[0]
+    part = model_cache_dir(paths.hf_home / "hub", spec.repo_id) / "blobs" / "abc.incomplete"
+    part.parent.mkdir(parents=True)
+    part.write_bytes(b"\0" * 8)
+    runs: list[tuple[str | None, bool]] = []
+
+    def runner(_cmd: list[str], env: dict[str, str], *_a: Any) -> None:
+        runs.append((env.get("HF_HUB_DISABLE_XET"), part.exists()))
+        if len(runs) == 1:
+            raise Stalled("Download stalled")
+
+    installer = Installer(paths=paths, env={}, runner=runner, seeder=lambda *_a: False, model_size=lambda *_a: None)
+    installer.fetch_model(spec, lambda *_a: None)
+    assert runs == [(None, True), ("1", False)]  # the HTTP retry never resumes xet's holed partial
 
 
 def _gone(pid: int) -> bool:
