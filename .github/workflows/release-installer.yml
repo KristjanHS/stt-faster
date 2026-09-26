@@ -112,7 +112,7 @@ jobs:
         run: gh release upload $env:TAG $env:EXE --clobber
 
       - name: SmartScreen submission reminder (unsigned rebuild)
-        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID == ''
+        if: env.REBUILD == 'true' && vars.SIGNPATH_ORG_ID == '' && inputs.skip_signing != true && inputs.attach != false
         shell: pwsh
         run: >-
           Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned Transcribe-Setup.exe attached to $env:TAG — submit it at https://www.microsoft.com/en-us/wdsi/filesubmission (Software developer → Microsoft Defender SmartScreen → Incorrectly detected)."
