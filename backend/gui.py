@@ -63,16 +63,17 @@ class AppPaths:
         return self.install_dir / "hf"  # the installer's models; mirrors installer.setup_gui.InstallPaths
 
 
-def default_app_paths(env: Mapping[str, str] | None = None) -> AppPaths:
+def default_app_paths(env: Mapping[str, str] | None = None, plat: str | None = None) -> AppPaths:
     """%LOCALAPPDATA% / %APPDATA% on Windows, XDG dirs elsewhere."""
     env = os.environ if env is None else env
+    plat = sys.platform if plat is None else plat
     home = Path.home()
 
     def env_dir(key: str, default: Path) -> Path:
         value = env.get(key, "")  # an empty value counts as unset (else Path("") → cwd-relative)
         return Path(value) if value else default
 
-    if sys.platform == "win32":
+    if plat == "win32":
         install = env_dir("LOCALAPPDATA", home / "AppData" / "Local") / APP_NAME
         config_dir = env_dir("APPDATA", home / "AppData" / "Roaming") / APP_NAME
     else:

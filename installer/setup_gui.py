@@ -323,17 +323,17 @@ def extract_named(archive: Path, names: Sequence[str], dest_dir: Path) -> None:
         raise InstallError(f"{archive.name} is missing {', '.join(missing)}")
 
 
-def swap_in(staged: Path, target: Path) -> None:
+def swap_in(staged: Path, target: Path, *, rename: Callable[[Path, Path], Any] = Path.rename) -> None:
     """Replace ``target`` with ``staged`` so a failed fetch never leaves a half-written app dir."""
     old = target.with_name(target.name + ".old")
     shutil.rmtree(old, ignore_errors=True)
     if target.exists():
-        target.rename(old)
+        rename(target, old)
     try:
-        staged.rename(target)
+        rename(staged, target)
     except OSError:
         if old.exists():  # put the working install back
-            old.rename(target)
+            rename(old, target)
         raise
     shutil.rmtree(old, ignore_errors=True)
 
@@ -396,14 +396,14 @@ def deps_env(base: Mapping[str, str], paths: InstallPaths) -> dict[str, str]:
     return {**isolated_env(base, paths), "UV_PROJECT_ENVIRONMENT": str(paths.venv_dir)}
 
 
-def seed_model_cache(legacy: Path, target: Path) -> bool:
+def seed_model_cache(legacy: Path, target: Path, *, copytree: Callable[..., Any] = shutil.copytree) -> bool:
     """Copy (never move) a model an older install left in the shared HF cache; ``hf download`` then verifies it."""
     if target.exists() or not legacy.is_dir() or legacy.resolve() == target.resolve():
         return False
     staged = target.with_name(target.name + ".seed")
     shutil.rmtree(staged, ignore_errors=True)
     try:  # staged + rename: an interrupted copy must never pass for a complete snapshot
-        shutil.copytree(legacy, staged, symlinks=True)
+        copytree(legacy, staged, symlinks=True)
         staged.rename(target)
     except OSError as error:
         LOGGER.info("Could not reuse %s (%s); downloading instead", legacy, error)
@@ -500,17 +500,17 @@ def is_installed(paths: InstallPaths) -> bool:
         return False
 
 
-def app_in_use(paths: InstallPaths) -> bool:
+def app_in_use(paths: InstallPaths, *, rename: Callable[[Path, Path], None] = os.rename) -> bool:
     """Windows refuses to rename a folder holding a running exe: a rename-and-back probe fails while the app is open."""
     scripts = paths.venv_dir / "Scripts"
     if not paths.windows or not scripts.is_dir():
         return False
     probe = scripts.with_name("Scripts.inuse-probe")
     try:
-        os.rename(scripts, probe)
+        rename(scripts, probe)
     except OSError:
         return True
-    os.rename(probe, scripts)
+    rename(probe, scripts)
     return False
 
 
@@ -520,19 +520,19 @@ def system_tool(env: Mapping[str, str], *parts: str) -> str:
     return str(Path(root, *parts)) if root else parts[-1].removesuffix(".exe")
 
 
-def clean_install(paths: InstallPaths) -> None:
+def clean_install(paths: InstallPaths, *, rmtree: Callable[..., Any] = shutil.rmtree) -> None:
     """Remove what the installer put in the install dir; keep the setup copy, logs and the uv / HF download caches.
 
     Kept models are not trusted: a clean install re-fetches them with ``--force-download``.
     """
     try:  # the venv first and strictly: a half-deleted venv under a running app is the worst outcome
-        shutil.rmtree(paths.venv_dir)
+        rmtree(paths.venv_dir)
     except FileNotFoundError:
         pass
     except OSError as error:
         raise InstallError(f"Could not remove {paths.venv_dir} ({error}). Close Transcribe, then retry.") from None
     for child in (paths.uv_dir, paths.app_dir, paths.python_dir, paths.ffmpeg_bin.parent, paths.install_dir / "work"):
-        shutil.rmtree(child, ignore_errors=True)
+        rmtree(child, ignore_errors=True)
 
 
 def _rmtree_strict(path: Path) -> None:
@@ -554,13 +554,20 @@ def _rmtree_best_effort(path: Path, left: list[str]) -> None:
     shutil.rmtree(path, onexc=onexc)
 
 
-def uninstall(paths: InstallPaths, env: Mapping[str, str], reg: Any = None) -> None:
+def uninstall(
+    paths: InstallPaths,
+    env: Mapping[str, str],
+    reg: Any = None,
+    *,
+    run: Callable[..., Any] = subprocess.run,
+    in_use: Callable[[InstallPaths], bool] = app_in_use,
+) -> None:
     """Remove the install dir, the config dir, both shortcuts and the Apps & features entry.
 
     Past the venv, removal is best effort: shortcuts, entry and config go even when a locked file keeps part of
     the install dir, and the InstallError then lists what was left (a rerun of setup offers Uninstall again).
     """
-    if app_in_use(paths):
+    if in_use(paths):
         raise InstallError("Close Transcribe first, then retry.")
     for target in (paths.install_dir, paths.config_file.parent):
         if target.name != APP_NAME:  # both are <base>\stt-faster by construction; never rmtree anything else
@@ -572,7 +579,7 @@ def uninstall(paths: InstallPaths, env: Mapping[str, str], reg: Any = None) -> N
     if paths.windows:
         powershell = system_tool(env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
         cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", remove_shortcuts_script()]
-        subprocess.run(cmd, capture_output=True, check=False, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        run(cmd, capture_output=True, check=False, creationflags=NO_WINDOW)
         if reg is not None:
             unregister_uninstall(reg)
     if left:
@@ -585,12 +592,18 @@ def running_exe() -> Path | None:
     return Path(sys.executable).resolve() if getattr(sys, "frozen", False) else None
 
 
-def relaunch_from_temp(exe: Path, args: Sequence[str]) -> None:
+def relaunch_from_temp(
+    exe: Path,
+    args: Sequence[str],
+    *,
+    popen: Callable[..., Any] = subprocess.Popen,
+    tempdir: Callable[[], str] = tempfile.gettempdir,
+) -> None:
     """Windows can't delete a running exe: continue the uninstall from a %TEMP% copy of it."""
-    copy = Path(tempfile.mkdtemp(prefix=UNINSTALL_TEMP_PREFIX)) / exe.name
+    copy = Path(tempfile.mkdtemp(prefix=UNINSTALL_TEMP_PREFIX, dir=tempdir())) / exe.name
     shutil.copy2(exe, copy)
     # cwd outside the install dir: Explorer starts us there, and Windows won't remove a process's cwd.
-    subprocess.Popen([str(copy), *args], cwd=tempfile.gettempdir(), creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+    popen([str(copy), *args], cwd=tempdir(), creationflags=NO_WINDOW)
 
 
 def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
@@ -604,10 +617,10 @@ def self_delete_command(exe: Path, env: Mapping[str, str]) -> str:
     )
 
 
-def schedule_self_delete(exe: Path, env: Mapping[str, str]) -> None:
+def schedule_self_delete(exe: Path, env: Mapping[str, str], *, popen: Callable[..., Any] = subprocess.Popen) -> None:
     if exe.parent.name.startswith(UNINSTALL_TEMP_PREFIX):  # only ever our own relaunch copy
         cmd = self_delete_command(exe, env)
-        subprocess.Popen(cmd, cwd=exe.parent.parent, creationflags=NO_WINDOW)  # noqa: S603  # nosec B603 - never cwd in what it deletes
+        popen(cmd, cwd=exe.parent.parent, creationflags=NO_WINDOW)  # never cwd in what it deletes
 
 
 def self_command() -> list[str]:
@@ -620,23 +633,47 @@ UNINSTALL_PROMPT = (
 )
 
 
-def uninstall_main(paths: InstallPaths, env: Mapping[str, str], *, headless: bool, confirmed: bool) -> int:
-    """``--uninstall``: confirm, hop to a %TEMP% copy when running from the install dir, remove, self-delete."""
+def _winreg() -> Any:
+    import winreg  # noqa: PLC0415 - Windows-only module
+
+    return winreg
+
+
+def _messagebox() -> Any:
     from tkinter import messagebox  # noqa: PLC0415 - windowed mode only
 
+    return messagebox
+
+
+def uninstall_main(
+    paths: InstallPaths,
+    env: Mapping[str, str],
+    *,
+    headless: bool,
+    confirmed: bool,
+    tk_root: Callable[[], Any] = tk.Tk,
+    dialogs: Callable[[], Any] = _messagebox,
+    winreg: Callable[[], Any] = _winreg,
+    current_exe: Callable[[], Path | None] = running_exe,
+    relaunch: Callable[[Path, Sequence[str]], None] = relaunch_from_temp,
+    remove: Callable[..., None] = uninstall,
+    self_delete: Callable[[Path, Mapping[str, str]], None] = schedule_self_delete,
+) -> int:
+    """``--uninstall``: confirm, hop to a %TEMP% copy when running from the install dir, remove, self-delete."""
+    messagebox = dialogs()
     root = None
     if not headless:
-        root = tk.Tk()
+        root = tk_root()
         root.withdraw()
     if root is not None and not confirmed:
         if not messagebox.askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=root):
             return 1
-    exe = running_exe()
+    exe = current_exe()
     if exe is not None and paths.windows and exe.is_relative_to(paths.install_dir.resolve()):
-        relaunch_from_temp(exe, ["--uninstall", "--yes", *(["--headless"] if headless else [])])
+        relaunch(exe, ["--uninstall", "--yes", *(["--headless"] if headless else [])])
         return 0
     try:
-        uninstall(paths, env, reg=_winreg() if paths.windows else None)
+        remove(paths, env, reg=winreg() if paths.windows else None)
     except InstallError as error:
         LOGGER.error("Uninstall failed: %s", error)
         if root is not None:
@@ -646,14 +683,8 @@ def uninstall_main(paths: InstallPaths, env: Mapping[str, str], *, headless: boo
     if root is not None:
         messagebox.showinfo("Uninstall Transcribe", "Transcribe was removed.", parent=root)
     if exe is not None and paths.windows:
-        schedule_self_delete(exe, env)
+        self_delete(exe, env)
     return 0
-
-
-def _winreg() -> Any:
-    import winreg  # noqa: PLC0415 - Windows-only module
-
-    return winreg
 
 
 # --- task runner ---------------------------------------------------------------------------------
@@ -776,6 +807,11 @@ class Installer:
     clean: bool = False
     env: Mapping[str, str] = field(default_factory=lambda: dict(os.environ))
     cancel: threading.Event = field(default_factory=threading.Event)
+    runner: Callable[..., None] = run_process
+    seeder: Callable[[Path, Path], bool] = seed_model_cache
+    model_size: Callable[[ModelSpec, Callable[[str], Any]], int | None] = expected_model_size
+    in_use: Callable[[InstallPaths], bool] = app_in_use
+    winreg: Callable[[], Any] = _winreg
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
         def on_progress(done: int, total: int | None) -> None:
@@ -815,22 +851,22 @@ class Installer:
         swap_in(staged, self.paths.app_dir)
 
     def install_deps(self, report: Report) -> None:
-        run_process(deps_command(self.paths), deps_env(self.env, self.paths), report, self.cancel)
+        self.runner(deps_command(self.paths), deps_env(self.env, self.paths), report, self.cancel)
 
     def fetch_model(self, spec: ModelSpec, report: Report) -> None:
         cache = model_cache_dir(self.paths.hf_home / "hub", spec.repo_id)
         if not self.clean:  # a v1.1.0 install downloaded into the user's shared HF cache
             legacy = model_cache_dir(hf_hub_cache(self.env, Path.home()), spec.repo_id)
             report(None, "reusing earlier download")
-            if seed_model_cache(legacy, cache):
+            if self.seeder(legacy, cache):
                 LOGGER.info("Copied %s from %s", spec.repo_id, legacy)
-        total = expected_model_size(spec, fetch_json)
+        total = self.model_size(spec, fetch_json)
 
         def poll() -> float | None:
             return min(dir_size(cache) / total, 1.0) if total else None
 
         env = isolated_env(self.env, self.paths)
-        run_process(model_command(self.paths, spec, force=self.clean), env, report, self.cancel, poll)
+        self.runner(model_command(self.paths, spec, force=self.clean), env, report, self.cancel, poll)
 
     def fetch_ffmpeg(self, report: Report) -> None:
         if all((self.paths.ffmpeg_bin / name).is_file() for name in FFMPEG_BINARIES) and not self.clean:
@@ -853,9 +889,9 @@ class Installer:
             report(None, "creating shortcuts")
             powershell = system_tool(self.env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
             cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", shortcut_script(self.paths.gui_exe)]
-            run_process(cmd, self.env, report, self.cancel)
+            self.runner(cmd, self.env, report, self.cancel)
             if self.paths.setup_copy.is_file():  # the entry's UninstallString runs that copy
-                register_uninstall(self.paths, _winreg())
+                register_uninstall(self.paths, self.winreg())
 
     def tasks(self) -> list[Task]:
         tasks = [
@@ -872,7 +908,7 @@ class Installer:
         return tasks
 
     def run(self, events: Events) -> bool:
-        if app_in_use(self.paths):
+        if self.in_use(self.paths):
             raise InstallError("Close Transcribe first, then retry.")
         self.paths.tmp_dir.mkdir(parents=True, exist_ok=True)
         if self.clean:
@@ -884,9 +920,22 @@ class Installer:
 
 
 class SetupWindow:
-    def __init__(self, root: tk.Tk, installer: Installer) -> None:
+    def __init__(
+        self,
+        root: tk.Tk,
+        installer: Installer,
+        *,
+        popen: Callable[..., Any] = subprocess.Popen,
+        tempdir: Callable[[], str] = tempfile.gettempdir,
+        dialogs: Callable[[], Any] = _messagebox,
+        logger: logging.Logger | None = None,
+    ) -> None:
         self.root = root
         self.installer = installer
+        self.popen = popen
+        self.tempdir = tempdir
+        self.dialogs = dialogs
+        self.logger = logging.getLogger() if logger is None else logger  # the root logger holds logs\setup.log
         self.events: queue.Queue[tuple[str, str, float | None, str]] = queue.Queue()
         self.rows: dict[str, tuple[ttk.Progressbar, ttk.Label]] = {}
         self.running = False
@@ -936,15 +985,13 @@ class SetupWindow:
         self.install_button.config(text="Uninstall" if self.mode.get() == "uninstall" else "Install")
 
     def uninstall(self) -> None:
-        from tkinter import messagebox  # noqa: PLC0415
-
-        if not messagebox.askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=self.root):
+        if not self.dialogs().askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=self.root):
             return
-        for handler in logging.getLogger().handlers[:]:  # release logs\setup.log so the install dir can go
+        for handler in self.logger.handlers[:]:  # release logs\setup.log so the install dir can go
             handler.close()
-            logging.getLogger().removeHandler(handler)
+            self.logger.removeHandler(handler)
         cmd = [*self_command(), "--uninstall", "--yes"]
-        subprocess.Popen(cmd, cwd=tempfile.gettempdir(), creationflags=NO_WINDOW)  # noqa: S603  # nosec B603 - not the install dir
+        self.popen(cmd, cwd=self.tempdir(), creationflags=NO_WINDOW)  # not the install dir
         self.root.destroy()
 
     def start(self) -> None:
@@ -1015,7 +1062,7 @@ class SetupWindow:
             self.install_button.config(text="Retry", state="normal")
 
     def launch(self) -> None:
-        subprocess.Popen([str(self.installer.paths.gui_exe)], creationflags=NO_WINDOW)  # noqa: S603  # nosec B603
+        self.popen([str(self.installer.paths.gui_exe)], creationflags=NO_WINDOW)
         self.root.destroy()
 
     def _on_close(self) -> None:
