@@ -227,6 +227,16 @@ class TestDiarizeProgressHook:
 
         assert calls == [("segmentation", None, None), ("segmentation", 1, 4), ("embeddings", None, None)]
 
+    def test_a_failing_on_progress_does_not_abort_the_run(self, fake_clock: _FakeClock) -> None:
+        from backend.diarize.pyannote_runner import _DiarizeProgressHook
+
+        def broken(*_args: object) -> None:
+            raise OSError("stdout closed")
+
+        with _DiarizeProgressHook(audio_duration=None, clock=fake_clock, on_progress=broken) as hook:
+            hook("segmentation", None, total=None, completed=None)
+            hook("segmentation", None, total=4, completed=1)
+
     def test_entry_with_zero_progress_logs_no_quantities_and_skips_redundant_marker(
         self, fake_clock: _FakeClock, caplog: pytest.LogCaptureFixture
     ) -> None:

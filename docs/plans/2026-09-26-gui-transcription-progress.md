@@ -1,6 +1,6 @@
 # GUI transcription progress — structured channel
 
-**Status:** rung 2 in flight; backlog below is unordered, re-pick after each rung.
+**Status:** rungs 1–2 shipped; backlog below is unordered, re-pick after each rung.
 
 ## Decision (2026-09-26)
 
@@ -26,11 +26,11 @@ Wire format: `@@progress {"file": 2, "files": 3, "stage": "diarize", "detail": "
 - Review fixes: forced end-of-file `advance` (the throttle dropped the last point); a `Retrying…` line
   resets the bar to indeterminate; `_finish` fills the bar only when `JobResult.ok`.
 
-## Rung 2 — diarize + stage names
+## Rung 2 (shipped) — diarize + stage names
 
 - `transcribe()` emits `preprocess` → `load model` → `transcribe` → `diarize` stages via a defaulted `reporter`.
 - `_DiarizeProgressHook` takes an `on_progress(step, completed, total)` callback (diarize stays free of
-  `backend.progress`); `transcribe()` adapts it to `stage/advance("diarize", …, detail=step)`.
+  `backend.progress`); `ProgressReporter.substeps("diarize")` adapts it to `stage/advance(…, detail=step)`.
 - GUI: bar = `stage_fraction`, label `File 2/3 · Identifying speakers · embeddings`; `overall_fraction` removed.
 
 ## Backlog
