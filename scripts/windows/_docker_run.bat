@@ -10,15 +10,17 @@ REM       STT_DIARIZE_ARGS        (e.g. "--diarize --num-speakers 2" or "--no-di
 REM       VARIANTS_COMMA          ("52" / "1,36,44" / ...)
 REM   - Caller sets STT_CLI_TAIL with the preset/language/output-format flags
 REM     (e.g. "--preset turbo --language en --output-format txt").
-REM   - DIARIZE (raw caller knob) is read for the HF_TOKEN fail-fast guard.
+REM   - STT_DIARIZE_ON / STT_WSL_REPO (from _runtime.bat) drive the model mounts.
+REM     Host prep, in WSL: make diarization-model rnnoise-model
 REM   - Helper does NOT setlocal.
 REM
 REM Scratch vars (leak to caller scope - reserved name, do not reuse):
 REM   DOCKER_ENV_ARGS - composed `-e KEY=VALUE` flags for the docker run line.
 REM     Note: this name is intentionally NOT STT_-prefixed for grep parity with
 REM     the lifted source; future callers should avoid the name regardless.
+REM   DOCKER_MODEL_ARGS, STT_DIAR_REPO_WIN, STT_RNNOISE_WIN - model mount scratch.
 REM
-REM Exits with the underlying `docker run` errorlevel (or 1 on the HF gate).
+REM Exits with the underlying `docker run` errorlevel (or 1 on the model gate).
 REM
 REM Env-bridging rationale: docker run starts with an empty env, so only the
 REM Windows-side vars we explicitly pass through reach the container. WSL
@@ -29,32 +31,39 @@ set "DOCKER_ENV_ARGS="
 if defined HF_TOKEN set "DOCKER_ENV_ARGS=!DOCKER_ENV_ARGS! -e HF_TOKEN=!HF_TOKEN!"
 if defined HF_XET_HIGH_PERFORMANCE set "DOCKER_ENV_ARGS=!DOCKER_ENV_ARGS! -e HF_XET_HIGH_PERFORMANCE=!HF_XET_HIGH_PERFORMANCE!"
 
-REM Banner-line for HF_TOKEN state - lifted from the old docker-forced bat.
-REM Useful for debugging "why are model downloads slow / rate-limited" without
-REM having to inspect the env. The diarize fail-fast above covers the hard
-REM failure (DIARIZE=1 + missing token); this echo covers the soft case
-REM (rate-limit warnings when downloading models without an authenticated session).
+REM Whisper model downloads only; diarization needs no token.
 if defined HF_TOKEN (echo [stt-faster] HF token: set ^(passed to container^)) else (echo [stt-faster] HF token: not set ^(rate-limit warnings expected on first model download^))
 
-REM ---- Diarize fail-fast: pyannote requires HF_TOKEN with the license accepted ----
-REM Fire before docker run so the user gets a clear hint instead of a
-REM mid-pipeline crash inside the container. Trigger on the raw caller
-REM knob DIARIZE=1 (matches the lifted source); _runtime.bat's runtime-
-REM default off-for-docker case leaves DIARIZE unset and skips this branch.
-if "!DIARIZE!"=="1" if not defined HF_TOKEN (
-    echo [stt-faster] ERROR: DIARIZE=1 but HF_TOKEN is not set on Windows.
-    echo [stt-faster] Pyannote diarization requires an HF token with the
-    echo [stt-faster] pyannote/speaker-diarization-3.1 license accepted.
-    echo [stt-faster] Set it once:  setx HF_TOKEN ^<your-hf-token^>
-    echo [stt-faster] Then reopen this cmd window and re-run.
-    exit /b 1
+REM ---- Offline models: mounted read-only from WSL, never downloaded in the container ----
+REM The whole HF repo dir is mounted: snapshot files are symlinks into ../../blobs.
+set "DOCKER_MODEL_ARGS="
+set "STT_DIAR_REPO_WIN="
+set "STT_RNNOISE_WIN="
+for /f "usebackq delims=" %%p in (`wsl -e bash -c "wslpath -w \"${HF_HUB_CACHE:-$HOME/.cache/hf/hub}/models--pyannote-community--speaker-diarization-community-1\" 2>/dev/null"`) do set "STT_DIAR_REPO_WIN=%%p"
+for /f "usebackq delims=" %%p in (`wsl -e wslpath -w "!STT_WSL_REPO!/models/sh.rnnn" 2^>nul`) do set "STT_RNNOISE_WIN=%%p"
+
+if "!STT_DIARIZE_ON!"=="1" (
+    REM pragma: allowlist nextline secret
+    if not exist "!STT_DIAR_REPO_WIN!\snapshots\8a527374977391da736e0daaef26855d949d9685\config.yaml" (
+        echo [stt-faster] ERROR: speaker model not installed in WSL.
+        echo [stt-faster] Run once in WSL:  cd !STT_WSL_REPO! ^&^& make diarization-model
+        exit /b 1
+    )
+    REM pragma: allowlist nextline secret
+    set "DOCKER_MODEL_ARGS=-v "!STT_DIAR_REPO_WIN!:/models/diarization:ro" -e STT_DIARIZATION_MODEL_DIR=/models/diarization/snapshots/8a527374977391da736e0daaef26855d949d9685"
+)
+
+if exist "!STT_RNNOISE_WIN!" (
+    set "DOCKER_MODEL_ARGS=!DOCKER_MODEL_ARGS! -v "!STT_RNNOISE_WIN!:/models/sh.rnnn:ro" -e STT_PREPROCESS_RNNOISE_MODEL=/models/sh.rnnn"
+) else (
+    echo [stt-faster] RNNoise model not found in WSL ^(variants that denoise will fail^) - run: make rnnoise-model
 )
 
 docker run --rm ^
   -v "!STT_AUDIO_DIR_RESOLVED!:/workspace" ^
   -v "%USERPROFILE%\.cache\hf:/home/appuser/.cache/hf" ^
   -v "%USERPROFILE%\.local\share\stt-faster:/home/appuser/.local/share/stt-faster" ^
-  !DOCKER_ENV_ARGS! ^
+  !DOCKER_ENV_ARGS! !DOCKER_MODEL_ARGS! ^
   stt-faster:latest process /workspace !STT_CLI_TAIL! !STT_DIARIZE_ARGS! --variants "!VARIANTS_COMMA!"
 
 exit /b !errorlevel!

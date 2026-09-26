@@ -11,8 +11,8 @@ REM     wsl -- bash -lc "cd /home/kristjans/projects/stt-faster && make docker-b
 REM Or directly:  docker build -t stt-faster:latest <repo>
 REM
 REM Optional Windows env vars (set once with `setx NAME value`, then reopen cmd):
-REM   HF_TOKEN                  - HF Hub auth. Silences rate-limit warnings;
-REM                               REQUIRED if DIARIZE=1 (pyannote is gated).
+REM   HF_TOKEN                  - HF Hub auth. Silences Whisper download rate-limit warnings.
+REM DIARIZE=1 needs the speaker model in WSL:  make diarization-model rnnoise-model
 REM   HF_XET_HIGH_PERFORMANCE   - "1" turns on Xet high-performance downloads
 REM                               (the `hf_xet` package is already in the image).
 REM Both are passed through to the container by _docker_run.bat only if defined.

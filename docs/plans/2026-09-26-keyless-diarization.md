@@ -1,6 +1,6 @@
 # Keyless, offline speaker diarization
 
-**Status:** Stages 1-4 shipped; Stage 5.1 (docs, NOTICE, e2e) shipped — Stage 5.2 (`scripts/windows/` bats) next, blocked on read permission.
+**Status:** Stages 1-5 shipped — Stage 6 (verify, network-off e2e, review) next.
 
 "Identify speakers" should need no Hugging Face account or token. Model weights are fetched once at install time from an ungated, revision-pinned mirror, and at transcription time they load from a local dir only.
 
@@ -124,7 +124,7 @@ Focus: `docs/diarization_setup.md`, `docs/Transcription_solution.md` (:12, :111)
 - `NOTICE` gives CC-BY-4.0 attribution: model name, authors (pyannote / Hervé Bredin, pyannoteAI), licence link, mirror repo + pinned revision, "unmodified"; plus plain attributions for plda/ (BUT Speech@FIT VBx) and RNNoise `sh.rnnn` (GregorR/rnnoise-models). The downloaded `README.md` model card also stays beside the weights.
 - The docker bat drops the HF_TOKEN diarize fail-fast (stale, says "3.1"), mounts the host models (diarization snapshot dir + `models/sh.rnnn`) read-only, and passes `STT_DIARIZATION_MODEL_DIR` + `STT_PREPROCESS_RNNOISE_MODEL` pointing at the mount. Dockerfile unchanged; host prep is `make diarization-model rnnoise-model`.
 - The e2e skip changes to "model not resolvable".
-- Stage 5.2 owed: `_docker_run.bat` guard+`:ro` mounts+env, `_transcribe.bat` :13-22 comments, `scripts/windows/README.md:44`, `transcribe_english_Online_docker.bat:14-15`; keep the Whisper HF_TOKEN passthrough.
+- Stage 5.2 shipped: the docker bat mounts the whole `models--pyannote-community--…` repo dir (snapshot files symlink into `../../blobs`); RNNoise mounts only if present.
 - Stage 5.2 host path (owner: Docker users always have WSL): prep is WSL `make diarization-model rnnoise-model`; the bat resolves the WSL paths at run time via `wsl wslpath -w`, no hardcoded distro/user.
 - Stage 5.2 falsifier: with the WSL model dir renamed, a `DIARIZE=1` docker bat run exits 1 naming `make diarization-model`; untested — Docker Desktop accepting a `\\wsl.localhost\…` `-v` source.
 - Done when: `grep -rln "HF_TOKEN\|hf.co/settings/tokens\|accept the licen" README.md docs/*.md scripts backend installer` lists only intentional non-diarization hits (Whisper rate-limit notes and `tests/conftest.py` are left as they are).

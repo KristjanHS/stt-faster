@@ -41,7 +41,7 @@ The transcribe bats delegate the boilerplate to six helper files. None of them a
 | `_variants.bat` | Normalizes `VARIANTS` (space-separated) → `VARIANTS_COMMA` + `VARIANT_COUNT`. |
 | `_banner.bat` | Prints the title / model / language / variant(s) header. Honors `STT_TITLE_SUFFIX` (e.g. `[DOCKER FORCED]`). |
 | `_transcribe.bat` | Dispatches WSL vs Docker. WSL branch invokes `wsl -e bash -c "..."`; docker branch delegates to `_docker_run.bat`. |
-| `_docker_run.bat` | Composes `DOCKER_ENV_ARGS` from `HF_TOKEN` / `HF_XET_HIGH_PERFORMANCE`, runs the diarize fail-fast HF_TOKEN guard, and executes `docker run`. |
+| `_docker_run.bat` | Composes `DOCKER_ENV_ARGS` from `HF_TOKEN` / `HF_XET_HIGH_PERFORMANCE`, mounts the WSL speaker + RNNoise models read-only (fails fast naming `make diarization-model` when diarize is on and the model is missing), and executes `docker run`. |
 | `_footer.bat` | Prints the "Processing Complete!" trailer + `pause`. |
 
 ## Adding a new transcribe variant
