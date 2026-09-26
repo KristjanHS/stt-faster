@@ -256,7 +256,6 @@ def test_run_job_retries_whole_job_failure_on_cpu_and_persists(
     assert result.ok and result.fell_back_to_cpu
     assert result.delivered == [audio.with_suffix(".txt")]
     assert read_device(paths.config_file) == "cpu"
-    assert "device_source=fallback" in paths.config_file.read_text()  # setup's repair keeps this cpu
 
 
 def test_run_job_cpu_retry_that_also_fails_does_not_persist(paths: AppPaths, audio: Path) -> None:
