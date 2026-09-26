@@ -213,6 +213,8 @@ def _process_single_variant(
     args: argparse.Namespace,
     input_folder: Path,
     variant: Any,  # noqa: ANN401
+    *,
+    run_log_path: Path | None = None,
 ) -> int:
     """Process files with a single variant.
 
@@ -220,6 +222,7 @@ def _process_single_variant(
         args: Parsed command-line arguments
         input_folder: Path to input folder
         variant: Variant instance
+        run_log_path: JSONL run-log location; ``None`` = XDG default.
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -257,7 +260,7 @@ def _process_single_variant(
             diarize=args.diarize,
             num_speakers=args.num_speakers,
         )
-        run_log = ServiceFactory.create_run_log()
+        run_log = ServiceFactory.create_run_log(run_log_path)
         file_mover = ServiceFactory.create_file_mover()
         output_writer = ServiceFactory.create_output_writer(include_timestamps=getattr(args, "timestamps", True))
 
@@ -292,6 +295,8 @@ def _run_single_variant(
     args: argparse.Namespace,
     input_folder: Path,
     run_folder: Path,
+    *,
+    run_log_path: Path | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Process one variant inside a multi-variant run.
 
@@ -321,7 +326,7 @@ def _run_single_variant(
             diarize=args.diarize,
             num_speakers=args.num_speakers,
         )
-        run_log = ServiceFactory.create_run_log()
+        run_log = ServiceFactory.create_run_log(run_log_path)
         file_mover = ServiceFactory.create_file_mover()
         output_writer = ServiceFactory.create_output_writer(include_timestamps=getattr(args, "timestamps", True))
 
@@ -392,6 +397,8 @@ def _process_multi_variant(
     args: argparse.Namespace,
     input_folder: Path,
     variants: list[Any],  # noqa: ANN401
+    *,
+    run_log_path: Path | None = None,
 ) -> int:
     """Process files with multiple variants.
 
@@ -399,6 +406,7 @@ def _process_multi_variant(
         args: Parsed command-line arguments
         input_folder: Path to input folder
         variants: List of variant instances
+        run_log_path: JSONL run-log location; ``None`` = XDG default.
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -417,7 +425,7 @@ def _process_multi_variant(
     all_results: dict[int, dict[str, Any]] = {}
 
     for variant in variants:
-        variant_meta, results = _run_single_variant(variant, args, input_folder, run_folder)
+        variant_meta, results = _run_single_variant(variant, args, input_folder, run_folder, run_log_path=run_log_path)
         all_variant_metadata.append(variant_meta)
         all_results[variant.number] = results
 
@@ -458,11 +466,13 @@ def _pyannote_installed() -> bool:
         return False
 
 
-def cmd_process(args: argparse.Namespace) -> int:
+def cmd_process(args: argparse.Namespace, *, run_log_path: Path | None = None) -> int:
     """Process audio files in the specified folder.
 
     Args:
         args: Parsed command-line arguments
+        run_log_path: JSONL run-log location (test seam); ``None`` resolves the
+            XDG default via :func:`backend.config.get_default_run_log_path`.
 
     Returns:
         Exit code (0 for success, 1 for failure)
@@ -500,10 +510,10 @@ def cmd_process(args: argparse.Namespace) -> int:
 
     # If single variant, use original behavior (backward compatible)
     if len(variants) == 1:
-        return _process_single_variant(args, input_folder, variants[0])
+        return _process_single_variant(args, input_folder, variants[0], run_log_path=run_log_path)
     else:
         # Multi-variant mode
-        return _process_multi_variant(args, input_folder, variants)
+        return _process_multi_variant(args, input_folder, variants, run_log_path=run_log_path)
 
 
 @app.command()

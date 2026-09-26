@@ -167,6 +167,7 @@ def execute_variant(
     diarize: bool = False,
     num_speakers: int = 2,
     diarize_runner: Any = None,
+    baseline_transcriber: Callable[..., dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Execute a single variant and return results.
 
@@ -183,6 +184,8 @@ def execute_variant(
         num_speakers: Expected speaker count when ``diarize`` is True. Ignored
             otherwise. Must be >= 2 (enforced by RunConfig validators).
         diarize_runner: Optional diarization runner override (test seam).
+        baseline_transcriber: Override for :func:`transcribe_with_baseline_params`
+            (test seam). Defaults to the real helper.
 
     Returns:
         Dictionary with variant results in same format as run_variant()
@@ -190,6 +193,7 @@ def execute_variant(
     from backend.run_config import VariantRunContext  # noqa: PLC0415
 
     ctx = context if context is not None else VariantRunContext()
+    transcribe_baseline = baseline_transcriber if baseline_transcriber is not None else transcribe_with_baseline_params
 
     # Log variant start with timestamp (major milestone)
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -231,7 +235,7 @@ def execute_variant(
         # Run transcription
         if is_baseline:
             # Use baseline transcription (only passes language and vad_filter, nothing else)
-            result = transcribe_with_baseline_params(
+            result = transcribe_baseline(
                 path=audio_path,
                 preset=preset,
                 language=language,

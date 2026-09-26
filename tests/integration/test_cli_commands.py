@@ -6,7 +6,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import pytest
 
 # Note: Fixtures cli_test_folder, real_audio_test_folder are defined in
 # tests/integration/conftest.py for reuse across integration tests.
@@ -52,15 +51,13 @@ class TestProcessCommand:
         assert result.returncode == 1
         assert "not a directory" in result.stderr or "not a directory" in result.stdout
 
-    def test_process_command_accepts_valid_folder(
-        self, cli_test_folder: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_process_command_accepts_valid_folder(self, cli_test_folder: Path, tmp_path: Path) -> None:
         """Integration test: CLI → Processor → JSONL run log with mocked model loading.
 
         This test validates the integration between CLI and processor layers
         by mocking only the external dependency (model loading from HuggingFace).
-        Isolates the JSONL run log to ``tmp_path`` via ``XDG_DATA_HOME`` so the
-        run doesn't pollute the user's real ``~/.local/share/stt-faster/runs.jsonl``.
+        Isolates the JSONL run log to ``tmp_path`` via the ``run_log_path`` seam
+        so the run doesn't pollute the user's real ``~/.local/share/stt-faster/runs.jsonl``.
         """
         import os
         import sys
@@ -68,7 +65,7 @@ class TestProcessCommand:
 
         xdg_data_home = tmp_path / "xdg_data"
         xdg_data_home.mkdir()
-        monkeypatch.setenv("XDG_DATA_HOME", str(xdg_data_home))
+        run_log_path = xdg_data_home / "stt-faster" / "runs.jsonl"
 
         scripts_path = os.path.join(os.getcwd(), "scripts")
         sys.path.insert(0, scripts_path)
@@ -93,7 +90,7 @@ class TestProcessCommand:
                 mock_pick_model_executor.return_value = mock_model
                 mock_pick_model_transcribe.return_value = mock_model
 
-                result = cmd_process(args)
+                result = cmd_process(args, run_log_path=run_log_path)
 
                 assert result == 0
 

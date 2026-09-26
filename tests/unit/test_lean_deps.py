@@ -45,7 +45,7 @@ def _run_process(tmp_path: Path, *, pyannote: bool) -> argparse.Namespace:
     args = argparse.Namespace(input_folder=str(tmp_path), diarize=True, verbose=False, variant=61, variants=None)
     captured: list[argparse.Namespace] = []
 
-    def fake_single(a: argparse.Namespace, *_: object) -> int:
+    def fake_single(a: argparse.Namespace, *_: object, **__: object) -> int:
         captured.append(a)
         return 0
 
