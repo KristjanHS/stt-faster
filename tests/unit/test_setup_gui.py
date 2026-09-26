@@ -1066,7 +1066,7 @@ def test_download_progress_reads_hf_byte_bar(line: str, fraction: float | None, 
 
 def test_run_process_holds_byte_bar_and_ticks_elapsed() -> None:
     bar = "Downloading (incomplete total...):  15%| | 11.2M/75.5M [00:03<00:18, 3.50MB/s]"
-    script = f"import sys, time; sys.stdout.write('\\x1b[A{bar}\\x1b[A\\n'); sys.stdout.flush(); time.sleep(1.5)"
+    script = f"import sys, time; sys.stdout.write('\\x1b[A{bar}\\x1b[A\\n'); sys.stdout.flush(); time.sleep(2.5)"
     reports: list[tuple[float | None, str]] = []
     run_process(
         [sys.executable, "-c", script], os.environ, lambda f, t: reports.append((f, t)), threading.Event(), lambda: 0.9
@@ -1165,9 +1165,8 @@ def test_save_device_pick_overwrites_none_keeps(tmp_path: Path) -> None:
     assert read_config(config)["device"] == "cuda"
     save_device(config, None)  # repair keeps it
     assert read_config(config)["device"] == "cuda"
-    assert "device_source" not in read_config(config)  # detection or a default, never a pick
-    save_device(config, False, chosen=True)
-    assert read_config(config) == {"device": "cpu", "device_source": "user"}
+    save_device(config, False)
+    assert read_config(config)["device"] == "cpu"
 
 
 def test_install_run_saves_gpu_pick_before_deps_sync(paths: InstallPaths, tmp_path: Path) -> None:
@@ -1212,7 +1211,7 @@ def test_deps_command_adds_gpu_extra_for_cuda_device(paths: InstallPaths) -> Non
     assert extras(deps_command(paths)) == ["gui"]
 
 
-def test_headless_gpu_detects_only_for_new_windows_installs(paths: InstallPaths, tmp_path: Path) -> None:
+def test_headless_gpu_detects_on_windows_and_moves_only_legacy_cpu(paths: InstallPaths, tmp_path: Path) -> None:
     calls: list[object] = []
 
     def detect(env: object) -> GpuInfo:
@@ -1228,37 +1227,43 @@ def test_headless_gpu_detects_only_for_new_windows_installs(paths: InstallPaths,
     paths.uv_exe.parent.mkdir(parents=True)
     paths.uv_exe.write_bytes(b"uv")  # installed
     set_config_value(paths.config_file, "device", "cpu")
-    assert headless(paths, cpu=False) is True  # repair: an unchosen cpu (v1.1.0 default) moves to the GPU
-    set_config_value(paths.config_file, "device_source", "user")
-    assert headless(paths, cpu=False) is False  # ... a chosen one stays
+    _write_app_version(paths, "1.1.0")
+    assert headless(paths, cpu=False) is True  # repair: CPU-only v1.1.0 wrote cpu unasked -> the GPU
+    _write_app_version(paths, "1.2.0")
+    assert headless(paths, cpu=False) is False  # a GPU-mode release's cpu was a pick (or the app's fallback)
     assert headless(paths, cpu=False, clean=True) is True
     assert headless(paths, cpu=True) is False  # --cpu always wins
     assert len(calls) == 4
     assert parse_args(["--cpu"]).cpu is True
 
 
+def _write_app_version(paths: InstallPaths, version: str) -> None:
+    paths.app_dir.mkdir(parents=True, exist_ok=True)
+    (paths.app_dir / "pyproject.toml").write_text(f'[project]\nversion = "{version}"\n')
+
+
 @pytest.mark.parametrize(
-    ("mode", "installed", "saved", "source", "capable", "ticked"),
+    ("mode", "installed", "saved", "version", "capable", "ticked"),
     [
-        ("repair", True, "cpu", None, True, True),  # v1.1.0 wrote cpu unasked: GPU hosts start ticked
-        ("repair", True, "cpu", None, False, False),
-        ("repair", True, "cpu", "user", True, False),  # a user's pick is kept
-        ("repair", True, "cpu", "fallback", True, False),  # so is the app's CPU fallback
-        ("repair", True, "cuda", "user", False, True),
-        ("clean", True, "cpu", "user", True, True),  # re-picks from detection
-        ("repair", False, None, None, True, True),
+        ("repair", True, "cpu", "1.1.0", True, True),  # CPU-only v1.1.0 wrote cpu unasked: GPU hosts start ticked
+        ("repair", True, "cpu", "1.1.0", False, False),
+        ("repair", True, "cpu", "1.2.0", True, False),  # a GPU-mode release's cpu is a pick or the app's fallback
+        ("repair", True, "cpu", "", True, False),  # unreadable version: keep what is saved
+        ("repair", True, "cuda", "1.2.1", False, True),
+        ("clean", True, "cpu", "1.2.1", True, True),  # re-picks from detection
+        ("repair", False, None, "", True, True),
     ],
 )
 def test_gpu_checkbox_starts_from_saved_device_on_repair(
-    paths: InstallPaths, mode: str, installed: bool, saved: str, source: str | None, capable: bool, ticked: bool
+    paths: InstallPaths, mode: str, installed: bool, saved: str, version: str, capable: bool, ticked: bool
 ) -> None:
     if installed:
         paths.gui_exe.parent.mkdir(parents=True)
         paths.gui_exe.write_bytes(b"exe")
     if saved:
         set_config_value(paths.config_file, "device", saved)
-    if source:
-        set_config_value(paths.config_file, "device_source", source)
+    if version:
+        _write_app_version(paths, version)
     configured: dict[str, bool] = {}
     window = SimpleNamespace(
         mode=SimpleNamespace(get=lambda: mode),
@@ -1270,7 +1275,7 @@ def test_gpu_checkbox_starts_from_saved_device_on_repair(
     assert configured == {"ticked": ticked}
 
 
-def test_start_saves_checkbox_as_a_pick_and_no_checkbox_as_keep(paths: InstallPaths) -> None:
+def test_start_saves_the_editable_checkbox_on_repair(paths: InstallPaths) -> None:
     installer = Installer(paths=paths, env={})
     window = SimpleNamespace(
         mode=SimpleNamespace(get=lambda: "repair"),
@@ -1289,10 +1294,10 @@ def test_start_saves_checkbox_as_a_pick_and_no_checkbox_as_keep(paths: InstallPa
         _poll=lambda: None,
     )
     SetupWindow.start(cast(Any, window))
-    assert (installer.gpu, installer.gpu_chosen) == (True, True)  # repair saves the (editable) checkbox
+    assert installer.gpu is True  # repair saves the (editable) checkbox
     window.gpu_check = None
     SetupWindow.start(cast(Any, window))
-    assert (installer.gpu, installer.gpu_chosen) == (None, False)
+    assert installer.gpu is None  # no checkbox shown: keep the saved device
 
 
 @pytest.mark.parametrize(
