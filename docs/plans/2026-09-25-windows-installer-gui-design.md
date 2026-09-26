@@ -75,7 +75,7 @@ nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv,noheader
 ```
 The choice is saved as `device=cpu|cuda` in `%APPDATA%\stt-faster\config`. The GUI passes it as `STT_DEVICE`. If GPU inference fails at runtime, the GUI re-runs the same job once with `STT_DEVICE=cpu` and writes `device=cpu`. The user never sees a CUDA error, and a wrong detection fixes itself.
 
-Diarization stays on CPU torch (the `cpu` extra) in both modes. GPU diarization on Windows is out of scope.
+Diarization stays on CPU torch (the `cpu` extra) in both modes. GPU diarization on Windows is out of scope. *Superseded 2026-09-26:* GPU mode on a driver ≥ 580 (CUDA 13) syncs `cu130` instead of `cpu`, keeping `gpu-win` for ctranslate2's CUDA 12 cuBLAS; older drivers keep `cpu` and setup says so. `run_pyannote` retries on the CPU if the GPU run throws (e.g. a cuDNN clash with ctranslate2's copy in the same process) and honours `STT_DEVICE=cpu`.
 
 ### Progress reporting (kept simple)
 - **models / ffmpeg:** poll the target directory size against the expected total (HF API file sizes or HTTP `Content-Length`), shown as "1.4 / 3.1 GB".
@@ -138,4 +138,4 @@ Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter
 
 ## Out of scope
 
-Paid code-signing certificates · GPU diarization on Windows · AMD/Intel GPUs · a fat frozen app · Mac/Linux installers.
+Paid code-signing certificates · AMD/Intel GPUs · a fat frozen app · Mac/Linux installers.

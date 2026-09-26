@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from backend.diarize.errors import DiarizationConfigError
+from backend.diarize.errors import DiarizationConfigError, DiarizationRuntimeError
 from backend.diarize.model import NOT_INSTALLED
 
 
@@ -251,3 +251,63 @@ def test_import_opts_out_of_pyannote_metrics() -> None:
         [sys.executable, "-c", probe], env=env, capture_output=True, text=True, check=True
     )
     assert result.stdout == "0"
+
+
+class _Segment:
+    start = 0.0
+    end = 1.0
+
+
+class _Annotation:
+    def itertracks(self, *, yield_label: bool) -> list[tuple[Any, None, str]]:
+        return [(_Segment(), None, "SPEAKER_00")]
+
+
+class _FakePipeline:
+    """Records each device it is moved to; the first ``fail_on`` call on that device raises."""
+
+    def __init__(self, fail_on: str | None = None) -> None:
+        self.devices: list[str] = ["cpu"]
+        self.fail_on = fail_on
+
+    def to(self, device: Any) -> None:
+        self.devices.append(str(device))
+
+    def __call__(self, _audio: Any, **_kwargs: Any) -> Any:
+        if self.devices[-1] == self.fail_on:
+            raise RuntimeError("cuDNN version incompatibility")
+        return type("DiarizeOutput", (), {"speaker_diarization": _Annotation()})()
+
+
+class TestRunPyannoteDevice:
+    def _run(self, tmp_path: Path, pipeline: _FakePipeline, env: dict[str, str], cuda: bool) -> list[Any]:
+        from backend.diarize.pyannote_runner import run_pyannote
+
+        wav = tmp_path / "a.wav"
+        _write_silent_wav(wav, sample_rate=16000, channels=1, seconds=0.1)
+        return run_pyannote(
+            str(wav),
+            env=env,
+            import_pipeline=_stub_pipeline_import(lambda _dir: pipeline),
+            resolve_model=lambda _env: tmp_path,
+            cuda_available=lambda: cuda,
+        )
+
+    def test_gpu_when_cuda_available(self, tmp_path: Path) -> None:
+        pipeline = _FakePipeline()
+        assert len(self._run(tmp_path, pipeline, {}, cuda=True)) == 1
+        assert pipeline.devices == ["cpu", "cuda"]
+
+    def test_stt_device_cpu_keeps_it_off_the_gpu(self, tmp_path: Path) -> None:
+        pipeline = _FakePipeline()
+        self._run(tmp_path, pipeline, {"STT_DEVICE": "cpu"}, cuda=True)
+        assert pipeline.devices == ["cpu"]
+
+    def test_gpu_failure_retries_on_cpu(self, tmp_path: Path) -> None:
+        pipeline = _FakePipeline(fail_on="cuda")
+        assert len(self._run(tmp_path, pipeline, {}, cuda=True)) == 1
+        assert pipeline.devices == ["cpu", "cuda", "cpu"]
+
+    def test_cpu_failure_is_a_runtime_error(self, tmp_path: Path) -> None:
+        with pytest.raises(DiarizationRuntimeError, match="cuDNN"):
+            self._run(tmp_path, _FakePipeline(fail_on="cpu"), {}, cuda=False)
