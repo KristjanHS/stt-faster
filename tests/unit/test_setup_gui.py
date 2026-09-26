@@ -1165,8 +1165,9 @@ def test_save_device_pick_overwrites_none_keeps(tmp_path: Path) -> None:
     assert read_config(config)["device"] == "cuda"
     save_device(config, None)  # repair keeps it
     assert read_config(config)["device"] == "cuda"
-    save_device(config, False)
-    assert read_config(config)["device"] == "cpu"
+    assert "device_source" not in read_config(config)  # detection or a default, never a pick
+    save_device(config, False, chosen=True)
+    assert read_config(config) == {"device": "cpu", "device_source": "user"}
 
 
 def test_install_run_saves_gpu_pick_before_deps_sync(paths: InstallPaths, tmp_path: Path) -> None:
@@ -1226,41 +1227,72 @@ def test_headless_gpu_detects_only_for_new_windows_installs(paths: InstallPaths,
     assert headless(InstallPaths(tmp_path / "l", tmp_path / "l" / "config", windows=False), cpu=False) is None
     paths.uv_exe.parent.mkdir(parents=True)
     paths.uv_exe.write_bytes(b"uv")  # installed
-    assert headless(paths, cpu=False) is None  # repair keeps the saved device
+    set_config_value(paths.config_file, "device", "cpu")
+    assert headless(paths, cpu=False) is True  # repair: an unchosen cpu (v1.1.0 default) moves to the GPU
+    set_config_value(paths.config_file, "device_source", "user")
+    assert headless(paths, cpu=False) is False  # ... a chosen one stays
     assert headless(paths, cpu=False, clean=True) is True
     assert headless(paths, cpu=True) is False  # --cpu always wins
-    assert len(calls) == 2
+    assert len(calls) == 4
     assert parse_args(["--cpu"]).cpu is True
 
 
 @pytest.mark.parametrize(
-    ("mode", "installed", "saved", "state", "ticked"),
+    ("mode", "installed", "saved", "source", "capable", "ticked"),
     [
-        ("repair", True, "cpu", "disabled", False),  # shows the saved device, not the detection
-        ("repair", True, "cuda", "disabled", True),
-        ("clean", True, "cpu", "normal", True),  # re-picks from detection
-        ("repair", False, None, "normal", True),
+        ("repair", True, "cpu", None, True, True),  # v1.1.0 wrote cpu unasked: GPU hosts start ticked
+        ("repair", True, "cpu", None, False, False),
+        ("repair", True, "cpu", "user", True, False),  # a user's pick is kept
+        ("repair", True, "cpu", "fallback", True, False),  # so is the app's CPU fallback
+        ("repair", True, "cuda", "user", False, True),
+        ("clean", True, "cpu", "user", True, True),  # re-picks from detection
+        ("repair", False, None, None, True, True),
     ],
 )
-def test_gpu_checkbox_shows_saved_device_on_repair(
-    paths: InstallPaths, mode: str, installed: bool, saved: str | None, state: str, ticked: bool
+def test_gpu_checkbox_starts_from_saved_device_on_repair(
+    paths: InstallPaths, mode: str, installed: bool, saved: str, source: str | None, capable: bool, ticked: bool
 ) -> None:
     if installed:
         paths.gui_exe.parent.mkdir(parents=True)
         paths.gui_exe.write_bytes(b"exe")
     if saved:
         set_config_value(paths.config_file, "device", saved)
-    configured: dict[str, str] = {}
+    if source:
+        set_config_value(paths.config_file, "device_source", source)
+    configured: dict[str, bool] = {}
     window = SimpleNamespace(
         mode=SimpleNamespace(get=lambda: mode),
         installer=SimpleNamespace(paths=paths),
-        gpu_info=GpuInfo("RTX 3060", 12288, (560, 94)),
+        gpu_info=GpuInfo("RTX 3060", 12288 if capable else 2048, (560, 94)),
         use_gpu=SimpleNamespace(set=lambda v: configured.update(ticked=v)),
-        gpu_check=SimpleNamespace(config=lambda **kw: configured.update(kw)),
     )
     SetupWindow._sync_gpu_check(cast(Any, window))
-    assert configured == {"state": state, "ticked": ticked}
-    assert window.gpu_pick is (state == "normal")  # type: ignore[attr-defined]
+    assert configured == {"ticked": ticked}
+
+
+def test_start_saves_checkbox_as_a_pick_and_no_checkbox_as_keep(paths: InstallPaths) -> None:
+    installer = Installer(paths=paths, env={})
+    window = SimpleNamespace(
+        mode=SimpleNamespace(get=lambda: "repair"),
+        installer=installer,
+        use_gpu=SimpleNamespace(get=lambda: True),
+        gpu_check=object(),
+        install_button=SimpleNamespace(config=lambda **_kw: None),
+        summary=SimpleNamespace(config=lambda **_kw: None),
+        launch_button=SimpleNamespace(config=lambda **_kw: None),
+        log_link=SimpleNamespace(pack_forget=lambda: None),
+        rows={},
+        tails={},
+        events=queue.Queue(),
+        root=SimpleNamespace(after=lambda *_a: None),
+        _work=lambda _events: None,
+        _poll=lambda: None,
+    )
+    SetupWindow.start(cast(Any, window))
+    assert (installer.gpu, installer.gpu_chosen) == (True, True)  # repair saves the (editable) checkbox
+    window.gpu_check = None
+    SetupWindow.start(cast(Any, window))
+    assert (installer.gpu, installer.gpu_chosen) == (None, False)
 
 
 @pytest.mark.parametrize(

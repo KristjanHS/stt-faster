@@ -465,6 +465,7 @@ def run_job(
         on_line("Retrying on CPU…")
         if attempt(result.missing, "cpu"):
             write_config_value(paths.config_file, "device", "cpu")
+            write_config_value(paths.config_file, "device_source", "fallback")  # setup's repair then keeps cpu
             result.fell_back_to_cpu = True
     return result
 
