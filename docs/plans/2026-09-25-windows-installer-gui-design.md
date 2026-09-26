@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); monkeypatch-free tests shipped (`7a9461f`..`da82b47`); next: slice 5; slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); monkeypatch-free tests shipped (`7a9461f`..`da82b47`); slice 5 shipped (`d7d30c2`, `6407156`, `f61bfe3`); next: slice 6 (starts with a Windows GPU spike on the owner host); slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
