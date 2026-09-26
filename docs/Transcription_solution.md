@@ -170,7 +170,7 @@ Core dependencies (in `pyproject.toml`):
 
 ### CPU / GPU install variants
 
-`./run_uv.sh` installs CPU torch wheels by default. GPU hosts run `make use-gpu` once per machine to switch to the `cu130` extra (writes the gitignored `.stt-variant.local`); subsequent syncs auto-pick GPU. `make use-cpu` switches back; `make show-variant` prints the current value. Runtime torch/torchaudio floors live in `docs/diarization_setup.md`. Historical design (shipped): `docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`.
+`./run_uv.sh` installs CPU torch wheels by default. GPU hosts run `make use-gpu` once per machine to switch to the `cu130` extra (writes the gitignored `.stt-variant.local`; linked worktrees without their own file inherit the main checkout's); subsequent syncs auto-pick GPU. `make use-cpu` switches back; `make show-variant` prints the current value. Runtime torch/torchaudio floors live in `docs/diarization_setup.md`. Historical design (shipped): `docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`.
 
 **Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch`, `torchaudio` and `pyannote.audio` live **in the extras, not in base deps**; the base closure has no torch (guarded by `tests/unit/test_lean_deps.py`). A single `uv.lock` holds both resolutions.
 
