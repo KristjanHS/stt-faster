@@ -31,6 +31,7 @@ from installer.setup_gui import (
     MODELS,
     UNINSTALL_KEY,
     DIARIZATION_MODEL,
+    GpuInfo,
     Cancelled,
     CommandFailed,
     Events,
@@ -49,8 +50,12 @@ from installer.setup_gui import (
     deps_env,
     dir_size,
     download,
+    detect_gpu,
     ensure_device_config,
     expected_model_size,
+    gpu_capable,
+    gpu_summary,
+    headless_gpu,
     extract_named,
     extract_zip_stripped,
     hf_hub_cache,
@@ -68,6 +73,7 @@ from installer.setup_gui import (
     remove_shortcuts_script,
     run_process,
     run_tasks,
+    save_device,
     schedule_self_delete,
     seed_model_cache,
     self_delete_command,
@@ -984,3 +990,105 @@ def test_run_process_cancel_kills_grandchildren(tmp_path: Path) -> None:
     finally:
         if not _gone(grandchild):
             os.kill(grandchild, 9)
+
+
+def _smi(stdout: str, returncode: int = 0) -> Callable[..., Any]:
+    def run(cmd: list[str], **_kw: Any) -> SimpleNamespace:
+        run.cmd = cmd  # type: ignore[attr-defined]
+        return SimpleNamespace(stdout=stdout, returncode=returncode)
+
+    return run
+
+
+def test_detect_gpu_reads_first_gpu_from_system32_nvidia_smi() -> None:
+    run = _smi("NVIDIA GeForce RTX 3060, Laptop, 12288, 560.94\nTesla T4, 15360, 560.94\n")
+    info = detect_gpu({"SystemRoot": "C:\\Windows"}, run=run)
+    assert info == GpuInfo("NVIDIA GeForce RTX 3060, Laptop", 12288, (560, 94))
+    assert Path(run.cmd[0]).parts[-2:] == ("System32", "nvidia-smi.exe")  # type: ignore[attr-defined]
+
+
+@pytest.mark.parametrize(
+    ("stdout", "returncode"),
+    [("", 0), ("RTX 3060, [N/A], 560.94\n", 0), ("RTX 3060, 12288, 560.94\n", 9)],
+    ids=["no-output", "unparsable", "exit-code"],
+)
+def test_detect_gpu_any_doubt_is_none(stdout: str, returncode: int) -> None:
+    assert detect_gpu({}, run=_smi(stdout, returncode)) is None
+
+
+def test_detect_gpu_missing_tool_is_none() -> None:
+    def run(*_a: Any, **_kw: Any) -> Any:
+        raise FileNotFoundError("nvidia-smi")
+
+    assert detect_gpu({}, run=run) is None
+
+
+@pytest.mark.parametrize(
+    ("info", "capable"),
+    [
+        (GpuInfo("RTX 3050", 4096, (528, 33)), True),
+        (GpuInfo("RTX 3050", 4096, (528, 24)), False),  # below the CUDA 12 driver floor
+        (GpuInfo("GTX 1050", 3072, (560, 94)), False),  # too little VRAM
+        (None, False),
+    ],
+)
+def test_gpu_capable_needs_driver_and_vram(info: GpuInfo | None, capable: bool) -> None:
+    assert gpu_capable(info) is capable
+    assert ("CPU" in gpu_summary(info)) is not capable
+
+
+def test_save_device_repair_keeps_clean_repicks(tmp_path: Path) -> None:
+    config = tmp_path / "config"
+    save_device(config, gpu=True, clean=False)  # new install
+    assert read_config(config)["device"] == "cuda"
+    save_device(config, gpu=False, clean=False)  # repair, or the GUI's CPU fallback already saved a choice
+    assert read_config(config)["device"] == "cuda"
+    save_device(config, gpu=False, clean=True)
+    assert read_config(config)["device"] == "cpu"
+
+
+def test_deps_command_adds_gpu_extra_for_cuda_device(paths: InstallPaths) -> None:
+    def extras(cmd: list[str]) -> list[str]:
+        return [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--extra"]
+
+    set_config_value(paths.config_file, "device", "cuda")
+    assert extras(deps_command(paths, diarization=True)) == ["gui", "cpu", "gpu-win"]  # --extras keeps GPU mode
+    set_config_value(paths.config_file, "device", "cpu")
+    assert extras(deps_command(paths)) == ["gui"]
+
+
+def test_headless_gpu_detects_only_on_windows_without_cpu_flag(paths: InstallPaths, tmp_path: Path) -> None:
+    capable = GpuInfo("RTX 3060", 12288, (560, 94))
+    calls: list[object] = []
+
+    def detect(env: object) -> GpuInfo:
+        calls.append(env)
+        return capable
+
+    assert headless_gpu(Installer(paths=paths, env={}, detect=detect), cpu=False) is True
+    assert headless_gpu(Installer(paths=paths, env={}, detect=detect), cpu=True) is False
+    linux = InstallPaths(tmp_path / "l", tmp_path / "l" / "config", windows=False)
+    assert headless_gpu(Installer(paths=linux, env={}, detect=detect), cpu=False) is False
+    assert len(calls) == 1
+    assert parse_args(["--cpu"]).cpu is True
+
+
+@pytest.mark.parametrize(
+    ("mode", "installed", "state"),
+    [("repair", True, "disabled"), ("clean", True, "normal"), ("repair", False, "normal")],
+)
+def test_gpu_checkbox_only_editable_when_device_is_picked(
+    paths: InstallPaths, mode: str, installed: bool, state: str
+) -> None:
+    if installed:
+        paths.gui_exe.parent.mkdir(parents=True)
+        paths.gui_exe.write_bytes(b"exe")
+    configured: dict[str, str] = {}
+    window = SimpleNamespace(
+        mode=SimpleNamespace(get=lambda: mode),
+        installer=SimpleNamespace(paths=paths),
+        gpu_check=SimpleNamespace(config=lambda **kw: configured.update(kw)),
+    )
+    SetupWindow._sync_gpu_check(cast(Any, window))
+    assert is_installed(paths) is installed
+    assert configured == {"state": state}

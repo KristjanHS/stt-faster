@@ -53,6 +53,9 @@ FFMPEG_BINARIES = ("ffmpeg.exe", "ffprobe.exe")  # inspect_audio needs ffprobe e
 USER_AGENT = f"{APP_NAME}-setup"
 SOURCE_IGNORE_DIRS = frozenset({"__pycache__", "node_modules", "logs", "reports", "build", "dist"})
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)  # no console flash from a --windowed exe
+MIN_GPU_DRIVER = (528, 33)  # CUDA 12.0 on Windows; newer cuBLAS 12.x runs via minor-version compatibility
+MIN_GPU_VRAM_MIB = 4000  # ~4 GB; a misjudged GPU still recovers through the GUI's CPU retry
+GPU_EXTRA_SIZE = "1.2 GB"  # gpu-win wheels: cuBLAS + cuDNN 9.1
 UNINSTALL_KEY = rf"Software\Microsoft\Windows\CurrentVersion\Uninstall\{APP_NAME}"  # HKCU: Apps & features, no admin
 UNINSTALL_TEMP_PREFIX = f"{APP_NAME}-uninstall-"
 SHORTCUT_DIRS_PS = "@([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))"
@@ -392,8 +395,9 @@ def classify_source(source: str) -> str:
 def deps_command(paths: InstallPaths, *, diarization: bool = False) -> list[str]:
     pin = paths.app_dir / ".python-version"  # UV_NO_CONFIG also skips .python-version discovery
     python = pin.read_text(encoding="utf-8").strip() if pin.is_file() else PYTHON_VERSION
-    # a full sync drops unlisted extras: once speaker detection is on, every repair keeps it
-    diarization = diarization or read_config(paths.config_file).get("extras") == "diarization"
+    # a full sync drops unlisted extras: once speaker detection / GPU mode is on, every repair keeps it
+    config = read_config(paths.config_file)
+    diarization = diarization or config.get("extras") == "diarization"
     return [
         str(paths.uv_exe),
         "sync",
@@ -402,6 +406,7 @@ def deps_command(paths: InstallPaths, *, diarization: bool = False) -> list[str]
         "--extra",
         "gui",
         *(("--extra", "cpu") if diarization else ()),
+        *(("--extra", "gpu-win") if config.get("device") == "cuda" else ()),
         "--python",
         python,
         "--python-preference",
@@ -535,6 +540,52 @@ def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
     """Write ``device=`` unless one is already set (a repair keeps the user's / the GUI's choice)."""
     if not read_config(config_file).get("device"):
         set_config_value(config_file, "device", device)
+
+
+def save_device(config_file: Path, *, gpu: bool, clean: bool) -> None:
+    """A clean install re-picks the device; a new install writes it; a repair keeps the saved one."""
+    device = "cuda" if gpu else "cpu"
+    if clean:
+        set_config_value(config_file, "device", device)
+    else:
+        ensure_device_config(config_file, device)
+
+
+@dataclass(frozen=True)
+class GpuInfo:
+    name: str
+    vram_mib: int
+    driver: tuple[int, ...]
+
+
+def detect_gpu(env: Mapping[str, str], *, run: Callable[..., Any] = subprocess.run) -> GpuInfo | None:
+    """First GPU from ``nvidia-smi`` (ships with every NVIDIA driver); None on any doubt."""
+    cmd = [
+        system_tool(env, "System32", "nvidia-smi.exe"),
+        "--query-gpu=name,memory.total,driver_version",
+        "--format=csv,noheader,nounits",
+    ]
+    try:
+        result = run(cmd, capture_output=True, text=True, timeout=15, check=False, creationflags=NO_WINDOW)
+        name, vram, driver = (part.strip() for part in result.stdout.splitlines()[0].rsplit(",", 2))
+        info = GpuInfo(name, int(float(vram)), tuple(int(n) for n in driver.split(".")))
+    except (OSError, subprocess.SubprocessError, IndexError, ValueError):
+        return None
+    return info if result.returncode == 0 else None
+
+
+def gpu_capable(info: GpuInfo | None) -> bool:
+    return info is not None and info.vram_mib >= MIN_GPU_VRAM_MIB and info.driver >= MIN_GPU_DRIVER
+
+
+def gpu_summary(info: GpuInfo | None) -> str:
+    if info is None:
+        return "No NVIDIA graphics card found: transcription runs on the CPU."
+    found = f"Found {info.name} ({info.vram_mib / 1024:.0f} GB)"
+    if gpu_capable(info):
+        return f"{found}."
+    need = f"{MIN_GPU_VRAM_MIB / 1000:.0f} GB and driver {'.'.join(map(str, MIN_GPU_DRIVER))}+"
+    return f"{found}, driver {'.'.join(map(str, info.driver))}: GPU mode needs {need}, so the CPU is used."
 
 
 def read_hf_token(token_file: Path) -> str:
@@ -881,6 +932,8 @@ class Installer:
     close_timeout: float = 60.0  # the app quits right after starting --extras
     hf_token: str = field(default="", repr=False)  # read from hf_token_file when an --extras run starts
     token_status: Callable[[str], int | None] = hf_token_status
+    gpu: bool = False  # the user's pick for a new / clean install; a repair keeps the saved device
+    detect: Callable[[Mapping[str, str]], GpuInfo | None] = detect_gpu
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
         def on_progress(done: int, total: int | None) -> None:
@@ -952,7 +1005,6 @@ class Installer:
     def finish(self, report: Report) -> None:
         if not self.paths.gui_exe.is_file():
             raise InstallError(f"Install finished but {self.paths.gui_exe.name} is missing")
-        ensure_device_config(self.paths.config_file)
         if getattr(sys, "frozen", False):  # keep a copy so the GUI can re-run setup (repair / extras)
             exe = Path(sys.executable)
             if exe.resolve() != self.paths.setup_copy.resolve():
@@ -1021,6 +1073,8 @@ class Installer:
         self.paths.tmp_dir.mkdir(parents=True, exist_ok=True)
         if self.clean:
             clean_install(self.paths)
+        if not self.extras:  # before deps: device=cuda adds the gpu-win extra to the sync
+            save_device(self.paths.config_file, gpu=self.gpu, clean=self.clean)
         return run_tasks(self.tasks(), events)
 
 
@@ -1069,6 +1123,18 @@ class SetupWindow:
             )
             ttk.Radiobutton(mode_row, text="Uninstall", value="uninstall", variable=self.mode).pack(side="left")
 
+        self.use_gpu = tk.BooleanVar(value=False)
+        self.gpu_check: ttk.Checkbutton | None = None
+        if installer.paths.windows and not installer.extras:
+            gpu = installer.detect(installer.env)
+            self.use_gpu.set(gpu_capable(gpu))
+            ttk.Label(frame, text=gpu_summary(gpu), wraplength=480).pack(anchor="w", pady=(8, 0))
+            if gpu_capable(gpu):
+                text = f"Use the graphics card (faster; {GPU_EXTRA_SIZE} extra download)"
+                self.gpu_check = ttk.Checkbutton(frame, text=text, variable=self.use_gpu)
+                self.gpu_check.pack(anchor="w")
+                self._sync_gpu_check()
+
         grid = ttk.Frame(frame)
         grid.pack(fill="x", pady=12)
         grid.columnconfigure(1, weight=1)
@@ -1094,6 +1160,12 @@ class SetupWindow:
 
     def _on_mode(self, *_: object) -> None:
         self.install_button.config(text="Uninstall" if self.mode.get() == "uninstall" else "Install")
+        self._sync_gpu_check()
+
+    def _sync_gpu_check(self) -> None:
+        if self.gpu_check is not None:  # a repair keeps the saved device; new / clean installs pick
+            fresh = self.mode.get() == "clean" or not is_installed(self.installer.paths)
+            self.gpu_check.config(state="normal" if fresh else "disabled")
 
     def uninstall(self) -> None:
         if not self.dialogs().askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=self.root):
@@ -1112,6 +1184,7 @@ class SetupWindow:
         self.running = True
         self.failure = ""
         self.installer.clean = self.mode.get() == "clean"
+        self.installer.gpu = self.use_gpu.get()
         self.installer.cancel.clear()
         self.install_button.config(state="disabled")
         self.summary.config(text="Installing…")
@@ -1189,6 +1262,14 @@ class SetupWindow:
         self.root.destroy()
 
 
+def headless_gpu(installer: Installer, *, cpu: bool) -> bool:
+    if cpu or installer.extras or not installer.paths.windows:  # elsewhere the CLI's own device probe decides
+        return False
+    gpu = installer.detect(installer.env)
+    LOGGER.info("%s", gpu_summary(gpu))
+    return gpu_capable(gpu)
+
+
 def _setup_logging(log_file: Path | None, *, console: bool) -> None:
     handlers: list[logging.Handler] = [logging.NullHandler()]
     if log_file is not None:  # None while uninstalling: an open log would lock the install dir
@@ -1206,6 +1287,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--headless", action="store_true", help="no window; log progress to the console")
     parser.add_argument("--uninstall", action="store_true", help="remove the app, its models, settings and shortcuts")
     parser.add_argument("--extras", action="store_true", help="add speaker detection to an existing install")
+    parser.add_argument("--cpu", action="store_true", help="headless: skip GPU mode even if an NVIDIA GPU is found")
     parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # already confirmed (relaunch)
     args = parser.parse_args(argv)
     if args.extras and (args.source or args.clean or args.uninstall):
@@ -1222,6 +1304,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     _setup_logging(paths.log_file, console=args.headless)
     installer = Installer(paths=paths, source=args.source, clean=args.clean, extras=args.extras)
     if args.headless:
+        installer.gpu = headless_gpu(installer, cpu=args.cpu)
         last: dict[str, str] = {}
 
         def progress(key: str, fraction: float | None, text: str) -> None:
