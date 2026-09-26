@@ -19,6 +19,7 @@ from backend.diarize.model import (
     DIARIZATION_SHA256,
     fetch_model,
     resolve_model_dir,
+    verify_snapshot,
 )
 
 
@@ -127,4 +128,21 @@ def test_fetch_model_bad_hash_removes_snapshot(tmp_path: Path) -> None:
     tampered = {**_NAME_HASHES, "plda/plda.npz": "0" * 64}
     with pytest.raises(DiarizationConfigError, match=r"corrupt download \(plda/plda.npz\)"):
         fetch_model(downloader=_downloader(snap, []), sha256=tampered)
+    assert not snap.exists()
+
+
+def test_verify_snapshot_deletes_cache_blobs_but_not_linked_in_files(tmp_path: Path) -> None:
+    snap = tmp_path / "repo" / "snapshots" / "rev"
+    blob = tmp_path / "repo" / "blobs" / "b1"
+    external = tmp_path / "shared" / "plda.npz"
+    for path in (snap, blob.parent, external.parent):
+        path.mkdir(parents=True)
+    blob.write_bytes(b"x")
+    external.write_bytes(b"y")
+    (snap / "a.bin").symlink_to(blob)
+    (snap / "b.bin").symlink_to(external)
+    with pytest.raises(DiarizationConfigError):
+        verify_snapshot(snap, {"a.bin": "0" * 64, "b.bin": "0" * 64})
+    assert not blob.exists()
+    assert external.exists()
     assert not snap.exists()

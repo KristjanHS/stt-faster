@@ -282,8 +282,8 @@ preprocess-audio:
 	echo "Preprocessing $$SRC -> $$OUT"; \
 	STT_PREPROCESS_ENABLED=1 .venv/bin/python scripts/run_preprocess.py --input "$$SRC" --output "$$OUT"
 
-diarization-model:
-	.venv/bin/python scripts/prefetch_models.py --diarization-only
+diarization-model:  # HF_HOME default matches scripts/windows/_transcribe.bat + _docker_run.bat
+	HF_HOME="$${HF_HOME:-$$HOME/.cache/hf}" .venv/bin/python scripts/prefetch_models.py --diarization-only
 
 rnnoise-model:
 	.venv/bin/python scripts/prefetch_models.py --rnnoise-only
