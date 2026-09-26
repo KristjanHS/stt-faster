@@ -13,6 +13,7 @@ import logging
 import os
 import platform
 import queue
+import re
 import shutil
 import signal
 import subprocess  # nosec B404 - runs uv / powershell with fixed argument lists
@@ -65,6 +66,12 @@ class Cancelled(InstallError):
     pass
 
 
+class CommandFailed(InstallError):
+    def __init__(self, message: str, output: str = "") -> None:
+        super().__init__(message)
+        self.output = output  # the command's last output lines
+
+
 @dataclass(frozen=True)
 class ModelSpec:
     repo_id: str
@@ -75,6 +82,14 @@ class ModelSpec:
 MODELS = (
     ModelSpec("TalTechNLP/whisper-large-v3-turbo-et-verbatim", ("ct2/*",)),
     ModelSpec("Systran/faster-distil-whisper-large-v3"),
+)
+DIARIZATION_MODEL = ModelSpec("pyannote/speaker-diarization-community-1")  # gated: needs the user's token
+HF_AUTH_ERROR = re.compile(r"\b40[13]\b|gated repo|unauthori[sz]ed|forbidden|invalid credentials", re.IGNORECASE)
+HF_AUTH_HELP = (
+    "Hugging Face refused the speaker model (401/403). To fix: "
+    "1) sign in and accept the licence at https://hf.co/pyannote/speaker-diarization-community-1; "
+    "2) create a read token at https://hf.co/settings/tokens; "
+    "3) paste that token in Transcribe and try again."
 )
 
 
@@ -137,6 +152,10 @@ class InstallPaths:
     @property
     def log_file(self) -> Path:
         return self.install_dir / "logs" / "setup.log"
+
+    @property
+    def hf_token_file(self) -> Path:
+        return self.config_file.parent / "hf_token"  # written by the app before it starts --extras
 
 
 def default_install_paths(
@@ -354,9 +373,11 @@ def classify_source(source: str) -> str:
     raise InstallError(f"--source must be a URL, a .zip file or a folder: {source}")
 
 
-def deps_command(paths: InstallPaths) -> list[str]:
+def deps_command(paths: InstallPaths, *, diarization: bool = False) -> list[str]:
     pin = paths.app_dir / ".python-version"  # UV_NO_CONFIG also skips .python-version discovery
     python = pin.read_text(encoding="utf-8").strip() if pin.is_file() else PYTHON_VERSION
+    # a full sync drops unlisted extras: once speaker detection is on, every repair keeps it
+    diarization = diarization or read_config(paths.config_file).get("extras") == "diarization"
     return [
         str(paths.uv_exe),
         "sync",
@@ -364,6 +385,7 @@ def deps_command(paths: InstallPaths) -> list[str]:
         "--no-dev",
         "--extra",
         "gui",
+        *(("--extra", "cpu") if diarization else ()),
         "--python",
         python,
         "--python-preference",
@@ -477,19 +499,38 @@ def unregister_uninstall(reg: Any) -> None:
         pass
 
 
-def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
-    """Write ``device=`` unless one is already set (a repair keeps the user's / the GUI's choice)."""
+def read_config(config_file: Path) -> dict[str, str]:
     values: dict[str, str] = {}
     if config_file.is_file():
         for line in config_file.read_text(encoding="utf-8").splitlines():
             key, sep, value = line.partition("=")
             if sep and key.strip():
                 values[key.strip()] = value.strip()
-    if values.get("device"):
-        return
-    values["device"] = device
+    return values
+
+
+def set_config_value(config_file: Path, key: str, value: str) -> None:
+    values = {**read_config(config_file), key: value}
     config_file.parent.mkdir(parents=True, exist_ok=True)
     config_file.write_text("".join(f"{k}={v}\n" for k, v in values.items()), encoding="utf-8")
+
+
+def ensure_device_config(config_file: Path, device: str = "cpu") -> None:
+    """Write ``device=`` unless one is already set (a repair keeps the user's / the GUI's choice)."""
+    if not read_config(config_file).get("device"):
+        set_config_value(config_file, "device", device)
+
+
+def read_hf_token(token_file: Path) -> str:
+    try:
+        token = token_file.read_text(encoding="utf-8-sig").strip()
+    except OSError:
+        token = ""  # nosec B105 - empty sentinel, not a credential
+    if not token:
+        raise InstallError(
+            f"No Hugging Face token saved ({token_file}). Paste one in Transcribe's speaker panel, then retry."
+        )
+    return token
 
 
 def is_installed(paths: InstallPaths) -> bool:
@@ -797,7 +838,11 @@ def run_process(
         tail = [*tail[-19:], lines.get()]
     if proc.returncode != 0:
         LOGGER.error("Command failed (%s):\n%s", proc.returncode, "\n".join(tail))
-        raise InstallError(tail[-1] if tail else f"exit code {proc.returncode}")
+        raise CommandFailed(tail[-1] if tail else f"exit code {proc.returncode}", "\n".join(tail))
+
+
+def launch_gui(paths: InstallPaths, *, popen: Callable[..., Any] = subprocess.Popen) -> None:
+    popen([str(paths.gui_exe)], creationflags=NO_WINDOW)
 
 
 @dataclass
@@ -812,6 +857,12 @@ class Installer:
     model_size: Callable[[ModelSpec, Callable[[str], Any]], int | None] = expected_model_size
     in_use: Callable[[InstallPaths], bool] = app_in_use
     winreg: Callable[[], Any] = _winreg
+    extras: bool = False
+    launch: Callable[[InstallPaths], None] = launch_gui
+    sleep: Callable[[float], None] = time.sleep
+    clock: Callable[[], float] = time.monotonic
+    close_timeout: float = 60.0  # the app quits right after starting --extras
+    hf_token: str = field(default="", repr=False)  # read from hf_token_file when an --extras run starts
 
     def _download_step(self, url: str, dest: Path, report: Report) -> None:
         def on_progress(done: int, total: int | None) -> None:
@@ -851,9 +902,10 @@ class Installer:
         swap_in(staged, self.paths.app_dir)
 
     def install_deps(self, report: Report) -> None:
-        self.runner(deps_command(self.paths), deps_env(self.env, self.paths), report, self.cancel)
+        cmd = deps_command(self.paths, diarization=self.extras)
+        self.runner(cmd, deps_env(self.env, self.paths), report, self.cancel)
 
-    def fetch_model(self, spec: ModelSpec, report: Report) -> None:
+    def fetch_model(self, spec: ModelSpec, report: Report, *, token: str = "") -> None:
         cache = model_cache_dir(self.paths.hf_home / "hub", spec.repo_id)
         if not self.clean:  # a v1.1.0 install downloaded into the user's shared HF cache
             legacy = model_cache_dir(hf_hub_cache(self.env, Path.home()), spec.repo_id)
@@ -866,6 +918,8 @@ class Installer:
             return min(dir_size(cache) / total, 1.0) if total else None
 
         env = isolated_env(self.env, self.paths)
+        if token:
+            env["HF_TOKEN"] = token
         self.runner(model_command(self.paths, spec, force=self.clean), env, report, self.cancel, poll)
 
     def fetch_ffmpeg(self, report: Report) -> None:
@@ -893,7 +947,34 @@ class Installer:
             if self.paths.setup_copy.is_file():  # the entry's UninstallString runs that copy
                 register_uninstall(self.paths, self.winreg())
 
+    def fetch_diarization(self, report: Report) -> None:
+        try:
+            self.fetch_model(DIARIZATION_MODEL, report, token=self.hf_token)
+        except CommandFailed as error:
+            if HF_AUTH_ERROR.search(error.output):
+                raise InstallError(HF_AUTH_HELP) from None
+            raise
+
+    def enable_extras(self, report: Report) -> None:
+        set_config_value(self.paths.config_file, "extras", "diarization")
+        report(None, "opening Transcribe")
+        self.launch(self.paths)
+
+    def wait_closed(self) -> None:
+        deadline = self.clock() + self.close_timeout
+        while self.in_use(self.paths):
+            if self.clock() >= deadline or self.cancel.is_set():
+                raise InstallError("Close Transcribe first, then retry.")
+            self.sleep(0.5)
+
     def tasks(self) -> list[Task]:
+        if self.extras:  # the base install is in place; one deps sync + the gated model, then the flag
+            model = DIARIZATION_MODEL.repo_id
+            return [
+                Task("deps", "Python + speaker libraries", self.install_deps),
+                Task(model, f"Model: {model.split('/', 1)[1]}", self.fetch_diarization),
+                Task("extras", "Speaker detection", self.enable_extras, needs=("deps", model)),
+            ]
         tasks = [
             Task("uv", "Installer tools (uv)", self.fetch_uv),
             Task("app", "Transcribe app", self.fetch_source),
@@ -908,7 +989,12 @@ class Installer:
         return tasks
 
     def run(self, events: Events) -> bool:
-        if self.in_use(self.paths):
+        if self.extras:
+            if not self.paths.uv_exe.is_file() or not self.paths.app_dir.is_dir():
+                raise InstallError("Transcribe is not installed yet. Run Transcribe-Setup first.")
+            self.hf_token = read_hf_token(self.paths.hf_token_file)
+            self.wait_closed()
+        elif self.in_use(self.paths):
             raise InstallError("Close Transcribe first, then retry.")
         self.paths.tmp_dir.mkdir(parents=True, exist_ok=True)
         if self.clean:
@@ -939,6 +1025,7 @@ class SetupWindow:
         self.events: queue.Queue[tuple[str, str, float | None, str]] = queue.Queue()
         self.rows: dict[str, tuple[ttk.Progressbar, ttk.Label]] = {}
         self.running = False
+        self.failure = ""  # first failed task's message, shown in the summary
 
         root.title("Transcribe — Setup")
         root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -950,7 +1037,7 @@ class SetupWindow:
         )
 
         self.mode = tk.StringVar(value="repair")
-        if is_installed(installer.paths):
+        if is_installed(installer.paths) and not installer.extras:
             mode_row = ttk.Frame(frame)
             mode_row.pack(anchor="w", pady=(8, 0))
             ttk.Label(mode_row, text="Already installed:").pack(side="left", padx=(0, 8))
@@ -980,6 +1067,8 @@ class SetupWindow:
         self.summary = ttk.Label(frame, text="", foreground="gray", wraplength=480)
         self.summary.pack(anchor="w", pady=(8, 0))
         self.mode.trace_add("write", self._on_mode)
+        if installer.extras:  # the app asked for this run and has already quit
+            root.after(100, self.start)
 
     def _on_mode(self, *_: object) -> None:
         self.install_button.config(text="Uninstall" if self.mode.get() == "uninstall" else "Install")
@@ -999,6 +1088,7 @@ class SetupWindow:
             self.uninstall()
             return
         self.running = True
+        self.failure = ""
         self.installer.clean = self.mode.get() == "clean"
         self.installer.cancel.clear()
         self.install_button.config(state="disabled")
@@ -1039,6 +1129,8 @@ class SetupWindow:
             elif kind == "state":
                 bar, status = self.rows[key]
                 state, _, message = text.partition("\t")
+                if state == "failed" and not self.failure:
+                    self.failure = message
                 if state != "running":
                     bar.stop()
                     bar.config(mode="determinate", value=1.0 if state == "done" else 0)
@@ -1052,17 +1144,21 @@ class SetupWindow:
 
     def _finished(self, ok: bool) -> None:
         self.running = False
+        if ok and self.installer.extras:  # the last extras task already reopened Transcribe
+            self.root.destroy()
+            return
         if ok:
             self.summary.config(text="Done. Transcribe is on your Desktop and in the Start menu.")
             self.launch_button.config(state="normal")
             self.install_button.config(text="Reinstall", state="normal")
         else:
             log = self.installer.paths.log_file
-            self.summary.config(text=f"Setup did not finish. Details: {log}")
+            reason = f"\n{self.failure}\n" if self.failure else " "
+            self.summary.config(text=f"Setup did not finish.{reason}Details: {log}")
             self.install_button.config(text="Retry", state="normal")
 
     def launch(self) -> None:
-        self.popen([str(self.installer.paths.gui_exe)], creationflags=NO_WINDOW)
+        launch_gui(self.installer.paths, popen=self.popen)
         self.root.destroy()
 
     def _on_close(self) -> None:
@@ -1080,21 +1176,28 @@ def _setup_logging(log_file: Path | None, *, console: bool) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s", handlers=handlers)
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Install the Transcribe app for the current user.")
     parser.add_argument("--source", help="app source: URL of a zip, a local .zip or a folder (default: latest release)")
     parser.add_argument("--clean", action="store_true", help="clean reinstall (headless; the window asks)")
     parser.add_argument("--headless", action="store_true", help="no window; log progress to the console")
     parser.add_argument("--uninstall", action="store_true", help="remove the app, its models, settings and shortcuts")
+    parser.add_argument("--extras", action="store_true", help="add speaker detection to an existing install")
     parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # already confirmed (relaunch)
     args = parser.parse_args(argv)
+    if args.extras and (args.source or args.clean or args.uninstall):
+        parser.error("--extras cannot be combined with --source, --clean or --uninstall")
+    return args
 
+
+def main(argv: Sequence[str] | None = None) -> int:
+    args = parse_args(argv)
     paths = default_install_paths()
     if args.uninstall:
         _setup_logging(None, console=args.headless)
         return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes)
     _setup_logging(paths.log_file, console=args.headless)
-    installer = Installer(paths=paths, source=args.source, clean=args.clean)
+    installer = Installer(paths=paths, source=args.source, clean=args.clean, extras=args.extras)
     if args.headless:
         last: dict[str, str] = {}
 
