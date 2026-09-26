@@ -26,7 +26,9 @@ from installer.setup_gui import (
     HF_TOOL_PINS,
     MODELS,
     UNINSTALL_KEY,
+    DIARIZATION_MODEL,
     Cancelled,
+    CommandFailed,
     Events,
     Installer,
     InstallError,
@@ -53,6 +55,8 @@ from installer.setup_gui import (
     latest_release_zip,
     model_cache_dir,
     model_command,
+    parse_args,
+    read_config,
     register_uninstall,
     relaunch_from_temp,
     remove_shortcuts_script,
@@ -61,6 +65,7 @@ from installer.setup_gui import (
     schedule_self_delete,
     seed_model_cache,
     self_delete_command,
+    set_config_value,
     shortcut_script,
     uninstall,
     uninstall_main,
@@ -558,6 +563,136 @@ def test_finish_registers_uninstall_only_with_setup_copy(paths: InstallPaths) ->
     paths.setup_copy.write_bytes(b"exe")
     installer.finish(lambda *_a: None)
     assert list(reg.keys) == [UNINSTALL_KEY]
+
+
+def test_parse_args_extras_only_alone() -> None:
+    assert parse_args(["--extras", "--headless"]).extras is True
+    assert parse_args([]).extras is False
+    with pytest.raises(SystemExit):
+        parse_args(["--extras", "--clean"])
+
+
+def test_deps_command_keeps_cpu_extra_once_diarization_is_on(paths: InstallPaths) -> None:
+    def extras(cmd: list[str]) -> list[str]:
+        return [cmd[i + 1] for i, arg in enumerate(cmd) if arg == "--extra"]
+
+    assert extras(deps_command(paths)) == ["gui"]
+    assert extras(deps_command(paths, diarization=True)) == ["gui", "cpu"]  # the --extras run itself
+    set_config_value(paths.config_file, "device", "cpu")
+    set_config_value(paths.config_file, "extras", "diarization")
+    assert extras(deps_command(paths)) == ["gui", "cpu"]  # repair / clean keep speaker detection
+    assert read_config(paths.config_file) == {"device": "cpu", "extras": "diarization"}
+
+
+class _ExtrasRun:
+    """An installed ``paths`` plus a recording runner / launcher for ``--extras`` runs."""
+
+    def __init__(self, paths: InstallPaths, *, token: str | None = "hf_abc", model_output: str | None = None) -> None:
+        paths.uv_exe.parent.mkdir(parents=True)
+        paths.uv_exe.write_bytes(b"uv")
+        paths.app_dir.mkdir(parents=True)
+        if token is not None:
+            paths.hf_token_file.parent.mkdir(parents=True, exist_ok=True)
+            paths.hf_token_file.write_text(token, encoding="utf-8")
+        self.paths = paths
+        self.model_output = model_output
+        self.runs: list[tuple[list[str], dict[str, str]]] = []
+        self.launches: list[InstallPaths] = []
+        self.states: dict[str, tuple[str, str]] = {}
+        self.lock = threading.Lock()
+
+    def runner(self, cmd: list[str], env: dict[str, str], *_a: Any) -> None:
+        with self.lock:
+            self.runs.append((list(cmd), dict(env)))
+        if self.model_output is not None and DIARIZATION_MODEL.repo_id in cmd:
+            raise CommandFailed(self.model_output.splitlines()[-1], self.model_output)
+
+    def installer(self, **kw: Any) -> Installer:
+        return Installer(
+            paths=self.paths,
+            env={},
+            extras=True,
+            runner=self.runner,
+            seeder=lambda *_a: False,
+            model_size=lambda *_a: None,
+            launch=self.launches.append,
+            **kw,
+        )
+
+    def events(self) -> Events:
+        def state(key: str, value: str, message: str) -> None:
+            with self.lock:
+                self.states[key] = (value, message)
+
+        return Events(progress=lambda *_a: None, state=state)
+
+
+def test_extras_success_writes_flag_then_relaunches(paths: InstallPaths) -> None:
+    run = _ExtrasRun(paths, token="  hf_abc\n")
+    assert run.installer().run(run.events()) is True
+    (deps_cmd, _), (model_cmd, model_env) = sorted(run.runs, key=lambda r: DIARIZATION_MODEL.repo_id in r[0])
+    assert deps_cmd[deps_cmd.index("gui") + 1 : deps_cmd.index("gui") + 3] == ["--extra", "cpu"]
+    assert model_cmd[model_cmd.index("download") + 1 :] == [DIARIZATION_MODEL.repo_id]  # full snapshot
+    assert model_env["HF_TOKEN"] == "hf_abc"
+    assert model_env["HF_HOME"] == str(paths.hf_home)
+    assert read_config(paths.config_file).get("extras") == "diarization"
+    assert run.launches == [paths]
+
+
+@pytest.mark.parametrize("token", [None, " \n"], ids=["missing", "blank"])
+def test_extras_without_token_fails_before_any_command(paths: InstallPaths, token: str | None) -> None:
+    run = _ExtrasRun(paths, token=token)
+    with pytest.raises(InstallError, match="No Hugging Face token"):
+        run.installer().run(run.events())
+    assert run.runs == [] and run.launches == []
+    assert "extras" not in read_config(paths.config_file)
+
+
+@pytest.mark.parametrize(
+    "output",
+    [
+        "Traceback ...\nhuggingface_hub.errors.GatedRepoError: 403 Client Error.\nCannot access gated repo for url x",
+        "requests.exceptions.HTTPError: 401 Client Error: Unauthorized for url: https://huggingface.co/api",
+    ],
+    ids=["403-licence", "401-token"],
+)
+def test_extras_auth_failure_explains_fixes_and_stays_off(paths: InstallPaths, output: str) -> None:
+    run = _ExtrasRun(paths, model_output=output)
+    assert run.installer().run(run.events()) is False
+    state, message = run.states[DIARIZATION_MODEL.repo_id]
+    assert state == "failed"
+    assert "https://hf.co/pyannote/speaker-diarization-community-1" in message and "hf.co/settings/tokens" in message
+    assert run.states["extras"][0] == "skipped"
+    assert "extras" not in read_config(paths.config_file)
+    assert run.launches == []
+
+
+def test_extras_other_download_failure_keeps_its_own_message(paths: InstallPaths) -> None:
+    run = _ExtrasRun(paths, model_output="OSError: [Errno 28] No space left on device")
+    assert run.installer().run(run.events()) is False
+    assert run.states[DIARIZATION_MODEL.repo_id] == ("failed", "OSError: [Errno 28] No space left on device")
+
+
+def test_extras_waits_for_the_app_to_close_then_gives_up(paths: InstallPaths) -> None:
+    now = [0.0]
+
+    def sleep(seconds: float) -> None:
+        now[0] += seconds
+
+    open_for = [3]
+
+    def in_use(_p: InstallPaths) -> bool:
+        open_for[0] -= 1
+        return open_for[0] >= 0
+
+    run = _ExtrasRun(paths)
+    assert run.installer(in_use=in_use, sleep=sleep, clock=lambda: now[0], close_timeout=10).run(run.events())
+    assert now[0] == 1.5  # three polls while the app was still closing
+    run = _ExtrasRun(InstallPaths(paths.install_dir.with_name("b"), paths.config_file, windows=True))
+    stuck = run.installer(in_use=lambda _p: True, sleep=sleep, clock=lambda: now[0], close_timeout=10)
+    with pytest.raises(InstallError, match="Close Transcribe first"):
+        stuck.run(run.events())
+    assert run.runs == [] and run.launches == []
 
 
 class _FakeTk:
