@@ -72,6 +72,14 @@ class Cancelled(InstallError):
     pass
 
 
+class Stalled(InstallError):
+    """A command's output stopped changing for longer than its stall timeout."""
+
+
+MODEL_STALL_TIMEOUT = 120.0  # hf-xet can hang forever on one stalled range request (xet-core #789, #850)
+PROGRESS_LOG_INTERVAL = 30.0
+
+
 class CommandFailed(InstallError):
     def __init__(self, message: str, output: str = "") -> None:
         super().__init__(message)
@@ -1079,9 +1087,12 @@ def run_process(
     report: Report,
     cancel: threading.Event,
     poll: Callable[[], float | None] | None = None,
+    stall_timeout: float | None = None,
 ) -> None:
-    """Run ``cmd``, reporting its last output line; ``poll`` supplies a progress fraction when it can."""
-    LOGGER.info("Running: %s", " ".join(cmd))
+    """Run ``cmd``, reporting its last output line; ``poll`` supplies a progress fraction when it can.
+
+    With ``stall_timeout``, output that stops changing for that many seconds kills the tree and raises Stalled.
+    """
     proc = subprocess.Popen(  # noqa: S603  # nosec B603 - fixed argument list
         list(cmd),
         env=dict(env),
@@ -1093,6 +1104,7 @@ def run_process(
         creationflags=NO_WINDOW,
         start_new_session=sys.platform != "win32",  # own process group, so cancel can kill the tree
     )
+    LOGGER.info("Running (pid %s): %s", proc.pid, " ".join(cmd))
     lines: queue.Queue[str] = queue.Queue()
     tail: list[str] = []
 
@@ -1103,8 +1115,8 @@ def run_process(
 
     thread = threading.Thread(target=reader, daemon=True)
     thread.start()
-    started = time.monotonic()
-    last = ""
+    started = moved = logged = time.monotonic()
+    last = seen = ""  # seen: the output that last counted as progress (a re-printed bar does not)
     bar: tuple[float | None, str] | None = None  # the latest hf byte bar, held between its bursty updates
     while proc.poll() is None:
         if cancel.is_set():
@@ -1114,12 +1126,24 @@ def run_process(
             last = lines.get()
             LOGGER.debug("%s", last)
             tail = [*tail[-19:], last]
-            bar = download_progress(last) or bar
+            parsed = download_progress(last)
+            bar = parsed or bar
+            if (mark := parsed[1] if parsed else last) != seen:
+                seen, moved = mark, time.monotonic()
+        now = time.monotonic()
         if bar is None:
-            report(poll() if poll else None, last[-100:])
+            fraction, text = poll() if poll else None, last[-100:]
         else:
             fraction = bar[0] if bar[0] is not None or poll is None else poll()
-            report(fraction, f"{bar[1]} · {format_elapsed(time.monotonic() - started)}")
+            text = f"{bar[1]} · {format_elapsed(now - started)}"
+        report(fraction, text)
+        if now - logged >= PROGRESS_LOG_INTERVAL:  # setup.log shows where a long step is, not just that it ran
+            LOGGER.info("[pid %s] %s", proc.pid, text)
+            logged = now
+        if stall_timeout is not None and now - moved > stall_timeout:
+            LOGGER.error("[pid %s] No progress for %s, stopping at: %s", proc.pid, format_elapsed(now - moved), seen)
+            kill_tree(proc, env)
+            raise Stalled(f"Download stalled (no progress for {format_elapsed(stall_timeout)})")
         time.sleep(0.3)
     thread.join(timeout=5)
     while not lines.empty():
@@ -1244,7 +1268,19 @@ class Installer:
         env["TQDM_POSITION"] = "-1"  # hf 1.2.1 then prints its aggregate byte bar through the pipe
         if token:
             env["HF_TOKEN"] = token
-        self.runner(model_command(self.paths, spec, force=self.clean), env, report, self.cancel, poll)
+        cmd = model_command(self.paths, spec, force=self.clean)
+        try:
+            self.runner(cmd, env, report, self.cancel, poll, MODEL_STALL_TIMEOUT)
+        except Stalled:  # hf-xet can hang forever on a stalled range request; plain HTTP times out instead
+            LOGGER.warning("Retrying %s without xet", spec.repo_id)
+            report(None, "stalled; retrying without xet")
+            for part in (cache / "blobs").glob("*.incomplete"):  # xet's partial has holes: HTTP must not resume it
+                try:
+                    part.unlink()
+                except OSError as error:
+                    raise InstallError(f"Could not clear the stalled download ({error}). Retry.") from None
+            env["HF_HUB_DISABLE_XET"] = "1"
+            self.runner(cmd, env, report, self.cancel, poll, MODEL_STALL_TIMEOUT)
 
     def fetch_ffmpeg(self, report: Report) -> None:
         if all((self.paths.ffmpeg_bin / name).is_file() for name in FFMPEG_BINARIES) and not self.clean:
