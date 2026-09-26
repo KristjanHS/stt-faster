@@ -735,26 +735,32 @@ def uninstall(
     *,
     run: Callable[..., Any] = subprocess.run,
     in_use: Callable[[InstallPaths], bool] = app_in_use,
+    step: Callable[[str], None] = lambda _text: None,
 ) -> None:
     """Remove the install dir, the config dir, the Desktop + Start-menu shortcuts and the Apps & features entry.
 
     Past the venv, removal is best effort: shortcuts, entry and config go even when a locked file keeps part of
     the install dir, and the InstallError then lists what was left (a rerun of setup offers Uninstall again).
+    ``step`` gets a status line before each part.
     """
     if in_use(paths):
         raise InstallError("Close Transcribe first, then retry.")
     for target in (paths.install_dir, paths.config_file.parent):
         if target.name != APP_NAME:  # both are <base>\stt-faster by construction; never rmtree anything else
             raise InstallError(f"Refusing to remove unexpected folder {target}")
+    step("Removing app files and models…")
     _rmtree_strict(paths.venv_dir)  # first, like clean_install: never leave a half-deleted venv
     left: list[str] = []
-    for target in (paths.install_dir, paths.config_file.parent):
-        _rmtree_best_effort(target, left)
+    _rmtree_best_effort(paths.install_dir, left)
+    step("Removing settings…")
+    _rmtree_best_effort(paths.config_file.parent, left)
     if paths.windows:
+        step("Removing shortcuts…")
         powershell = system_tool(env, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
         cmd = [powershell, "-NoProfile", "-NonInteractive", "-Command", remove_shortcuts_script()]
         run(cmd, capture_output=True, check=False, creationflags=NO_WINDOW)
         if reg is not None:
+            step("Removing the Apps & features entry…")
             unregister_uninstall(reg)
     if left:
         more = f"\n… and {len(left) - 5} more" if len(left) > 5 else ""
@@ -819,12 +825,112 @@ def _messagebox() -> Any:
     return messagebox
 
 
+READY_TIMEOUT = 20.0  # seconds a "Starting uninstall…" window waits for the remover's window before closing anyway
+
+
+def ready_marker(tempdir: Callable[[], str] = tempfile.gettempdir) -> Path:
+    """Where the process that removes the app signals that its window is up (``--ready-file``)."""
+    return Path(tempdir(), f"{UNINSTALL_TEMP_PREFIX}{os.getpid()}.ready")
+
+
+def wait_for_marker(
+    root: Any, marker: Path, *, timeout: float = READY_TIMEOUT, clock: Callable[[], float] = time.monotonic
+) -> None:
+    """Destroy ``root`` once ``marker`` exists (deleting it) or ``timeout`` seconds have passed."""
+    deadline = clock() + timeout
+
+    def poll() -> None:
+        if marker.exists() or clock() >= deadline:
+            marker.unlink(missing_ok=True)
+            root.destroy()
+        else:
+            root.after(200, poll)
+
+    poll()
+
+
+def show_starting(root: Any, marker: Path) -> None:
+    """Cover the hop to the %TEMP% copy: a small busy window until the copy's own window is up."""
+    root.title("Uninstall Transcribe")
+    frame = ttk.Frame(root, padding=16)
+    frame.pack(fill="both", expand=True)
+    ttk.Label(frame, text="Starting uninstall…").pack(anchor="w")
+    bar = ttk.Progressbar(frame, mode="indeterminate", length=320)
+    bar.pack(fill="x", pady=(8, 0))
+    bar.start(15)
+    root.deiconify()
+    wait_for_marker(root, marker)
+    root.mainloop()
+
+
+class UninstallWindow:
+    """``--uninstall``'s window: a status line + busy bar while ``remove`` runs on a worker, then the result."""
+
+    def __init__(self, root: Any, remove: Callable[[Callable[[str], None]], None], *, ready_file: Path | None) -> None:
+        self.root = root
+        self.remove = remove
+        self.ready_file = ready_file
+        self.events: queue.Queue[tuple[str, str]] = queue.Queue()
+        self.done = False
+        self.ok = False
+
+        root.title("Uninstall Transcribe")
+        root.protocol("WM_DELETE_WINDOW", self._on_close)
+        root.minsize(360, 0)
+        frame = ttk.Frame(root, padding=16)
+        frame.pack(fill="both", expand=True)
+        self.status = ttk.Label(frame, text="Uninstalling Transcribe…", wraplength=480, justify="left")
+        self.status.pack(anchor="w")
+        self.bar = ttk.Progressbar(frame, mode="indeterminate", length=320)
+        self.bar.pack(fill="x", pady=(8, 0))
+        self.bar.start(15)
+        self.close_button = ttk.Button(frame, text="Close", command=root.destroy)  # packed with the result
+        root.deiconify()
+        threading.Thread(target=self._work, daemon=True).start()
+        root.after(100, self._poll)
+
+    def _work(self) -> None:
+        try:
+            self.remove(lambda text: self.events.put(("step", text)))
+        except InstallError as error:
+            LOGGER.error("Uninstall failed: %s", error)
+            self.events.put(("failed", f"Uninstall did not finish:\n{error}"))
+        except Exception as error:  # noqa: BLE001 - the window must still end with a Close button
+            LOGGER.exception("Uninstall failed")
+            self.events.put(("failed", f"Uninstall did not finish:\n{error}"))
+        else:
+            self.events.put(("done", "Transcribe was removed."))
+
+    def _poll(self) -> None:
+        if self.ready_file is not None:  # this window is up: the one that started us can close
+            try:
+                self.ready_file.touch()
+            except OSError:
+                LOGGER.warning("Could not create %s", self.ready_file)
+            self.ready_file = None
+        while not self.events.empty():
+            kind, text = self.events.get()
+            self.status.config(text=text)
+            if kind != "step":
+                self.done, self.ok = True, kind == "done"
+                self.bar.stop()
+                self.bar.pack_forget()
+                self.close_button.pack(anchor="e", pady=(12, 0))
+                return
+        self.root.after(100, self._poll)
+
+    def _on_close(self) -> None:
+        if self.done:  # ignored while removing: stopping halfway leaves a half-removed install
+            self.root.destroy()
+
+
 def uninstall_main(
     paths: InstallPaths,
     env: Mapping[str, str],
     *,
     headless: bool,
     confirmed: bool,
+    ready_file: Path | None = None,
     tk_root: Callable[[], Any] = tk.Tk,
     dialogs: Callable[[], Any] = _messagebox,
     winreg: Callable[[], Any] = _winreg,
@@ -832,30 +938,50 @@ def uninstall_main(
     relaunch: Callable[[Path, Sequence[str]], None] = relaunch_from_temp,
     remove: Callable[..., None] = uninstall,
     self_delete: Callable[[Path, Mapping[str, str]], None] = schedule_self_delete,
+    marker: Callable[[], Path] = ready_marker,
+    starting: Callable[[Any, Path], None] = show_starting,
+    window: Callable[..., Any] = UninstallWindow,
 ) -> int:
-    """``--uninstall``: confirm, hop to a %TEMP% copy when running from the install dir, remove, self-delete."""
-    messagebox = dialogs()
+    """``--uninstall``: confirm, hop to a %TEMP% copy when running from the install dir, remove, self-delete.
+
+    ``ready_file``: the setup window that started us waits for it; forwarded over the hop, created by the remover.
+    """
     root = None
     if not headless:
         root = tk_root()
         root.withdraw()
     if root is not None and not confirmed:
-        if not messagebox.askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=root):
+        if not dialogs().askyesno("Uninstall Transcribe", UNINSTALL_PROMPT, parent=root):
             return 1
     exe = current_exe()
+    reg = winreg() if paths.windows else None
     if exe is not None and paths.windows and exe.is_relative_to(paths.install_dir.resolve()):
-        relaunch(exe, ["--uninstall", "--yes", *(["--headless"] if headless else [])])
+        if root is None:
+            relaunch(exe, ["--uninstall", "--yes", "--headless"])
+            return 0
+        ready = ready_file or marker()
+        relaunch(exe, ["--uninstall", "--yes", "--ready-file", str(ready)])
+        if ready_file is None:  # nobody else is covering the hop
+            starting(root, ready)
         return 0
-    try:
-        remove(paths, env, reg=winreg() if paths.windows else None)
-    except InstallError as error:
-        LOGGER.error("Uninstall failed: %s", error)
-        if root is not None:
-            messagebox.showerror("Uninstall Transcribe", f"Uninstall did not finish:\n{error}", parent=root)
+    if root is None:
+        try:
+            remove(paths, env, reg=reg)
+        except InstallError as error:
+            LOGGER.error("Uninstall failed: %s", error)
+            return 1
+        ok = True
+    else:
+
+        def remove_reporting(step: Callable[[str], None]) -> None:
+            remove(paths, env, reg=reg, step=step)
+
+        shown = window(root, remove_reporting, ready_file=ready_file)
+        root.mainloop()
+        ok = shown.ok
+    if not ok:
         return 1
     LOGGER.info("Removed %s and %s", paths.install_dir, paths.config_file.parent)
-    if root is not None:
-        messagebox.showinfo("Uninstall Transcribe", "Transcribe was removed.", parent=root)
     if exe is not None and paths.windows:
         self_delete(exe, env)
     return 0
@@ -1309,9 +1435,12 @@ class SetupWindow:
         for handler in self.logger.handlers[:]:  # release logs\setup.log so the install dir can go
             handler.close()
             self.logger.removeHandler(handler)
-        cmd = [*self_command(), "--uninstall", "--yes"]
+        ready = ready_marker(self.tempdir)
+        cmd = [*self_command(), "--uninstall", "--yes", "--ready-file", str(ready)]
         self.popen(cmd, cwd=self.tempdir(), creationflags=NO_WINDOW)  # not the install dir
-        self.root.destroy()
+        self.install_button.config(state="disabled")
+        self.summary.config(text="Starting uninstall…")
+        wait_for_marker(self.root, ready)  # stay up until the uninstall's own window is
 
     def start(self) -> None:
         if self.mode.get() == "uninstall":
@@ -1447,6 +1576,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--extras", action="store_true", help="add speaker detection to an existing install")
     parser.add_argument("--cpu", action="store_true", help="headless: skip GPU mode even if an NVIDIA GPU is found")
     parser.add_argument("--yes", action="store_true", help=argparse.SUPPRESS)  # already confirmed (relaunch)
+    parser.add_argument("--ready-file", type=Path, help=argparse.SUPPRESS)  # uninstall: created once our window is up
     args = parser.parse_args(argv)
     if args.extras and (args.source or args.clean or args.uninstall):
         parser.error("--extras cannot be combined with --source, --clean or --uninstall")
@@ -1458,7 +1588,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     paths = default_install_paths()
     if args.uninstall:
         _setup_logging(None, console=args.headless)
-        return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes)
+        return uninstall_main(paths, os.environ, headless=args.headless, confirmed=args.yes, ready_file=args.ready_file)
     _setup_logging(paths.log_file, console=args.headless)
     # Bitdefender sets it in Chrome, so a setup opened from the download bar inherits it; dropped here, our own
     # downloads and the Transcribe it launches never see it either (isolated_env still guards passed-in envs).

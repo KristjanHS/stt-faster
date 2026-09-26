@@ -84,10 +84,12 @@ from installer.setup_gui import (
     self_delete_command,
     set_config_value,
     shortcut_script,
+    UninstallWindow,
     uninstall,
     uninstall_main,
     unregister_uninstall,
     source_ignore,
+    wait_for_marker,
     swap_in,
     system_tool,
     uv_asset,
@@ -412,6 +414,17 @@ def test_uninstall_removes_install_and_config_only(tmp_path: Path) -> None:
     assert sorted(str(p.relative_to(tmp_path)) for p in tmp_path.rglob("*")) == ["cfg", "cfg/other", "share"]
 
 
+def test_uninstall_reports_each_step(win_paths: InstallPaths) -> None:
+    steps: list[str] = []
+    uninstall(win_paths, {}, reg=_FakeReg(), run=lambda *_a, **_kw: None, step=steps.append)
+    assert steps == [
+        "Removing app files and models…",
+        "Removing settings…",
+        "Removing shortcuts…",
+        "Removing the Apps & features entry…",
+    ]
+
+
 @pytest.mark.skipif(os.name != "posix" or os.geteuid() == 0, reason="read-only dir must block unlink")
 def test_partial_uninstall_still_unregisters_and_stays_retryable(win_paths: InstallPaths) -> None:
     locked = win_paths.install_dir / "hf" / "locked"
@@ -479,9 +492,17 @@ def test_spawned_processes_never_run_inside_what_they_delete(
     temp_exe = Path(popen_calls[0][0][0])
     schedule_self_delete(temp_exe, {}, popen=popen)
     window = SimpleNamespace(
-        root=_FakeTk(), popen=popen, tempdir=tempdir, dialogs=lambda: fake_dialogs, logger=logging.Logger("test")
+        root=_FakeTk(),
+        popen=popen,
+        tempdir=tempdir,
+        dialogs=lambda: fake_dialogs,
+        logger=logging.Logger("test"),
+        install_button=_FakeLabel(),
+        summary=_FakeLabel(),
     )
     SetupWindow.uninstall(cast(Any, window))
+    assert not window.root.destroyed and window.summary.text == "Starting uninstall…"  # until the child's window
+    assert "--ready-file" in popen_calls[2][0]
     cwds = [Path(kw["cwd"]) for _args, kw in popen_calls]
     assert cwds == [Path(tempdir()), temp_exe.parent.parent, Path(tempdir())]
     assert not any(cwd.is_relative_to(win_paths.install_dir) or cwd.is_relative_to(temp_exe.parent) for cwd in cwds)
@@ -872,10 +893,23 @@ def test_open_file_uses_the_platform_opener(tmp_path: Path, windows: bool) -> No
 
 
 class _FakeTk:
+    def __init__(self) -> None:
+        self.destroyed = False
+        self.pending: list[Callable[[], None]] = []
+
     def withdraw(self) -> None:
         pass
 
     def destroy(self) -> None:
+        self.destroyed = True
+
+    def after(self, _ms: int, callback: Callable[[], None]) -> None:
+        self.pending.append(callback)
+
+    def run_after(self) -> None:
+        self.pending.pop(0)()
+
+    def mainloop(self) -> None:
         pass
 
 
@@ -964,6 +998,124 @@ def test_uninstall_main_self_deletes_only_after_success(tmp_path: Path, win_path
     assert deletes == []
     assert run(lambda *_a, **_kw: None) == 0
     assert deletes == [exe]
+
+
+@pytest.mark.parametrize("given", [None, "setup.ready"])
+def test_uninstall_main_windowed_hop_forwards_or_covers_the_ready_file(
+    win_paths: InstallPaths, tmp_path: Path, given: str | None
+) -> None:
+    ready_file = None if given is None else tmp_path / given
+    relaunched: list[list[str]] = []
+    covered: list[Path] = []
+    code = uninstall_main(
+        win_paths,
+        {},
+        headless=False,
+        confirmed=True,
+        ready_file=ready_file,
+        tk_root=_FakeTk,
+        winreg=_FakeReg,
+        current_exe=lambda: win_paths.setup_copy.resolve(),
+        relaunch=lambda _exe, args: relaunched.append(list(args)),
+        remove=lambda *_a, **_kw: pytest.fail("the temp copy removes"),
+        marker=lambda: tmp_path / "own.ready",
+        starting=lambda _root, marker: covered.append(marker),
+    )
+    expected = ready_file or tmp_path / "own.ready"
+    assert code == 0
+    assert relaunched == [["--uninstall", "--yes", "--ready-file", str(expected)]]
+    assert covered == ([] if given else [expected])  # the setup window already covers the hop
+
+
+@pytest.mark.parametrize("ok", [True, False])
+def test_uninstall_main_windowed_removes_in_its_window(win_paths: InstallPaths, tmp_path: Path, ok: bool) -> None:
+    exe = tmp_path / "Downloads" / "Transcribe-Setup.exe"
+    ready = tmp_path / "setup.ready"
+    steps: list[str] = []
+    deletes: list[Path] = []
+
+    def remove(_paths: InstallPaths, _env: Any, *, reg: Any, step: Callable[[str], None]) -> None:
+        assert isinstance(reg, _FakeReg)
+        step("Removing settings…")
+
+    def window(_root: Any, run: Callable[[Callable[[str], None]], None], *, ready_file: Path | None) -> Any:
+        assert ready_file == ready
+        run(steps.append)
+        return SimpleNamespace(ok=ok)
+
+    code = uninstall_main(
+        win_paths,
+        {},
+        headless=False,
+        confirmed=True,
+        ready_file=ready,
+        tk_root=_FakeTk,
+        winreg=_FakeReg,
+        current_exe=lambda: exe,
+        remove=remove,
+        self_delete=lambda e, _env: deletes.append(e),
+        window=window,
+    )
+    assert code == (0 if ok else 1)
+    assert steps == ["Removing settings…"]
+    assert deletes == ([exe] if ok else [])
+
+
+def test_wait_for_marker_closes_on_the_marker_or_the_timeout(tmp_path: Path) -> None:
+    marker = tmp_path / "x.ready"
+    now = [0.0]
+    root = _FakeTk()
+    wait_for_marker(root, marker, timeout=20, clock=lambda: now[0])
+    assert not root.destroyed
+    marker.touch()
+    root.run_after()
+    assert root.destroyed and not marker.exists()
+
+    root = _FakeTk()
+    wait_for_marker(root, marker, timeout=20, clock=lambda: now[0])
+    now[0] = 19.9
+    root.run_after()
+    assert not root.destroyed
+    now[0] = 20.0
+    root.run_after()
+    assert root.destroyed
+
+
+@pytest.mark.parametrize("error", [None, InstallError("locked"), OSError("boom")])
+def test_uninstall_window_shows_steps_then_the_result(tmp_path: Path, error: Exception | None) -> None:
+    ready = tmp_path / "setup.ready"
+
+    def remove(step: Callable[[str], None]) -> None:
+        step("Removing settings…")
+        if error is not None:
+            raise error
+
+    status, close = _FakeLabel(), _FakeLabel()
+    window = SimpleNamespace(
+        root=_FakeTk(),
+        remove=remove,
+        ready_file=ready,
+        events=queue.Queue(),
+        done=False,
+        ok=False,
+        status=status,
+        bar=SimpleNamespace(stop=lambda: None, pack_forget=lambda: None),
+        close_button=close,
+    )
+    window._poll = lambda: UninstallWindow._poll(cast(Any, window))
+    window.events.put(("step", "Removing app files and models…"))
+    UninstallWindow._poll(cast(Any, window))
+    assert status.text == "Removing app files and models…" and ready.exists()  # the setup window may close
+    UninstallWindow._on_close(cast(Any, window))
+    assert not window.root.destroyed  # X is ignored while removing
+
+    UninstallWindow._work(cast(Any, window))
+    window.root.run_after()
+    assert window.done and window.ok is (error is None)
+    assert status.text == ("Transcribe was removed." if error is None else f"Uninstall did not finish:\n{error}")
+    assert close.shown
+    UninstallWindow._on_close(cast(Any, window))
+    assert window.root.destroyed
 
 
 def test_system_tool_prefers_system_root() -> None:

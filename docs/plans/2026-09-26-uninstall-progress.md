@@ -20,12 +20,8 @@ removed." box, so it looked as if the uninstall had crashed.
   bar, `remove()` on a worker thread, per-step text (app files / settings / shortcuts / Apps & features entry).
 - The window turns into the result ("Transcribe was removed." or the InstallError text) with a Close button;
   it replaces the separate `showinfo` / `showerror` boxes.
-- Cover the hop gap: the setup window shows "Starting uninstall…" and closes only after the `--uninstall` child has started.
-- Headless and Apps & features uninstalls keep their current paths (Apps & features runs the same `--uninstall`).
+- Cover the hop gap with a `--ready-file` marker: the remover touches it once its window is up; the setup window
+  (and, on the Start-menu / Apps & features path, the hopping install-dir copy) shows "Starting uninstall…" until then (20 s cap).
+- X is ignored while removing; headless uninstall keeps its current path.
 - Falsifier: unit tests on the step reporting and result state with injected `remove`; Windows eyeball: no blank gap
   longer than ~2 s from clicking Uninstall to the result.
-
-## Open
-
-- How the setup window knows the child started (a fixed delay, or a marker file the child writes) — pick the
-  marker if the delay proves flaky.
