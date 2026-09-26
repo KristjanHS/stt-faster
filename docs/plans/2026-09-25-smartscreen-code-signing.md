@@ -1,13 +1,13 @@
 # SmartScreen + code signing — plan
 
-**Status:** A shipped; C's repo commit + D's CI build shipped with signing dormant; left: B/C owner steps, D's after-approval steps, E. Parent: `2026-09-25-windows-installer-gui-design.md` (slice 7).
+**Status:** A shipped; D's CI build shipped with signing dormant. SignPath (C, D's SignPath steps) dropped 2026-09-26; signing route undecided. Parent: `2026-09-25-windows-installer-gui-design.md` (slice 7).
 
 ## Rulings (owner, 2026-09-25)
 
 | Topic | Ruling |
 |---|---|
 | Now | Tell users how to click through, and submit every rebuilt exe to Microsoft. |
-| Signing | **SignPath Foundation** (free for OSS; publisher shows "SignPath Foundation"). No paid OV/EV certificate. |
+| Signing | **SignPath dropped by owner 2026-09-26 — never suggest it.** Route undecided: Certum OSS cloud cert (€49/yr), SSL.com IV, or stay unsigned. |
 | Build | The exe gets built + signed on a `windows-latest` Actions job (free on a public repo). This replaces the local `build_installer.bat` build for releases. |
 | Store / MSIX | Backlog; reconsider after D. |
 | CI build before approval | Move the build to CI now; SignPath steps run only once `vars.SIGNPATH_ORG_ID` is set; the Microsoft submission reminder moves to the job summary while dormant. |
