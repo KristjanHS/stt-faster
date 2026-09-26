@@ -8,9 +8,13 @@ Plan: docs/plans/2026-09-26-keyless-diarization.md.
 
 from __future__ import annotations
 
+import hashlib
 import os
+import shutil
 from collections.abc import Callable, Mapping
 from pathlib import Path
+
+from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
 
 from backend.diarize.errors import DiarizationConfigError
 
@@ -47,7 +51,6 @@ def _hub_cache_dir(env: Mapping[str, str]) -> str | None:
 
 def _cached_snapshot(cache_dir: str | None) -> Path | None:
     """The pinned snapshot from the local HF cache; `local_files_only` makes no HTTP call."""
-    from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
     from huggingface_hub.errors import LocalEntryNotFoundError
 
     try:
@@ -83,3 +86,44 @@ def resolve_model_dir(
     if snapshot is None or not _complete(snapshot):
         raise DiarizationConfigError(NOT_INSTALLED)
     return snapshot
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def verify_snapshot(model_dir: Path, sha256: Mapping[str, str] = DIARIZATION_SHA256) -> None:
+    """Hash-check the weights; on a mismatch delete the snapshot (and its cache blobs) so a rerun refetches."""
+    bad = [
+        name for name, want in sha256.items() if not (model_dir / name).is_file() or _sha256(model_dir / name) != want
+    ]
+    if not bad:
+        return
+    for name in sha256:
+        (model_dir / name).resolve().unlink(missing_ok=True)
+    shutil.rmtree(model_dir, ignore_errors=True)
+    raise DiarizationConfigError(f"corrupt download ({', '.join(bad)}) — rerun `make diarization-model`")
+
+
+def fetch_model(
+    *,
+    downloader: Callable[..., str] = snapshot_download,
+    cache_dir: str | None = None,
+    sha256: Mapping[str, str] = DIARIZATION_SHA256,
+) -> Path:
+    """Download (or reuse) the pinned snapshot tokenlessly, then hash-verify it."""
+    model_dir = Path(
+        downloader(
+            DIARIZATION_REPO,
+            revision="8a527374977391da736e0daaef26855d949d9685",  # pragma: allowlist secret
+            allow_patterns=list(DIARIZATION_INCLUDE),
+            token=False,
+            cache_dir=cache_dir,
+        )
+    )
+    verify_snapshot(model_dir, sha256)
+    return model_dir

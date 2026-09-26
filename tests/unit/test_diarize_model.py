@@ -3,14 +3,23 @@
 from __future__ import annotations
 
 import ast
+import hashlib
 import inspect
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from backend.diarize import model
 from backend.diarize.errors import DiarizationConfigError
-from backend.diarize.model import DIARIZATION_REVISION, DIARIZATION_SHA256, resolve_model_dir
+from backend.diarize.model import (
+    DIARIZATION_INCLUDE,
+    DIARIZATION_REPO,
+    DIARIZATION_REVISION,
+    DIARIZATION_SHA256,
+    fetch_model,
+    resolve_model_dir,
+)
 
 
 def _snapshot(root: Path) -> Path:
@@ -81,3 +90,41 @@ def test_every_revision_literal_is_the_pinned_revision() -> None:
     ]
     assert literals
     assert set(literals) == {DIARIZATION_REVISION}
+
+
+def _downloader(root: Path, calls: list[dict[str, object]]) -> Callable[..., str]:
+    """Writes each weight file with its own name as content (hashes pinned by `_NAME_HASHES`)."""
+
+    def download(repo_id: str, **kwargs: object) -> str:
+        calls.append({"repo_id": repo_id, **kwargs})
+        for name in DIARIZATION_SHA256:
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            (root / name).write_bytes(name.encode())
+        return str(root)
+
+    return download
+
+
+_NAME_HASHES = {name: hashlib.sha256(name.encode()).hexdigest() for name in DIARIZATION_SHA256}
+
+
+def test_fetch_model_verifies_and_sends_no_token(tmp_path: Path) -> None:
+    calls: list[dict[str, object]] = []
+    assert fetch_model(downloader=_downloader(tmp_path, calls), cache_dir="/c", sha256=_NAME_HASHES) == tmp_path
+    assert calls == [
+        {
+            "repo_id": DIARIZATION_REPO,
+            "revision": DIARIZATION_REVISION,
+            "allow_patterns": list(DIARIZATION_INCLUDE),
+            "token": False,
+            "cache_dir": "/c",
+        }
+    ]
+
+
+def test_fetch_model_bad_hash_removes_snapshot(tmp_path: Path) -> None:
+    snap = tmp_path / "snap"
+    tampered = {**_NAME_HASHES, "plda/plda.npz": "0" * 64}
+    with pytest.raises(DiarizationConfigError, match=r"corrupt download \(plda/plda.npz\)"):
+        fetch_model(downloader=_downloader(snap, []), sha256=tampered)
+    assert not snap.exists()
