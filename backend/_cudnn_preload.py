@@ -54,7 +54,7 @@ def register_nvidia_dll_dirs(
 
 def preload_bundled_cudnn() -> None:
     if sys.platform == "win32":
-        spec = importlib.util.find_spec("nvidia")  # namespace package; absent without the gpu-win extra
+        spec = importlib.util.find_spec("nvidia")  # namespace package from the nvidia-* wheels (gpu-win)
         register_nvidia_dll_dirs((spec.submodule_search_locations or []) if spec else [])
         return
 

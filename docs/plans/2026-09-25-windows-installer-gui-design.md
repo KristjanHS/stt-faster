@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); monkeypatch-free tests shipped (`7a9461f`..`da82b47`); slice 5 shipped (`d7d30c2`, `6407156`, `f61bfe3`); next: slice 6 (starts with a Windows GPU spike on the owner host); slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
+**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); monkeypatch-free tests shipped (`7a9461f`..`da82b47`); slice 5 shipped (`d7d30c2`, `6407156`, `f61bfe3`); slice 6 shipped (`e7fae5f` + review fixes; first real GPU run owed on the owner host); slice 7 (signing) waits on the owner's SignPath application. Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 
@@ -122,7 +122,7 @@ The bats, `run_uv.sh`, the Dockerfile and the CLI's default behaviour are untouc
 5. **Extras / diarization** panel + `--extras` installer mode.
    Rulings: setup writes `extras=diarization` to config after a successful `--extras`; `deps_command` adds `--extra cpu` whenever it is set (Repair keeps it); `--extras` pre-fetches `pyannote/speaker-diarization-community-1` with the token (2nd bar), 401/403 → error in setup, no relaunch; token file `%APPDATA%\stt-faster\hf_token`; ☐ Identify speakers shows iff pyannote imports + token saved, spinbox 2–10 default 2 (CLI minimum); diarization failure → re-run once `--no-diarize` + "Speakers skipped: <reason>" banner; no setup exe beside install → button disabled + hint; guard = unit tests, real run on the Windows eyeball list.
 6. **GPU mode**: change #2b + `nvidia-smi` detection in the installer (the GUI's CPU retry shipped in slice 1). Spike done statically: the win wheel loads `cublas64_12.dll` and bundles cuDNN shim 9.1.0.70.
-   Rulings: pin `nvidia-cublas-cu12` + `nvidia-cudnn-cu12==9.1.0.70` (win32); GPU iff driver ≥ 528.33 and VRAM ≥ 4 GB; install screen shows detection + "Use GPU" checkbox, headless `--cpu`; Repair keeps `device=`, Clean re-detects; first real GPU run → Windows eyeball list.
+   Rulings: pin `nvidia-cublas-cu12` + `nvidia-cudnn-cu12==9.1.0.70` (win32); GPU iff driver ≥ 528.33 and VRAM ≥ 4 GB; install screen shows detection + "Use GPU" checkbox, headless `--cpu`; Repair keeps `device=` (checkbox shows it read-only), Clean re-detects, a same-window retry uses the checkbox; first real GPU run → Windows eyeball list.
 7. **Code signing (SignPath Foundation) + SmartScreen todos** → `docs/plans/2026-09-25-smartscreen-code-signing.md` (owns the Store/MSIX backlog item too).
 
 Backlog (unordered): VAD sliders (needs a `--vad` override that sets `vad_filter=True` via `config.set(...)` on the variant's config before `ServiceFactory.create_transcription_service`, `transcription_commands.py:250`; `vad_threshold` / `vad_parameters.min_silence_duration_ms` live in `preprocess/config.py:262-276`) · in-app update check · multilingual "Other" profile.

@@ -35,6 +35,7 @@ from installer.setup_gui import (
     Cancelled,
     CommandFailed,
     Events,
+    FFMPEG_BINARIES,
     Installer,
     InstallError,
     InstallPaths,
@@ -1037,14 +1038,48 @@ def test_gpu_capable_needs_driver_and_vram(info: GpuInfo | None, capable: bool) 
     assert ("CPU" in gpu_summary(info)) is not capable
 
 
-def test_save_device_repair_keeps_clean_repicks(tmp_path: Path) -> None:
+def test_save_device_pick_overwrites_none_keeps(tmp_path: Path) -> None:
     config = tmp_path / "config"
-    save_device(config, gpu=True, clean=False)  # new install
-    assert read_config(config)["device"] == "cuda"
-    save_device(config, gpu=False, clean=False)  # repair, or the GUI's CPU fallback already saved a choice
-    assert read_config(config)["device"] == "cuda"
-    save_device(config, gpu=False, clean=True)
+    save_device(config, None)  # an old install without a device line
     assert read_config(config)["device"] == "cpu"
+    save_device(config, True)  # new / clean install, or a same-window retry after unticking
+    assert read_config(config)["device"] == "cuda"
+    save_device(config, None)  # repair keeps it
+    assert read_config(config)["device"] == "cuda"
+    save_device(config, False)
+    assert read_config(config)["device"] == "cpu"
+
+
+def test_install_run_saves_gpu_pick_before_deps_sync(paths: InstallPaths, tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    source.mkdir()
+    (source / "pyproject.toml").write_text("[project]\n")
+    for exe in (paths.uv_exe, *(paths.ffmpeg_bin / name for name in FFMPEG_BINARIES)):
+        exe.parent.mkdir(parents=True, exist_ok=True)
+        exe.write_bytes(b"x")
+    set_config_value(paths.config_file, "device", "cpu")  # a failed earlier attempt already saved one
+    runs: list[list[str]] = []
+
+    def runner(cmd: list[str], *_a: Any) -> None:
+        runs.append(list(cmd))
+        if "sync" in cmd:  # the deps sync creates the venv
+            paths.gui_exe.parent.mkdir(parents=True, exist_ok=True)
+            paths.gui_exe.write_bytes(b"exe")
+
+    installer = Installer(
+        paths=paths,
+        source=str(source),
+        env={},
+        runner=runner,
+        seeder=lambda *_a: False,
+        model_size=lambda *_a: None,
+        in_use=lambda _p: False,
+        gpu=True,
+    )
+    assert installer.run(Events(progress=lambda *_a: None, state=lambda *_a: None)) is True
+    (sync,) = [cmd for cmd in runs if "sync" in cmd]
+    assert sync[sync.index("gui") + 1 :][:2] == ["--extra", "gpu-win"]
+    assert read_config(paths.config_file)["device"] == "cuda"
 
 
 def test_deps_command_adds_gpu_extra_for_cuda_device(paths: InstallPaths) -> None:
@@ -1057,38 +1092,53 @@ def test_deps_command_adds_gpu_extra_for_cuda_device(paths: InstallPaths) -> Non
     assert extras(deps_command(paths)) == ["gui"]
 
 
-def test_headless_gpu_detects_only_on_windows_without_cpu_flag(paths: InstallPaths, tmp_path: Path) -> None:
-    capable = GpuInfo("RTX 3060", 12288, (560, 94))
+def test_headless_gpu_detects_only_for_new_windows_installs(paths: InstallPaths, tmp_path: Path) -> None:
     calls: list[object] = []
 
     def detect(env: object) -> GpuInfo:
         calls.append(env)
-        return capable
+        return GpuInfo("RTX 3060", 12288, (560, 94))
 
-    assert headless_gpu(Installer(paths=paths, env={}, detect=detect), cpu=False) is True
-    assert headless_gpu(Installer(paths=paths, env={}, detect=detect), cpu=True) is False
-    linux = InstallPaths(tmp_path / "l", tmp_path / "l" / "config", windows=False)
-    assert headless_gpu(Installer(paths=linux, env={}, detect=detect), cpu=False) is False
-    assert len(calls) == 1
+    def headless(p: InstallPaths, **kw: Any) -> bool | None:
+        return headless_gpu(Installer(paths=p, env={}, detect=detect, clean=kw.pop("clean", False)), **kw)
+
+    assert headless(paths, cpu=False) is True
+    assert headless(paths, cpu=True) is False
+    assert headless(InstallPaths(tmp_path / "l", tmp_path / "l" / "config", windows=False), cpu=False) is None
+    paths.uv_exe.parent.mkdir(parents=True)
+    paths.uv_exe.write_bytes(b"uv")  # installed
+    assert headless(paths, cpu=False) is None  # repair keeps the saved device
+    assert headless(paths, cpu=False, clean=True) is True
+    assert headless(paths, cpu=True) is False  # --cpu always wins
+    assert len(calls) == 2
     assert parse_args(["--cpu"]).cpu is True
 
 
 @pytest.mark.parametrize(
-    ("mode", "installed", "state"),
-    [("repair", True, "disabled"), ("clean", True, "normal"), ("repair", False, "normal")],
+    ("mode", "installed", "saved", "state", "ticked"),
+    [
+        ("repair", True, "cpu", "disabled", False),  # shows the saved device, not the detection
+        ("repair", True, "cuda", "disabled", True),
+        ("clean", True, "cpu", "normal", True),  # re-picks from detection
+        ("repair", False, None, "normal", True),
+    ],
 )
-def test_gpu_checkbox_only_editable_when_device_is_picked(
-    paths: InstallPaths, mode: str, installed: bool, state: str
+def test_gpu_checkbox_shows_saved_device_on_repair(
+    paths: InstallPaths, mode: str, installed: bool, saved: str | None, state: str, ticked: bool
 ) -> None:
     if installed:
         paths.gui_exe.parent.mkdir(parents=True)
         paths.gui_exe.write_bytes(b"exe")
+    if saved:
+        set_config_value(paths.config_file, "device", saved)
     configured: dict[str, str] = {}
     window = SimpleNamespace(
         mode=SimpleNamespace(get=lambda: mode),
         installer=SimpleNamespace(paths=paths),
+        gpu_info=GpuInfo("RTX 3060", 12288, (560, 94)),
+        use_gpu=SimpleNamespace(set=lambda v: configured.update(ticked=v)),
         gpu_check=SimpleNamespace(config=lambda **kw: configured.update(kw)),
     )
     SetupWindow._sync_gpu_check(cast(Any, window))
-    assert is_installed(paths) is installed
-    assert configured == {"state": state}
+    assert configured == {"state": state, "ticked": ticked}
+    assert window.gpu_pick is (state == "normal")  # type: ignore[attr-defined]
