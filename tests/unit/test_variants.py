@@ -199,7 +199,7 @@ class TestVariantExecutor:
         # So we'll verify the structure in integration tests
         assert expected_keys  # Placeholder assertion
 
-    def test_execute_variant_forwards_diarize_kwargs(self, monkeypatch: Any, tmp_path: Path) -> None:
+    def test_execute_variant_forwards_diarize_kwargs(self, tmp_path: Path) -> None:
         """execute_variant must forward diarize / num_speakers into the underlying helper."""
         from backend.variants import executor as executor_mod  # noqa: PLC0415
 
@@ -208,8 +208,6 @@ class TestVariantExecutor:
         def fake_baseline(**kwargs: Any) -> dict[str, Any]:
             captured.update(kwargs)
             return {"segments": [], "duration": 0.0, "language": "et"}
-
-        monkeypatch.setattr(executor_mod, "transcribe_with_baseline_params", fake_baseline)
 
         variant = get_variant_by_number(1)  # baseline_true_defaults
         assert variant is not None
@@ -224,6 +222,7 @@ class TestVariantExecutor:
             language="et",
             diarize=True,
             num_speakers=3,
+            baseline_transcriber=fake_baseline,
         )
 
         assert result["status"] == "success"
