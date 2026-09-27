@@ -1,6 +1,6 @@
 # Windows one-click installer + simple GUI — design
 
-**Status:** in progress — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); monkeypatch-free tests shipped (`7a9461f`..`da82b47`); slice 5 shipped (`d7d30c2`, `6407156`, `f61bfe3`); slice 6 shipped (`e7fae5f` + review fixes; first real GPU run owed on the owner host); slice 7 (signing) dropped 2026-09-26 — replaced by one-launch-only exe (setup runs from the venv launcher afterwards). Execute slice by slice (`/qimpag` per slice).
+**Status:** ✅ SHIPPED 2026-09-27 (backlog left unplanned) — slice 1 shipped (`e59ac04`, `0653df2`); slice 2 shipped (`0895ab9`, `4799a25`); slice 3 shipped (`bd70690`, `830674e`); slice 4 shipped (`9aef2a4`, `7a4884c`, bat placed by the owner); slice 4b shipped (`c5eab3a` + review fixes + e2e guard); monkeypatch-free tests shipped (`7a9461f`..`da82b47`); slice 5 shipped (`d7d30c2`, `6407156`, `f61bfe3`); slice 6 shipped (`e7fae5f` + review fixes; first real GPU run owed on the owner host); slice 7 (signing) dropped 2026-09-26 — replaced by one-launch-only exe (setup runs from the venv launcher afterwards). Execute slice by slice (`/qimpag` per slice).
 
 ## Goals
 

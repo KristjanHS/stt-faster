@@ -184,6 +184,13 @@ Core dependencies (in `pyproject.toml`):
 
 A CPU-isolation canary (`tests/unit/test_no_transitive_cuda.py`) asserts `nvidia-cublas` is not installed in the CPU venv via `importlib.metadata.distribution` — catches a GPU torch leaking into a CPU venv.
 
+### Windows app (GUI + installer)
+
+- `backend/gui.py`: `GUI_PROFILES` = Estonian→`et-large`, English→`turbo`, both variant 61 (VAD off); config + HF token in `%APPDATA%\stt-faster`.
+- `installer/setup_gui.py` fetches uv, source, deps, models, ffmpeg+ffprobe into `%LOCALAPPDATA%\stt-faster`; built by `installer/build_installer.bat`, shipped via `make release V=X.Y.Z` (CI attaches the exe).
+- GPU mode (Windows only; dev venvs stay explicit): `nvidia-smi` vs `MIN_GPU_DRIVER`/`MIN_GPU_VRAM_MIB` → `device=cuda` + `gpu-win` extra (cuBLAS/cuDNN wheels, no torch); a failed GPU job re-runs once on CPU.
+- Design history: `docs/plans/archived/2026-09-25-windows-installer-gui-design.md`.
+
 ## Output Formats
 
 Selected via `--output-format {txt,json,both}`. Default: `txt`.
