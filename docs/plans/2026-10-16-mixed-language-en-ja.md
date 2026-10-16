@@ -33,13 +33,13 @@ per-segment language detection (`multilingual=True`) — its card only shows for
 
 ## Contract (questions round 2026-10-16)
 
-- **Seam:** `--language multi` → `transcribe()` passes `language=None, multilingual=True`.
+- **Seam:** `--language multi` → `transcribe()` passes `language=None, multilingual=True`; `en+ja` adds the Stage 5 restriction.
   The language string already flows GUI → CLI → run_config → processor → `transcribe()`
   untouched, so no new flag is plumbed. `et-*` presets keep the Estonian default; `multi`
   overrides it.
 - **New preset** `ja-en-distil` = `kotoba-tech/kotoba-whisper-bilingual-v1.0-faster`
   (cuda/float16).
-- **GUI profile** "Mixed (auto)" = `large8gb` + `--language multi` until the A/B says otherwise.
+- **GUI profile** "Mixed EN/JA" = `large8gb` + `--language en+ja` until the A/B says otherwise.
   Installer prefetches `Systran/faster-whisper-large-v3` for it.
 - **Rename:** `turbo` + `distil` merge into `en-distil`. Old names stay accepted as aliases
   that log a "renamed" warning. All docs/.bat/tests/GUI/scripts say `en-distil`.

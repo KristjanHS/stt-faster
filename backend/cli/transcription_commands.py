@@ -25,6 +25,7 @@ from backend.cli.ui import (
 from backend.config import setup_logging
 from backend.processor import TranscriptionProcessor
 from backend.run_config import RunConfig
+from backend.transcribe import candidate_languages
 from backend.services.factory import ServiceFactory
 from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
@@ -569,6 +570,10 @@ def create_app(*, process_fn: Callable[[argparse.Namespace], int] = cmd_process)
         ] = True,
     ) -> None:
         """Process audio files in the specified folder."""
+        try:
+            candidate_languages(language)
+        except ValueError as exc:
+            raise typer.BadParameter(str(exc), param_hint="--language") from exc
 
         # Create argparse-like namespace for backward compatibility
         args = argparse.Namespace()

@@ -36,7 +36,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
 from faster_whisper import WhisperModel
-from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+from faster_whisper.tokenizer import _LANGUAGE_CODES  # pyright: ignore[reportPrivateUsage, reportMissingTypeStubs]
+from huggingface_hub import hf_hub_download, snapshot_download  # type: ignore[import-untyped]
 from huggingface_hub.utils import disable_progress_bars  # pyright: ignore[reportPrivateImportUsage]
 
 from backend.exceptions import ModelNotFoundError
@@ -254,11 +255,19 @@ def _resolve_model_path(
     return config.model_id
 
 
+def _load_tokenizer(repo_id: str) -> Any:
+    from tokenizers import Tokenizer
+
+    # nosec B615 - same unpinned-main policy as every model snapshot (installer MODELS prefetches this repo)
+    return Tokenizer.from_file(hf_hub_download(repo_id, "tokenizer.json"))  # nosec B615
+
+
 def pick_model(
     preset: str = "et-large",
     *,
     resolver: Callable[[ModelConfig], str] = _resolve_model_path,
     loader: ModelLoader | None = None,
+    tokenizer_loader: Callable[[str], Any] = _load_tokenizer,
 ) -> WhisperModel:
     """Load a Whisper model by preset name.
 
@@ -290,7 +299,10 @@ def pick_model(
 
     # Load the model with automatic fallback
     model_loader = loader or ModelLoader()
-    return model_loader.load(model_path, config)
+    model = model_loader.load(model_path, config)
+    if config.tokenizer_id:
+        cast(Any, model).hf_tokenizer = tokenizer_loader(config.tokenizer_id)
+    return model
 
 
 def _round_floats(value: Any, places: int = FLOAT_PRECISION) -> Any:
@@ -437,10 +449,17 @@ MULTILINGUAL = "multi"
 
 
 def candidate_languages(language: str | None) -> tuple[str, ...] | None:
-    """``en+ja`` ⇒ ``("en", "ja")``: per-segment auto-detect limited to those codes; else ``None``."""
+    """``en+ja`` ⇒ ``("en", "ja")``: per-segment auto-detect limited to those codes; else ``None``.
+
+    Raises ``ValueError`` unless the ``+`` form names two or more known codes.
+    """
     if language is None or "+" not in language:
         return None
-    return tuple(code.strip() for code in language.split("+") if code.strip())
+    codes = tuple(dict.fromkeys(code.strip() for code in language.split("+") if code.strip()))
+    unknown = sorted(set(codes) - set(_LANGUAGE_CODES))
+    if len(codes) < 2 or unknown:
+        raise ValueError(f"Language {language!r}: join two or more known codes with '+' (unknown: {unknown})")
+    return codes
 
 
 def resolve_language(language: str | None, preset: str) -> tuple[str | None, bool]:
@@ -462,7 +481,7 @@ class _LanguageRestrictedWhisper:
     faster-whisper 1.2.1 has no candidate-language option: both the up-front and the per-segment
     (``multilingual=True``) detection take the argmax over all 99 languages from
     ``WhisperModel.model.detect_language`` — so accented English can land on ``et``. Filtering
-    (and renormalising) here covers both detection paths.
+    here covers both detection paths; probabilities stay raw (not renormalised).
     """
 
     def __init__(self, inner: Any, languages: tuple[str, ...]) -> None:
@@ -476,21 +495,19 @@ class _LanguageRestrictedWhisper:
         restricted: list[list[tuple[str, float]]] = []
         for ranked in self._inner.detect_language(*args, **kwargs):
             kept = [(token, prob) for token, prob in ranked if token in self._tokens]
-            total = sum(prob for _, prob in kept) or 1.0
-            restricted.append([(token, prob / total) for token, prob in kept])
+            if not kept:
+                raise ValueError(f"Model vocabulary has none of {sorted(self._tokens)}")
+            restricted.append(kept)
         return restricted
 
 
 def restrict_languages(model: WhisperModel, languages: tuple[str, ...]) -> WhisperModel:
     """Return a shallow view of ``model`` whose language detection only picks from ``languages``.
 
-    The cached model itself is left untouched, so other runs sharing it stay unrestricted.
+    ``model`` itself is left untouched, so other holders of it stay unrestricted.
     """
-    # The local WhisperModel stub omits ``model`` / ``supported_languages``.
+    # The local WhisperModel stub omits ``model``.
     loaded: Any = model
-    unknown = sorted(set(languages) - set(loaded.supported_languages))
-    if unknown:
-        raise ValueError(f"Unsupported language code(s) for this model: {', '.join(unknown)}")
     view: Any = copy.copy(loaded)
     view.model = _LanguageRestrictedWhisper(loaded.model, languages)
     return cast(WhisperModel, view)

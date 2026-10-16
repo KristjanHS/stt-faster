@@ -189,7 +189,7 @@ def test_build_command_mirrors_teams_bat(tmp_path: Path) -> None:
     assert "-v" not in cmd
 
 
-def test_build_command_mixed_profile_uses_multilingual(tmp_path: Path) -> None:
+def test_build_command_mixed_profile_restricts_to_en_ja(tmp_path: Path) -> None:
     cmd = build_command(tmp_path, GUI_PROFILES["Mixed EN/JA"], timestamps=False)
     assert cmd[cmd.index("--preset") + 1] == "large8gb"
     assert cmd[cmd.index("--language") + 1] == "en+ja"

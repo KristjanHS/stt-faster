@@ -22,6 +22,7 @@ from backend.transcribe import (
     TranscriptionMetrics,
     _get_estonian_model_path,
     _round_floats,
+    candidate_languages,
     pick_model,
     resolve_language,
     restrict_languages,
@@ -187,6 +188,24 @@ class TestPickModel:
             f"Preset {preset} should load from {expected_cache_path}"
         )
 
+    @pytest.mark.parametrize(
+        "preset,expected_tokenizer", [("ja-en-distil", "Systran/faster-whisper-large-v3"), ("large8gb", None)]
+    )
+    def test_preset_tokenizer_override(self, preset: str, expected_tokenizer: str | None) -> None:
+        class Loaded:
+            hf_tokenizer = "bundled"
+
+        loader = ModelLoader(
+            device_selector=FixedDeviceSelector("cuda", "float16"),
+            model_factory=RecordingModelFactory(return_value=Loaded()),
+        )
+
+        model: Any = pick_model(
+            preset, resolver=RecordingResolver("/tmp/model"), loader=loader, tokenizer_loader=lambda repo: f"tok:{repo}"
+        )
+
+        assert model.hf_tokenizer == (f"tok:{expected_tokenizer}" if expected_tokenizer else "bundled")
+
     def test_et_large_fallback_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test et-large preset falls back to CPU when GPU fails (fallback behavior)."""
         resolver = RecordingResolver("/tmp/model/ct2")
@@ -257,23 +276,27 @@ class DetectingModel(RecordingModel):
         return super().transcribe(*args, **kwargs)
 
 
-def test_restrict_languages_filters_and_renormalises_without_touching_original() -> None:
+def test_restrict_languages_filters_without_touching_original() -> None:
     model = DetectingModel()
     view: Any = restrict_languages(cast(WhisperModel, model), ("en", "ja"))
 
-    assert view.model.detect_language(None) == [
-        [("<|en|>", pytest.approx(0.41 / 0.51)), ("<|ja|>", pytest.approx(0.10 / 0.51))]
-    ]
+    assert view.model.detect_language(None) == [[("<|en|>", 0.41), ("<|ja|>", 0.10)]]
     assert model.model.detect_language(None)[0][0][0] == "<|et|>"
-    with pytest.raises(ValueError, match="xx"):
-        restrict_languages(cast(WhisperModel, model), ("en", "xx"))
+    with pytest.raises(ValueError, match="none of"):
+        restrict_languages(cast(WhisperModel, model), ("ko", "zh")).model.detect_language(None)
+
+
+@pytest.mark.parametrize("language", ["en+xx", "+", "en+", "en+en"])
+def test_candidate_languages_rejects_bad_plus_specs(language: str) -> None:
+    with pytest.raises(ValueError, match="two or more known codes"):
+        candidate_languages(language)
 
 
 @pytest.mark.parametrize("language,expected", [("en+ja", "<|en|>"), ("multi", "<|et|>")])
 def test_transcribe_paths_restrict_detection_for_plus_language(tmp_path: Path, language: str, expected: str) -> None:
     processed_path = tmp_path / "processed.wav"
     processed_path.write_text("data")
-    runs: list[DetectingModel] = []
+    runs: list[DetectingModel] = []  # copy.copy shares ``picked`` between a model and its restricted view
 
     def picker(_preset: str) -> DetectingModel:
         runs.append(DetectingModel())

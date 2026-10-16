@@ -23,12 +23,14 @@ class ModelConfig:
         device: Preferred device (cpu/cuda) - may fallback to CPU
         compute_type: Quantization/precision type
         is_estonian: Whether this is an Estonian-specific model (requires special path handling)
+        tokenizer_id: HF repo whose ``tokenizer.json`` to use when ``model_id`` ships none
     """
 
     model_id: str
     device: DeviceType = "cuda"
     compute_type: ComputeType = "float16"
     is_estonian: bool = False
+    tokenizer_id: str | None = None
 
 
 # Model presets - easy to extend with new models
@@ -63,6 +65,9 @@ PRESETS: dict[str, ModelConfig] = {
         model_id="kotoba-tech/kotoba-whisper-bilingual-v1.0-faster",
         device="cuda",
         compute_type="float16",
+        # No tokenizer.json in the repo: faster-whisper's whisper-tiny fallback is off by one token
+        # against this 100-language vocab (timestamps 0.0, <|transcribe|> decodes as <|translate|>).
+        tokenizer_id="Systran/faster-whisper-large-v3",
     ),
     # Fallback preset (portable, CPU-friendly)
     "small": ModelConfig(
