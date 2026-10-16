@@ -489,7 +489,7 @@ docker-build-prod:
 	@echo ">> Building production Docker image..."
 	docker build -t stt-faster:latest .
 	@echo "✅ Production image built: stt-faster:latest"
-	@echo "   Usage: ./scripts/transcribe-docker process /path/to/audio --preset turbo"
+	@echo "   Usage: ./scripts/transcribe-docker process /path/to/audio --preset en-distil"
 
 docker-run-prod:
 	@echo ">> Running production Docker container..."

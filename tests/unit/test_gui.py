@@ -176,7 +176,7 @@ def test_build_command_mirrors_teams_bat(tmp_path: Path) -> None:
         "process",
         str(tmp_path),
         "--preset",
-        "turbo",
+        "en-distil",
         "--variant",
         "61",
         "--language",
@@ -187,6 +187,12 @@ def test_build_command_mirrors_teams_bat(tmp_path: Path) -> None:
         "--no-timestamps",
     ]
     assert "-v" not in cmd
+
+
+def test_build_command_mixed_profile_restricts_to_en_ja(tmp_path: Path) -> None:
+    cmd = build_command(tmp_path, GUI_PROFILES["Mixed EN/JA"], timestamps=False)
+    assert cmd[cmd.index("--preset") + 1] == "large8gb"
+    assert cmd[cmd.index("--language") + 1] == "en+ja"
 
 
 def test_build_env_sets_device_and_prepends_ffmpeg(tmp_path: Path) -> None:

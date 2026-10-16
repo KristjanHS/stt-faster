@@ -7,7 +7,7 @@ REM   - Caller already invoked _runtime.bat (populates STT_RUNTIME,
 REM     STT_DIARIZE_ARGS, STT_AUDIO_DIR_RESOLVED, STT_AUDIO_DIR_WSL,
 REM     STT_WSL_REPO) and _variants.bat (populates VARIANTS_COMMA).
 REM   - Caller sets STT_CLI_TAIL with preset/language/output-format flags
-REM     (e.g. "--preset turbo --language en --output-format txt"). Shared
+REM     (e.g. "--preset en-distil --language en --output-format txt"). Shared
 REM     between the WSL and docker branches today; collapses both branches
 REM     to one knob.
 REM   - DIARIZE (raw caller knob) is folded into STT_DIARIZE_ON by

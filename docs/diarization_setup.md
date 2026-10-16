@@ -79,7 +79,7 @@ pyannote loaded but crashed on a specific file. This is per-file, not batch-leve
 
 community-1 needs roughly 2 GB VRAM on top of whisper at peak. If your card is tight (≤4 GB):
 
-- Use a smaller whisper preset (`distil`, `et-32`) — frees more headroom for pyannote.
+- Use a smaller whisper preset (`en-distil`, `et-32`) — frees more headroom for pyannote.
 - Force CPU on the diarize stage by unsetting CUDA: `CUDA_VISIBLE_DEVICES= .venv/bin/python scripts/transcribe_manager.py process ...` runs both whisper and pyannote on CPU.
 - Run with `--no-diarize` if you don't need speaker labels for this particular batch.
 

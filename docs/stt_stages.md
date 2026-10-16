@@ -26,7 +26,7 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 | **SNR Estimation** | Method | `estimate_snr_db` | `estimate_snr_db` | Hardcoded |
 | **Model Loading** | Compute type | `float16`, `int8_float16`, `int8` | `float16`, `int8_float16`, `int8` | From preset config |
 | **Model Loading** | Estonian model | `TalTechNLP/whisper-large-v3-turbo-et-verbatim` | `TalTechNLP/whisper-large-v3-turbo-et-verbatim` | Hardcoded per preset |
-| **Model Loading** | Turbo model | `Systran/faster-distil-whisper-large-v3` | `Systran/faster-distil-whisper-large-v3` | Hardcoded per preset |
+| **Model Loading** | en-distil model | `Systran/faster-distil-whisper-large-v3` | `Systran/faster-distil-whisper-large-v3` | Hardcoded per preset |
 | **Model Loading** | Large model | `Systran/faster-whisper-large-v3` | `Systran/faster-whisper-large-v3` | Hardcoded per preset |
 | **Transcription** | Beam size | `5` | `5` | env: `STT_TRANSCRIBE_BEAM_SIZE` |
 | **Transcription** | Patience | `1.1` | `1.0` | Beam search patience, env: `STT_TRANSCRIBE_PATIENCE` |
@@ -61,8 +61,8 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 |--------|-------|--------|--------------|----------|
 | `et-large` | TalTechNLP/whisper-large-v3-turbo-et-verbatim | cuda | float16 | Estonian |
 | `et-32` | TalTechNLP/whisper-large-v3-turbo-et-verbatim | cpu | float32 | Estonian |
-| `turbo` | Systran/faster-distil-whisper-large-v3 | cuda | float16 | Multi |
-| `distil` | Systran/faster-distil-whisper-large-v3 | cuda | float16 | Multi |
+| `en-distil` | Systran/faster-distil-whisper-large-v3 | cuda | float16 | English only |
+| `ja-en-distil` | kotoba-tech/kotoba-whisper-bilingual-v1.0-faster | cuda | float16 | Japanese + English |
 | `large8gb` | Systran/faster-whisper-large-v3 | cuda | int8_float16 | Multi |
 | `small` | small | cpu | int8 | Multi |
 

@@ -61,3 +61,12 @@ def test_diarize_skipped_without_pyannote(tmp_path: Path) -> None:
 
 def test_diarize_kept_with_pyannote(tmp_path: Path) -> None:
     assert _run_process(tmp_path, pyannote=True).diarize is True
+
+
+def test_bad_plus_language_fails_before_any_file(tmp_path: Path) -> None:
+    args = argparse.Namespace(input_folder=str(tmp_path), diarize=False, verbose=False, language="en+jp")
+    ran: list[object] = []
+
+    exit_code = transcription_commands.cmd_process(args, process_single_variant=lambda *a, **k: ran.append(a) or 0)
+
+    assert (exit_code, ran) == (1, [])

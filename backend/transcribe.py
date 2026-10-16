@@ -23,6 +23,7 @@ export HF_XET_HIGH_PERFORMANCE=1
 python transcribe.py
 """
 
+import copy
 import json
 import logging
 import math
@@ -35,7 +36,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Dict, cast
 
 from faster_whisper import WhisperModel
-from huggingface_hub import snapshot_download  # type: ignore[import-untyped]
+from faster_whisper.tokenizer import _LANGUAGE_CODES  # pyright: ignore[reportPrivateUsage, reportMissingTypeStubs]
+from huggingface_hub import hf_hub_download, snapshot_download  # type: ignore[import-untyped]
 from huggingface_hub.utils import disable_progress_bars  # pyright: ignore[reportPrivateImportUsage]
 
 from backend.exceptions import ModelNotFoundError
@@ -253,18 +255,26 @@ def _resolve_model_path(
     return config.model_id
 
 
+def _load_tokenizer(repo_id: str) -> Any:
+    from tokenizers import Tokenizer
+
+    # nosec B615 - same unpinned-main policy as every model snapshot (installer MODELS prefetches this repo)
+    return Tokenizer.from_file(hf_hub_download(repo_id, "tokenizer.json"))  # nosec B615
+
+
 def pick_model(
     preset: str = "et-large",
     *,
     resolver: Callable[[ModelConfig], str] = _resolve_model_path,
     loader: ModelLoader | None = None,
+    tokenizer_loader: Callable[[str], Any] = _load_tokenizer,
 ) -> WhisperModel:
     """Load a Whisper model by preset name.
 
     This is the main entry point for loading models. It uses configuration-driven
     model selection with automatic device selection and GPU->CPU fallback.
 
-    Available presets: et-large, turbo, distil, large8gb, small
+    Available presets: see PRESETS in model_config.py
 
     Args:
         preset: Model preset name (see PRESETS in model_config.py)
@@ -289,7 +299,10 @@ def pick_model(
 
     # Load the model with automatic fallback
     model_loader = loader or ModelLoader()
-    return model_loader.load(model_path, config)
+    model = model_loader.load(model_path, config)
+    if config.tokenizer_id:
+        cast(Any, model).hf_tokenizer = tokenizer_loader(config.tokenizer_id)
+    return model
 
 
 def _round_floats(value: Any, places: int = FLOAT_PRECISION) -> Any:
@@ -432,16 +445,72 @@ def format_segments_as_text(segments: list[dict[str, Any]], *, include_timestamp
     return "".join(lines)
 
 
-def _apply_language_default(language: str | None, preset: str) -> str | None:
-    """Apply the Estonian-preset language default.
+MULTILINGUAL = "multi"
 
-    When ``language`` is unset and the preset name marks an Estonian model
-    (``et-*``), default to Estonian. Otherwise return ``language`` unchanged
-    (``None`` ⇒ faster-whisper auto-detects).
+
+def candidate_languages(language: str | None) -> tuple[str, ...] | None:
+    """``en+ja`` ⇒ ``("en", "ja")``: per-segment auto-detect limited to those codes; else ``None``.
+
+    Raises ``ValueError`` unless the ``+`` form names two or more known codes.
     """
+    if language is None or "+" not in language:
+        return None
+    codes = tuple(dict.fromkeys(code.strip() for code in language.split("+") if code.strip()))
+    unknown = sorted(set(codes) - set(_LANGUAGE_CODES))
+    if len(codes) < 2 or unknown:
+        raise ValueError(f"Language {language!r}: join two or more known codes with '+' (unknown: {unknown})")
+    return codes
+
+
+def resolve_language(language: str | None, preset: str) -> tuple[str | None, bool]:
+    """Map the requested language to faster-whisper's ``(language, multilingual)``.
+
+    ``multi`` or ``en+ja`` ⇒ auto-detect per segment (mixed-language audio; the ``+`` form is
+    narrowed by :func:`restrict_languages`); unset on an ``et-*`` preset ⇒ ``et``.
+    """
+    if language == MULTILINGUAL or candidate_languages(language):
+        return None, True
     if language is None and preset.startswith("et-"):
-        return "et"
-    return language
+        return "et", False
+    return language, False
+
+
+class _LanguageRestrictedWhisper:
+    """CTranslate2 Whisper wrapper whose ``detect_language`` ranks only the allowed codes.
+
+    faster-whisper 1.2.1 has no candidate-language option: both the up-front and the per-segment
+    (``multilingual=True``) detection take the argmax over every vocabulary language from
+    ``WhisperModel.model.detect_language`` — so accented English can land on ``et``. Filtering
+    here covers both detection paths; probabilities stay raw (not renormalised).
+    """
+
+    def __init__(self, inner: Any, languages: tuple[str, ...]) -> None:
+        self._inner = inner
+        self._tokens = {f"<|{code}|>" for code in languages}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def detect_language(self, *args: Any, **kwargs: Any) -> list[list[tuple[str, float]]]:
+        restricted: list[list[tuple[str, float]]] = []
+        for ranked in self._inner.detect_language(*args, **kwargs):
+            kept = [(token, prob) for token, prob in ranked if token in self._tokens]
+            if not kept:
+                raise ValueError(f"Model vocabulary has none of {sorted(self._tokens)}")
+            restricted.append(kept)
+        return restricted
+
+
+def restrict_languages(model: WhisperModel, languages: tuple[str, ...]) -> WhisperModel:
+    """Return a shallow view of ``model`` whose language detection only picks from ``languages``.
+
+    ``model`` itself is left untouched, so other holders of it stay unrestricted.
+    """
+    # The local WhisperModel stub omits ``model``.
+    loaded: Any = model
+    view: Any = copy.copy(loaded)
+    view.model = _LanguageRestrictedWhisper(loaded.model, languages)
+    return cast(WhisperModel, view)
 
 
 def _collect_segments(
@@ -681,13 +750,20 @@ def transcribe(
 
         # Auto-detect language based on preset if not explicitly provided
         requested_language = language
-        applied_language = _apply_language_default(requested_language, preset)
+        applied_language, multilingual = resolve_language(requested_language, preset)
+        languages = candidate_languages(requested_language)
+        if languages:
+            model = restrict_languages(model, languages)
 
         # Log language configuration
         if applied_language:
             LOGGER.info("Language: %s (forced)", applied_language)
         else:
-            LOGGER.info("Language: auto-detect")
+            LOGGER.info(
+                "Language: auto-detect%s%s",
+                " per segment" if multilingual else "",
+                f" among {', '.join(languages)}" if languages else "",
+            )
 
         LOGGER.info("Transcribing audio")
         reporter.stage("transcribe")
@@ -704,6 +780,7 @@ def transcribe(
             patience=transcription_config.patience,
             word_timestamps=transcription_config.word_timestamps,
             language=applied_language,
+            multilingual=multilingual,
             task=transcription_config.task,
             chunk_length=transcription_config.chunk_length,
             vad_filter=transcription_config.vad_filter,

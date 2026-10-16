@@ -78,7 +78,7 @@ docker run --rm stt-faster:latest --help
 docker run --rm \
   -v $(pwd):/workspace \
   -v ~/.cache/hf:/home/appuser/.cache/hf \
-  stt-faster:latest process /workspace/audio --preset turbo
+  stt-faster:latest process /workspace/audio --preset en-distil
 
 # Check status
 docker run --rm \
@@ -100,7 +100,7 @@ spec:
       - name: transcribe
         image: stt-faster:latest
         command: ["python", "/app/scripts/transcribe_manager.py"]
-        args: ["process", "/workspace/audio", "--preset", "turbo"]
+        args: ["process", "/workspace/audio", "--preset", "en-distil"]
         volumeMounts:
         - name: audio-files
           mountPath: /workspace
@@ -135,7 +135,7 @@ services:
       - ./audio:/workspace
       - model-cache:/home/appuser/.cache/hf
       - app-data:/home/appuser/.local/share/stt-faster
-    command: ["process", "/workspace", "--preset", "turbo"]
+    command: ["process", "/workspace", "--preset", "en-distil"]
     user: "1000:1000"
     
 volumes:
@@ -198,7 +198,7 @@ docker run --rm -u "$(id -u):$(id -g)" \
 # Pre-download models to cache
 docker run --rm \
   -v ~/.cache/hf:/home/appuser/.cache/hf \
-  stt-faster:latest process /workspace --preset turbo --help
+  stt-faster:latest process /workspace --preset en-distil --help
 ```
 
 ## References

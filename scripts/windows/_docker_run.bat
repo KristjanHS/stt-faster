@@ -9,7 +9,7 @@ REM       STT_AUDIO_DIR_RESOLVED  (Windows path; mounted at /workspace)
 REM       STT_DIARIZE_ARGS        (e.g. "--diarize --num-speakers 2" or "--no-diarize"; always explicit)
 REM       VARIANTS_COMMA          ("52" / "1,36,44" / ...)
 REM   - Caller sets STT_CLI_TAIL with the preset/language/output-format flags
-REM     (e.g. "--preset turbo --language en --output-format txt").
+REM     (e.g. "--preset en-distil --language en --output-format txt").
 REM   - STT_DIARIZE_ON / STT_WSL_REPO (from _runtime.bat) drive the model mounts.
 REM     Host prep, in WSL: make diarization-model rnnoise-model
 REM   - Helper does NOT setlocal.

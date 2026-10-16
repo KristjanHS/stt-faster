@@ -58,8 +58,8 @@ def _create_test_processor(
 
 def test_processor_custom_preset(temp_folder: Path) -> None:
     """Test processor with custom preset."""
-    processor = _create_test_processor(temp_folder, preset="turbo")
-    assert processor.preset == "turbo"
+    processor = _create_test_processor(temp_folder, preset="en-distil")
+    assert processor.preset == "en-distil"
 
 
 def test_scan_folder_empty(temp_folder: Path) -> None:

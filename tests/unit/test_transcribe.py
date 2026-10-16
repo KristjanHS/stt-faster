@@ -17,11 +17,15 @@ from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.metrics import PreprocessMetrics
 from backend.preprocess.orchestrator import PreprocessResult
 from backend.progress import ProgressEvent, ProgressReporter, parse_progress
+from backend.variants.executor import transcribe_with_baseline_params, transcribe_with_minimal_params
 from backend.transcribe import (
     TranscriptionMetrics,
     _get_estonian_model_path,
     _round_floats,
+    candidate_languages,
     pick_model,
+    resolve_language,
+    restrict_languages,
     segment_to_payload,
     transcribe,
     transcribe_and_save,
@@ -159,8 +163,9 @@ class TestPickModel:
         "preset,expected_model_id,expected_cache_path",
         [
             ("et-large", "TalTechNLP/whisper-large-v3-turbo-et-verbatim", "/tmp/model/ct2"),
-            ("turbo", "Systran/faster-distil-whisper-large-v3", "/tmp/model/turbo"),
-            ("distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/distil"),
+            ("en-distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/en-distil"),
+            ("turbo", "Systran/faster-distil-whisper-large-v3", "/tmp/model/turbo"),  # retired alias
+            ("distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/distil"),  # retired alias
             ("large8gb", "Systran/faster-whisper-large-v3", "/tmp/model/large-v3"),
         ],
     )
@@ -182,6 +187,24 @@ class TestPickModel:
         assert factory.calls == [(expected_cache_path, "cuda", "float16")], (
             f"Preset {preset} should load from {expected_cache_path}"
         )
+
+    @pytest.mark.parametrize(
+        "preset,expected_tokenizer", [("ja-en-distil", "Systran/faster-whisper-large-v3"), ("large8gb", None)]
+    )
+    def test_preset_tokenizer_override(self, preset: str, expected_tokenizer: str | None) -> None:
+        class Loaded:
+            hf_tokenizer = "bundled"
+
+        loader = ModelLoader(
+            device_selector=FixedDeviceSelector("cuda", "float16"),
+            model_factory=RecordingModelFactory(return_value=Loaded()),
+        )
+
+        model: Any = pick_model(
+            preset, resolver=RecordingResolver("/tmp/model"), loader=loader, tokenizer_loader=lambda repo: f"tok:{repo}"
+        )
+
+        assert model.hf_tokenizer == (f"tok:{expected_tokenizer}" if expected_tokenizer else "bundled")
 
     def test_et_large_fallback_to_cpu(self, caplog: pytest.LogCaptureFixture) -> None:
         """Test et-large preset falls back to CPU when GPU fails (fallback behavior)."""
@@ -215,6 +238,90 @@ class TestPickModel:
         # Test behavior: invalid preset should raise clear error
         with pytest.raises(KeyError, match="Unknown preset 'unknown'"):
             pick_model("unknown")
+
+
+@pytest.mark.parametrize(
+    "language,preset,expected",
+    [
+        ("multi", "et-large", (None, True)),
+        (None, "et-large", ("et", False)),
+        (None, "large8gb", (None, False)),
+        ("ja", "large8gb", ("ja", False)),
+        ("en+ja", "et-large", (None, True)),
+    ],
+)
+def test_resolve_language(language: str | None, preset: str, expected: tuple[str | None, bool]) -> None:
+    assert resolve_language(language, preset) == expected
+
+
+class RankingWhisper:
+    """Stands in for the CTranslate2 Whisper: ranks accented English as Estonian."""
+
+    def detect_language(self, _features: object) -> list[list[tuple[str, float]]]:
+        return [[("<|et|>", 0.44), ("<|en|>", 0.41), ("<|ja|>", 0.10), ("<|fi|>", 0.05)]]
+
+
+class DetectingModel(RecordingModel):
+    """Records the language the (possibly restricted) detector would pick at transcribe time."""
+
+    supported_languages = ("en", "et", "fi", "ja")
+
+    def __init__(self) -> None:
+        super().__init__([], FakeTranscriptionInfo(language="en", language_probability=0.9, duration=5.0))
+        self.model: Any = RankingWhisper()
+        self.picked: list[str] = []
+
+    def transcribe(self, *args: Any, **kwargs: Any) -> Any:
+        self.picked.append(self.model.detect_language(None)[0][0][0])
+        return super().transcribe(*args, **kwargs)
+
+
+def test_restrict_languages_filters_without_touching_original() -> None:
+    model = DetectingModel()
+    view: Any = restrict_languages(cast(WhisperModel, model), ("en", "ja"))
+
+    assert view.model.detect_language(None) == [[("<|en|>", 0.41), ("<|ja|>", 0.10)]]
+    assert model.model.detect_language(None)[0][0][0] == "<|et|>"
+    with pytest.raises(ValueError, match="none of"):
+        restrict_languages(cast(WhisperModel, model), ("ko", "zh")).model.detect_language(None)
+
+
+@pytest.mark.parametrize("language", ["en+xx", "+", "en+", "en+en"])
+def test_candidate_languages_rejects_bad_plus_specs(language: str) -> None:
+    with pytest.raises(ValueError, match="two or more known codes"):
+        candidate_languages(language)
+
+
+@pytest.mark.parametrize("language,expected", [("en+ja", "<|en|>"), ("multi", "<|et|>")])
+def test_transcribe_paths_restrict_detection_for_plus_language(tmp_path: Path, language: str, expected: str) -> None:
+    processed_path = tmp_path / "processed.wav"
+    processed_path.write_text("data")
+    runs: list[DetectingModel] = []  # copy.copy shares ``picked`` between a model and its restricted view
+
+    def picker(_preset: str) -> DetectingModel:
+        runs.append(DetectingModel())
+        return runs[-1]
+
+    transcribe(
+        "/path/to/audio.wav",
+        preset="large8gb",
+        language=language,
+        preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+        preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+        model_picker=picker,
+    )
+    for runner in (transcribe_with_baseline_params, transcribe_with_minimal_params):
+        runner(
+            "/path/to/audio.wav",
+            "large8gb",
+            language,
+            PreprocessConfig(enabled=False),
+            lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            TranscriptionConfig(),
+            model_picker=picker,
+        )
+
+    assert [run.picked for run in runs] == [[expected]] * 3
 
 
 class TestRoundFloats:
@@ -377,7 +484,7 @@ class TestTranscribe:
 
         transcribe(
             "/path/to/audio.wav",
-            preset="turbo",
+            preset="en-distil",
             preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
             preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
             model_picker=lambda preset: model,  # noqa: ARG005
@@ -386,6 +493,50 @@ class TestTranscribe:
         # Verify language parameter is None for non-Estonian models
         call_kwargs = model.calls[0]["kwargs"]
         assert call_kwargs["language"] is None
+
+    @pytest.mark.parametrize(
+        "language,expected_language,expected_multilingual",
+        [("multi", None, True), ("en", "en", False), (None, None, False)],
+    )
+    def test_transcribe_passes_multilingual_flag(
+        self, tmp_path: Path, language: str | None, expected_language: str | None, expected_multilingual: bool
+    ) -> None:
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        model = RecordingModel([], FakeTranscriptionInfo(language="en", language_probability=0.9, duration=5.0))
+
+        transcribe(
+            "/path/to/audio.wav",
+            preset="large8gb",
+            language=language,
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
+
+        call_kwargs = model.calls[0]["kwargs"]
+        assert call_kwargs["language"] == expected_language
+        assert call_kwargs["multilingual"] is expected_multilingual
+
+    @pytest.mark.parametrize("runner", [transcribe_with_baseline_params, transcribe_with_minimal_params])
+    def test_variant_runners_pass_multilingual_for_multi(self, tmp_path: Path, runner: Any) -> None:
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        model = RecordingModel([], FakeTranscriptionInfo(language="ja", language_probability=0.9, duration=5.0))
+
+        runner(
+            "/path/to/audio.wav",
+            "et-large",
+            "multi",
+            PreprocessConfig(enabled=False),
+            lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            TranscriptionConfig(),
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
+
+        call_kwargs = model.calls[0]["kwargs"]
+        assert "language" not in call_kwargs
+        assert call_kwargs["multilingual"] is True
 
     def test_transcribe_without_duration(self, tmp_path: Path) -> None:
         """Test transcription when duration is None."""
@@ -492,9 +643,9 @@ class TestTranscribeToJson:
 
         json_path = tmp_path / "test.json"
 
-        transcribe_to_json("test.wav", str(json_path), preset="turbo", transcribe_fn=fake_transcribe)
+        transcribe_to_json("test.wav", str(json_path), preset="en-distil", transcribe_fn=fake_transcribe)
 
-        assert calls == [("test.wav", "turbo", None)]
+        assert calls == [("test.wav", "en-distil", None)]
         assert json.loads(json_path.read_text()) == payload
 
 

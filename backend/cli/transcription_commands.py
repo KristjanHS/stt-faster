@@ -25,6 +25,7 @@ from backend.cli.ui import (
 from backend.config import setup_logging
 from backend.processor import TranscriptionProcessor
 from backend.run_config import RunConfig
+from backend.transcribe import candidate_languages
 from backend.services.factory import ServiceFactory
 from backend.variants.registry import get_variant_by_number
 from backend.variants.variant import Variant
@@ -507,6 +508,12 @@ def cmd_process(
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
+    try:
+        candidate_languages(getattr(args, "language", None))
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        return 1
+
     if getattr(args, "diarize", False) and not pyannote_installed():
         console.print(
             "[yellow]Warning:[/yellow] pyannote.audio is not installed — continuing WITHOUT speaker "
@@ -544,7 +551,14 @@ def create_app(*, process_fn: Callable[[argparse.Namespace], int] = cmd_process)
     def process(
         input_folder: Annotated[str, typer.Argument(help="Path to input folder containing audio files")],
         preset: Annotated[str, typer.Option("--preset", "-p", help="Model preset name")] = "et-large",
-        language: Annotated[str | None, typer.Option("--language", "-l", help="Language code")] = None,
+        language: Annotated[
+            str | None,
+            typer.Option(
+                "--language",
+                "-l",
+                help="Language code, 'multi' (per-segment auto-detect), or 'en+ja' (auto-detect among those)",
+            ),
+        ] = None,
         output_format: Annotated[
             str, typer.Option("--output-format", "-f", help="Output format: txt, json, or both")
         ] = "both",
@@ -562,7 +576,6 @@ def create_app(*, process_fn: Callable[[argparse.Namespace], int] = cmd_process)
         ] = True,
     ) -> None:
         """Process audio files in the specified folder."""
-
         # Create argparse-like namespace for backward compatibility
         args = argparse.Namespace()
         args.input_folder = input_folder

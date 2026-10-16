@@ -3,7 +3,7 @@
 # Docker wrapper script for end users
 #
 # Purpose: Run stt-faster in Docker without installing Python/dependencies
-# Usage: ./scripts/transcribe-docker process /path/to/audio --preset turbo
+# Usage: ./scripts/transcribe-docker process /path/to/audio --preset en-distil
 ##########################################################################
 
 set -euo pipefail
@@ -31,7 +31,7 @@ ${YELLOW}Usage:${NC}
   
 ${YELLOW}Examples:${NC}
   # Process audio files in current directory
-  ./scripts/transcribe-docker process ./audio --preset turbo
+  ./scripts/transcribe-docker process ./audio --preset en-distil
   
   # Process specific file
   ./scripts/transcribe-docker process /path/to/audio.mp3 --preset large

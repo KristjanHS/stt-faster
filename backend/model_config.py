@@ -4,8 +4,11 @@ This module defines available model presets and their configurations,
 separating configuration from model loading logic.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Literal
+
+LOGGER = logging.getLogger(__name__)
 
 DeviceType = Literal["cpu", "cuda"]
 ComputeType = Literal["int8", "float16", "int8_float16", "float32"]
@@ -20,12 +23,14 @@ class ModelConfig:
         device: Preferred device (cpu/cuda) - may fallback to CPU
         compute_type: Quantization/precision type
         is_estonian: Whether this is an Estonian-specific model (requires special path handling)
+        tokenizer_id: HF repo whose ``tokenizer.json`` to use when ``model_id`` ships none
     """
 
     model_id: str
     device: DeviceType = "cuda"
     compute_type: ComputeType = "float16"
     is_estonian: bool = False
+    tokenizer_id: str | None = None
 
 
 # Model presets - easy to extend with new models
@@ -44,12 +49,8 @@ PRESETS: dict[str, ModelConfig] = {
         is_estonian=True,
     ),
     # English/multilingual models (Systran faster-whisper)
-    "turbo": ModelConfig(
-        model_id="Systran/faster-distil-whisper-large-v3",
-        device="cuda",
-        compute_type="float16",
-    ),
-    "distil": ModelConfig(
+    # distil-whisper: English-only training data; use large8gb for any other language.
+    "en-distil": ModelConfig(
         model_id="Systran/faster-distil-whisper-large-v3",
         device="cuda",
         compute_type="float16",
@@ -59,6 +60,15 @@ PRESETS: dict[str, ModelConfig] = {
         device="cuda",
         compute_type="int8_float16",  # Try original large-v3 with mixed INT8/FP16 to fit in 8 GB
     ),
+    # kotoba-whisper-bilingual: large-v3 distilled for Japanese + English (~6x faster, slightly weaker Japanese).
+    "ja-en-distil": ModelConfig(
+        model_id="kotoba-tech/kotoba-whisper-bilingual-v1.0-faster",
+        device="cuda",
+        compute_type="float16",
+        # No tokenizer.json in the repo: faster-whisper's whisper-tiny fallback is off by one token
+        # against this 100-language vocab (timestamps 0.0, <|transcribe|> decodes as <|translate|>).
+        tokenizer_id="Systran/faster-whisper-large-v3",
+    ),
     # Fallback preset (portable, CPU-friendly)
     "small": ModelConfig(
         model_id="small",
@@ -67,12 +77,15 @@ PRESETS: dict[str, ModelConfig] = {
     ),
 }
 
+# Retired preset names, still accepted so existing scripts keep working.
+PRESET_ALIASES: dict[str, str] = {"turbo": "en-distil", "distil": "en-distil"}
+
 
 def get_preset(name: str) -> ModelConfig:
     """Get model configuration by preset name.
 
     Args:
-        name: Preset name (e.g., 'et-large', 'turbo')
+        name: Preset name (e.g., 'et-large', 'en-distil'); retired aliases resolve with a warning
 
     Returns:
         ModelConfig for the requested preset
@@ -80,6 +93,9 @@ def get_preset(name: str) -> ModelConfig:
     Raises:
         KeyError: If preset name is not recognized
     """
+    if name in PRESET_ALIASES:
+        LOGGER.warning("Preset '%s' was renamed to '%s'", name, PRESET_ALIASES[name])
+        name = PRESET_ALIASES[name]
     if name not in PRESETS:
         available = ", ".join(PRESETS.keys())
         raise KeyError(f"Unknown preset '{name}'. Available: {available}")

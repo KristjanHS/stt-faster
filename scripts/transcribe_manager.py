@@ -19,6 +19,7 @@ from logging.handlers import TimedRotatingFileHandler
 
 from backend.config import setup_logging
 from backend.cli.transcription_commands import cmd_process
+from backend.model_config import PRESET_ALIASES, PRESETS
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,13 +82,13 @@ def create_parser() -> argparse.ArgumentParser:
     process_parser.add_argument(
         "--preset",
         default="et-large",
-        choices=["turbo", "distil", "large8gb", "et-large", "et-32", "small"],
+        choices=[*PRESETS, *PRESET_ALIASES],
         help="Model preset to use (default: et-large)",
     )
     process_parser.add_argument(
         "--language",
         default=None,
-        help="Force language code (e.g., 'en', 'et', 'ru'). Auto-detect if not specified.",
+        help="Language code ('en', 'et'), 'multi' for mixed audio, or 'en+ja' to limit detection. Default: auto.",
     )
     process_parser.add_argument(
         "--output-format",

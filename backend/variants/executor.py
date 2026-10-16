@@ -18,8 +18,11 @@ from backend.progress import REPORTER, ProgressReporter
 from backend.transcribe import (
     FLOAT_PRECISION,
     TranscriptionMetrics,
+    candidate_languages,
     maybe_log_progress,
     pick_model,
+    resolve_language,
+    restrict_languages,
     segment_to_payload,
 )
 from backend.variants.preprocess_steps import create_preprocess_runner
@@ -620,11 +623,18 @@ def _run_transcription(
     reporter.stage("load model")
     model = (model_picker or pick_model)(preset)
     LOGGER.info("Model loaded, ready for transcription")
+    languages = candidate_languages(requested_language)
+    if languages:
+        model = restrict_languages(model, languages)
 
     if applied_language:
         LOGGER.info("Language: %s (forced)", applied_language)
     else:
-        LOGGER.info("Language: auto-detect")
+        LOGGER.info(
+            "Language: auto-detect%s%s",
+            " per segment" if transcribe_kwargs.get("multilingual") else "",
+            f" among {', '.join(languages)}" if languages else "",
+        )
 
     reporter.stage("transcribe")
     transcribe_start = time.time()
@@ -780,8 +790,8 @@ def transcribe_with_baseline_params(
 ) -> dict[str, Any]:
     """Transcribe with baseline parameters, using faster-whisper library defaults.
 
-    This is a true baseline that only passes language (if needed) and vad_filter
-    (if explicitly set). All other parameters are omitted, allowing faster-whisper
+    This is a true baseline that only passes language / multilingual (if needed) and
+    vad_filter (if explicitly set). All other parameters are omitted, allowing faster-whisper
     to use its own internal defaults — so skip counts cannot be tracked (the
     thresholds the library applied are unknown to us).
 
@@ -794,8 +804,7 @@ def transcribe_with_baseline_params(
         transcription_config: TranscriptionConfig (only vad_filter will be used if set)
         metrics_collector: Optional metrics collector callback
     """
-    # Auto-detect language based on preset if not explicitly provided
-    applied_language = language if language is not None else ("et" if preset.startswith("et-") else None)
+    applied_language, multilingual = resolve_language(language, preset)
 
     # For baseline, use to_kwargs() to get only explicitly set fields.
     # Everything else uses faster-whisper library defaults.
@@ -816,6 +825,8 @@ def transcribe_with_baseline_params(
     # Note: Baseline forces language for Estonian presets, so it's not "pure defaults".
     if applied_language:
         transcribe_kwargs["language"] = applied_language
+    if multilingual:
+        transcribe_kwargs["multilingual"] = True
 
     # Backward/forward compatible mapping: faster-whisper uses log_prob_threshold (underscore)
     if "logprob_threshold" in transcribe_kwargs and "log_prob_threshold" not in transcribe_kwargs:
@@ -898,8 +909,7 @@ def transcribe_with_minimal_params(
         transcription_config: TranscriptionConfig with parameters (only allowed ones will be used)
         metrics_collector: Optional metrics collector callback
     """
-    # Auto-detect language based on preset if not explicitly provided
-    applied_language = language if language is not None else ("et" if preset.startswith("et-") else None)
+    applied_language, multilingual = resolve_language(language, preset)
 
     # Use to_kwargs() to get only explicitly set parameters from config
     raw_kwargs = transcription_config.to_kwargs()
@@ -921,6 +931,8 @@ def transcribe_with_minimal_params(
     # Language is not part of TranscriptionConfig; add it separately if set.
     if applied_language:
         transcribe_kwargs["language"] = applied_language
+    if multilingual:
+        transcribe_kwargs["multilingual"] = True
 
     # Handle VAD parameters specially: vad_threshold merges into vad_parameters,
     # and we only emit vad_parameters if vad_filter is True.
