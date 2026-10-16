@@ -152,6 +152,7 @@ After `_runtime.bat` returns, the bat calls `_variants.bat`, `_banner.bat`, `_tr
 | `et-large` (default for Estonian) | TalTechNLP/whisper-large-v3-turbo-et-verbatim | ~1.5 GB | Estonian | Best Estonian accuracy |
 | `et-32` | Same model, float32 CPU | ~1.5 GB | Estonian | CPU-only |
 | `en-distil` | Systran/faster-distil-whisper-large-v3 | ~1.5 GB | English only | Used by English `.bat`s |
-| `large8gb` | Systran/faster-whisper-large-v3 | ~3 GB | Multi | Highest accuracy |
+| `large8gb` | Systran/faster-whisper-large-v3 | ~3 GB | Multi | Highest accuracy; GUI Mixed (auto) profile |
+| `ja-en-distil` | kotoba-tech/kotoba-whisper-bilingual-v1.0-faster | ~1.5 GB | Japanese + English | Fast mixed EN/JA |
 
 See `docs/Transcription_solution.md` for the full preset / variant matrix.

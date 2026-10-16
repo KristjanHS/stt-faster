@@ -58,6 +58,12 @@ PRESETS: dict[str, ModelConfig] = {
         device="cuda",
         compute_type="int8_float16",  # Try original large-v3 with mixed INT8/FP16 to fit in 8 GB
     ),
+    # kotoba-whisper-bilingual: large-v3 distilled for Japanese + English (~6x faster, slightly weaker Japanese).
+    "ja-en-distil": ModelConfig(
+        model_id="kotoba-tech/kotoba-whisper-bilingual-v1.0-faster",
+        device="cuda",
+        compute_type="float16",
+    ),
     # Fallback preset (portable, CPU-friendly)
     "small": ModelConfig(
         model_id="small",

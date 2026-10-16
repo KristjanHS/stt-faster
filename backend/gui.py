@@ -64,10 +64,11 @@ class GuiProfile:
     variant: int = GUI_VARIANT
 
 
-# Mirrors scripts/windows/transcribe_{estonian,english}_Teams.bat.
+# Estonian/English mirror scripts/windows/transcribe_{estonian,english}_Teams.bat.
 GUI_PROFILES: dict[str, GuiProfile] = {
     "Estonian": GuiProfile(preset="et-large", language="et"),
     "English": GuiProfile(preset="en-distil", language="en"),
+    "Mixed (auto)": GuiProfile(preset="large8gb", language="multi"),
 }
 
 

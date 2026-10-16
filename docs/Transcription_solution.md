@@ -22,6 +22,7 @@ The system provides automated batch transcription of audio files with:
 |--------|-------|------|----------|----------|
 | `large8gb` | Whisper large-v3 | ~3GB | Multi | Highest accuracy |
 | `en-distil` | Systran/faster-distil-whisper-large-v3 | ~1.5GB | English only | Fast (`turbo`/`distil` = retired aliases) |
+| `ja-en-distil` | kotoba-tech/kotoba-whisper-bilingual-v1.0-faster | ~1.5GB | Japanese + English | Fast mixed EN/JA; pair with `--language multi` |
 | `et-32` | Estonian 32-bit | ~1.5GB | Estonian | CPU-optimized |
 
 **Caching**: All models use `snapshot_download()` for HuggingFace cache (`~/.cache/hf/hub/`). Download once, reuse forever.
@@ -185,7 +186,7 @@ A CPU-isolation canary (`tests/unit/test_no_transitive_cuda.py`) asserts `nvidia
 
 ### Windows app (GUI + installer)
 
-- `backend/gui.py`: `GUI_PROFILES` = Estonian→`et-large`, English→`en-distil`, both variant 61 (VAD off); config + HF token in `%APPDATA%\stt-faster`.
+- `backend/gui.py`: `GUI_PROFILES` = Estonian→`et-large`, English→`en-distil`, Mixed (auto)→`large8gb` + `--language multi`, all variant 61 (VAD off); config + HF token in `%APPDATA%\stt-faster`.
 - `installer/setup_gui.py` fetches uv, source, deps, models, ffmpeg+ffprobe into `%LOCALAPPDATA%\stt-faster`; built by `installer/build_installer.bat`, shipped via `make release V=X.Y.Z` (CI attaches the exe).
 - GPU mode (Windows only; dev venvs stay explicit): `nvidia-smi` vs `MIN_GPU_DRIVER`/`MIN_GPU_VRAM_MIB` → `device=cuda` + `gpu-win` extra (cuBLAS/cuDNN wheels, no torch); a failed GPU job re-runs once on CPU.
 - Design history: `docs/plans/archived/2026-09-25-windows-installer-gui-design.md`.

@@ -189,6 +189,12 @@ def test_build_command_mirrors_teams_bat(tmp_path: Path) -> None:
     assert "-v" not in cmd
 
 
+def test_build_command_mixed_profile_uses_multilingual(tmp_path: Path) -> None:
+    cmd = build_command(tmp_path, GUI_PROFILES["Mixed (auto)"], timestamps=False)
+    assert cmd[cmd.index("--preset") + 1] == "large8gb"
+    assert cmd[cmd.index("--language") + 1] == "multi"
+
+
 def test_build_env_sets_device_and_prepends_ffmpeg(tmp_path: Path) -> None:
     (tmp_path / "bin").mkdir()
     env = build_env({"PATH": "/usr/bin"}, device="cpu", ffmpeg_bin=tmp_path / "bin")

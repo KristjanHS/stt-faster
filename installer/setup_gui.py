@@ -103,10 +103,11 @@ class ModelSpec:
     revision: str = "main"
 
 
-# Estonian (et-large) and English (en-distil) GUI profiles, see backend/model_config.py.
+# Estonian (et-large), English (en-distil) and Mixed (large8gb) GUI profiles, see backend/gui.py.
 MODELS = (
     ModelSpec("TalTechNLP/whisper-large-v3-turbo-et-verbatim", ("ct2/*",)),
     ModelSpec("Systran/faster-distil-whisper-large-v3"),
+    ModelSpec("Systran/faster-whisper-large-v3"),
 )
 # Ungated CC-BY-4.0 mirror, pinned; the stdlib-only exe can't import backend/diarize/model.py (drift-tested).
 DIARIZATION_MODEL = ModelSpec(
