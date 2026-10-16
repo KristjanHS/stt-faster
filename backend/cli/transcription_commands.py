@@ -508,6 +508,12 @@ def cmd_process(
         console.print(f"[red]Error:[/red] Input path is not a directory: {input_folder}")
         return 1
 
+    try:
+        candidate_languages(getattr(args, "language", None))
+    except ValueError as exc:
+        console.print(f"[red]Error:[/red] {exc}")
+        return 1
+
     if getattr(args, "diarize", False) and not pyannote_installed():
         console.print(
             "[yellow]Warning:[/yellow] pyannote.audio is not installed — continuing WITHOUT speaker "
@@ -570,11 +576,6 @@ def create_app(*, process_fn: Callable[[argparse.Namespace], int] = cmd_process)
         ] = True,
     ) -> None:
         """Process audio files in the specified folder."""
-        try:
-            candidate_languages(language)
-        except ValueError as exc:
-            raise typer.BadParameter(str(exc), param_hint="--language") from exc
-
         # Create argparse-like namespace for backward compatibility
         args = argparse.Namespace()
         args.input_folder = input_folder

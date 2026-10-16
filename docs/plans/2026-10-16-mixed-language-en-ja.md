@@ -86,6 +86,7 @@ User reads the Japanese stretches → pick the GUI Mixed default.
 `+`-joined codes ⇒ `multilingual=True` with `restrict_languages()` filtering CT2 `detect_language`
 to those codes. GUI profile "Mixed EN/JA"; both Windows mixed .bat files use `en+ja`.
 
-### Stage 6 — `ja-en-distil` timestamps
+### Stage 6 — `ja-en-distil` timestamps (shipped 96178e3)
 Focus: why kotoba-bilingual segments come out `0.0-0.0` (Stage 4 smoke) and a preset-level fix.
-Test: segments from a real decode of the fixture clip on that preset have `end > start`.
+Cause: no `tokenizer.json` → whisper-tiny fallback, special tokens off by one. Fix: `ModelConfig.tokenizer_id`.
+Owed: installer `MODELS` lacks kotoba, so `ja-en-distil` can't load on an offline Windows install.

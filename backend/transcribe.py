@@ -479,7 +479,7 @@ class _LanguageRestrictedWhisper:
     """CTranslate2 Whisper wrapper whose ``detect_language`` ranks only the allowed codes.
 
     faster-whisper 1.2.1 has no candidate-language option: both the up-front and the per-segment
-    (``multilingual=True``) detection take the argmax over all 99 languages from
+    (``multilingual=True``) detection take the argmax over every vocabulary language from
     ``WhisperModel.model.detect_language`` — so accented English can land on ``et``. Filtering
     here covers both detection paths; probabilities stay raw (not renormalised).
     """
