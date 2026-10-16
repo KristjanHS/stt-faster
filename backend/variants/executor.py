@@ -20,6 +20,7 @@ from backend.transcribe import (
     TranscriptionMetrics,
     maybe_log_progress,
     pick_model,
+    resolve_language,
     segment_to_payload,
 )
 from backend.variants.preprocess_steps import create_preprocess_runner
@@ -624,7 +625,7 @@ def _run_transcription(
     if applied_language:
         LOGGER.info("Language: %s (forced)", applied_language)
     else:
-        LOGGER.info("Language: auto-detect")
+        LOGGER.info("Language: auto-detect%s", " per segment" if transcribe_kwargs.get("multilingual") else "")
 
     reporter.stage("transcribe")
     transcribe_start = time.time()
@@ -794,8 +795,7 @@ def transcribe_with_baseline_params(
         transcription_config: TranscriptionConfig (only vad_filter will be used if set)
         metrics_collector: Optional metrics collector callback
     """
-    # Auto-detect language based on preset if not explicitly provided
-    applied_language = language if language is not None else ("et" if preset.startswith("et-") else None)
+    applied_language, multilingual = resolve_language(language, preset)
 
     # For baseline, use to_kwargs() to get only explicitly set fields.
     # Everything else uses faster-whisper library defaults.
@@ -816,6 +816,8 @@ def transcribe_with_baseline_params(
     # Note: Baseline forces language for Estonian presets, so it's not "pure defaults".
     if applied_language:
         transcribe_kwargs["language"] = applied_language
+    if multilingual:
+        transcribe_kwargs["multilingual"] = True
 
     # Backward/forward compatible mapping: faster-whisper uses log_prob_threshold (underscore)
     if "logprob_threshold" in transcribe_kwargs and "log_prob_threshold" not in transcribe_kwargs:
@@ -898,8 +900,7 @@ def transcribe_with_minimal_params(
         transcription_config: TranscriptionConfig with parameters (only allowed ones will be used)
         metrics_collector: Optional metrics collector callback
     """
-    # Auto-detect language based on preset if not explicitly provided
-    applied_language = language if language is not None else ("et" if preset.startswith("et-") else None)
+    applied_language, multilingual = resolve_language(language, preset)
 
     # Use to_kwargs() to get only explicitly set parameters from config
     raw_kwargs = transcription_config.to_kwargs()
@@ -921,6 +922,8 @@ def transcribe_with_minimal_params(
     # Language is not part of TranscriptionConfig; add it separately if set.
     if applied_language:
         transcribe_kwargs["language"] = applied_language
+    if multilingual:
+        transcribe_kwargs["multilingual"] = True
 
     # Handle VAD parameters specially: vad_threshold merges into vad_parameters,
     # and we only emit vad_parameters if vad_filter is True.

@@ -105,7 +105,7 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 **`process` command:**
 - `input_folder` (required): Path to folder containing audio files
 - `--preset`: Model preset (`en-distil`, `large8gb`, `et-large`, `et-32`, `small`)
-- `--language`: Force language code (e.g., `en`, `et`, `ru`). Auto-detect if not specified
+- `--language`: Force language code (e.g., `en`, `et`); `multi` = per-segment auto-detect for mixed-language audio (e.g. English + Japanese). Auto-detect once (first 30 s) if not specified
 - `--output-format`: Output format (`txt`, `json`, `both`) - default: `txt`
 - `--diarize` / `--no-diarize`: Speaker diarization toggle - default: `--diarize` (needs the local speaker model, `make diarization-model`; see [docs/diarization_setup.md](diarization_setup.md))
 - `--num-speakers N`: Expected speaker count - default: `2`

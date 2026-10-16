@@ -432,16 +432,19 @@ def format_segments_as_text(segments: list[dict[str, Any]], *, include_timestamp
     return "".join(lines)
 
 
-def _apply_language_default(language: str | None, preset: str) -> str | None:
-    """Apply the Estonian-preset language default.
+MULTILINGUAL = "multi"
 
-    When ``language`` is unset and the preset name marks an Estonian model
-    (``et-*``), default to Estonian. Otherwise return ``language`` unchanged
-    (``None`` ⇒ faster-whisper auto-detects).
+
+def resolve_language(language: str | None, preset: str) -> tuple[str | None, bool]:
+    """Map the requested language to faster-whisper's ``(language, multilingual)``.
+
+    ``multi`` ⇒ auto-detect per segment (mixed-language audio); unset on an ``et-*`` preset ⇒ ``et``.
     """
+    if language == MULTILINGUAL:
+        return None, True
     if language is None and preset.startswith("et-"):
-        return "et"
-    return language
+        return "et", False
+    return language, False
 
 
 def _collect_segments(
@@ -681,13 +684,13 @@ def transcribe(
 
         # Auto-detect language based on preset if not explicitly provided
         requested_language = language
-        applied_language = _apply_language_default(requested_language, preset)
+        applied_language, multilingual = resolve_language(requested_language, preset)
 
         # Log language configuration
         if applied_language:
             LOGGER.info("Language: %s (forced)", applied_language)
         else:
-            LOGGER.info("Language: auto-detect")
+            LOGGER.info("Language: auto-detect%s", " per segment" if multilingual else "")
 
         LOGGER.info("Transcribing audio")
         reporter.stage("transcribe")
@@ -704,6 +707,7 @@ def transcribe(
             patience=transcription_config.patience,
             word_timestamps=transcription_config.word_timestamps,
             language=applied_language,
+            multilingual=multilingual,
             task=transcription_config.task,
             chunk_length=transcription_config.chunk_length,
             vad_filter=transcription_config.vad_filter,

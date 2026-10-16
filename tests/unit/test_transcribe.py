@@ -17,11 +17,13 @@ from backend.preprocess.config import PreprocessConfig, TranscriptionConfig
 from backend.preprocess.metrics import PreprocessMetrics
 from backend.preprocess.orchestrator import PreprocessResult
 from backend.progress import ProgressEvent, ProgressReporter, parse_progress
+from backend.variants.executor import transcribe_with_baseline_params, transcribe_with_minimal_params
 from backend.transcribe import (
     TranscriptionMetrics,
     _get_estonian_model_path,
     _round_floats,
     pick_model,
+    resolve_language,
     segment_to_payload,
     transcribe,
     transcribe_and_save,
@@ -218,6 +220,19 @@ class TestPickModel:
             pick_model("unknown")
 
 
+@pytest.mark.parametrize(
+    "language,preset,expected",
+    [
+        ("multi", "et-large", (None, True)),
+        (None, "et-large", ("et", False)),
+        (None, "large8gb", (None, False)),
+        ("ja", "large8gb", ("ja", False)),
+    ],
+)
+def test_resolve_language(language: str | None, preset: str, expected: tuple[str | None, bool]) -> None:
+    assert resolve_language(language, preset) == expected
+
+
 class TestRoundFloats:
     """Tests for _round_floats function contract: floats rounded, structure preserved."""
 
@@ -387,6 +402,50 @@ class TestTranscribe:
         # Verify language parameter is None for non-Estonian models
         call_kwargs = model.calls[0]["kwargs"]
         assert call_kwargs["language"] is None
+
+    @pytest.mark.parametrize(
+        "language,expected_language,expected_multilingual",
+        [("multi", None, True), ("en", "en", False), (None, None, False)],
+    )
+    def test_transcribe_passes_multilingual_flag(
+        self, tmp_path: Path, language: str | None, expected_language: str | None, expected_multilingual: bool
+    ) -> None:
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        model = RecordingModel([], FakeTranscriptionInfo(language="en", language_probability=0.9, duration=5.0))
+
+        transcribe(
+            "/path/to/audio.wav",
+            preset="large8gb",
+            language=language,
+            preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+            preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
+
+        call_kwargs = model.calls[0]["kwargs"]
+        assert call_kwargs["language"] == expected_language
+        assert call_kwargs["multilingual"] is expected_multilingual
+
+    @pytest.mark.parametrize("runner", [transcribe_with_baseline_params, transcribe_with_minimal_params])
+    def test_variant_runners_pass_multilingual_for_multi(self, tmp_path: Path, runner: Any) -> None:
+        processed_path = tmp_path / "processed.wav"
+        processed_path.write_text("data")
+        model = RecordingModel([], FakeTranscriptionInfo(language="ja", language_probability=0.9, duration=5.0))
+
+        runner(
+            "/path/to/audio.wav",
+            "et-large",
+            "multi",
+            PreprocessConfig(enabled=False),
+            lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            TranscriptionConfig(),
+            model_picker=lambda preset: model,  # noqa: ARG005
+        )
+
+        call_kwargs = model.calls[0]["kwargs"]
+        assert "language" not in call_kwargs
+        assert call_kwargs["multilingual"] is True
 
     def test_transcribe_without_duration(self, tmp_path: Path) -> None:
         """Test transcription when duration is None."""
