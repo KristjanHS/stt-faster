@@ -103,7 +103,7 @@ class ModelSpec:
     revision: str = "main"
 
 
-# Estonian (et-large) and English (turbo) GUI profiles, see backend/model_config.py.
+# Estonian (et-large) and English (en-distil) GUI profiles, see backend/model_config.py.
 MODELS = (
     ModelSpec("TalTechNLP/whisper-large-v3-turbo-et-verbatim", ("ct2/*",)),
     ModelSpec("Systran/faster-distil-whisper-large-v3"),

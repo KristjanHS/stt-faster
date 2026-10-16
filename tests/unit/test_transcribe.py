@@ -159,8 +159,9 @@ class TestPickModel:
         "preset,expected_model_id,expected_cache_path",
         [
             ("et-large", "TalTechNLP/whisper-large-v3-turbo-et-verbatim", "/tmp/model/ct2"),
-            ("turbo", "Systran/faster-distil-whisper-large-v3", "/tmp/model/turbo"),
-            ("distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/distil"),
+            ("en-distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/en-distil"),
+            ("turbo", "Systran/faster-distil-whisper-large-v3", "/tmp/model/turbo"),  # retired alias
+            ("distil", "Systran/faster-distil-whisper-large-v3", "/tmp/model/distil"),  # retired alias
             ("large8gb", "Systran/faster-whisper-large-v3", "/tmp/model/large-v3"),
         ],
     )
@@ -377,7 +378,7 @@ class TestTranscribe:
 
         transcribe(
             "/path/to/audio.wav",
-            preset="turbo",
+            preset="en-distil",
             preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
             preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
             model_picker=lambda preset: model,  # noqa: ARG005
@@ -492,9 +493,9 @@ class TestTranscribeToJson:
 
         json_path = tmp_path / "test.json"
 
-        transcribe_to_json("test.wav", str(json_path), preset="turbo", transcribe_fn=fake_transcribe)
+        transcribe_to_json("test.wav", str(json_path), preset="en-distil", transcribe_fn=fake_transcribe)
 
-        assert calls == [("test.wav", "turbo", None)]
+        assert calls == [("test.wav", "en-distil", None)]
         assert json.loads(json_path.read_text()) == payload
 
 

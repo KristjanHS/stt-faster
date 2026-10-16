@@ -21,9 +21,9 @@ After setup, every bat in `scripts\windows\` works without further configuration
 | `transcribe_estonian_Teams.bat` | Estonian | 61 | Teams / video-call Estonian |
 | `transcribe_estonian_Online.bat` | Estonian | 52 | Online / mixed-source Estonian |
 | `transcribe_estonian_32bit_cpu.bat` | Estonian | 7 (preset `et-32`) | CPU-only machines, no GPU |
-| `transcribe_english_Desk.bat` | English | 44 | Desk-mic English (`turbo` preset) |
-| `transcribe_english_Teams.bat` | English | 61 | Teams / video-call English (`turbo` preset) |
-| `transcribe_english_Online.bat` | English | 52 | Online / mixed-source English (`turbo` preset) |
+| `transcribe_english_Desk.bat` | English | 44 | Desk-mic English (`en-distil` preset) |
+| `transcribe_english_Teams.bat` | English | 61 | Teams / video-call English (`en-distil` preset) |
+| `transcribe_english_Online.bat` | English | 52 | Online / mixed-source English (`en-distil` preset) |
 | `compare_variants.bat` | Estonian | all builtin variants | Comparison run across every variant in the registry; also generates the HTML report |
 | `report_only.bat` | – | – | Regenerates the variant HTML report from existing outputs |
 | `check_recent.bat` | – | – | Shows recent transcription run history (`stt-faster db recent`) |
@@ -67,7 +67,7 @@ set "STT_MODEL=<model display string>"
 set "STT_LANG=<English | Estonian | ...>"
 set "STT_CLI_TAIL=--language <code> --output-format txt"
 REM Add `--preset <name>` to STT_CLI_TAIL if the variant needs a non-default
-REM preset (e.g. `--preset turbo` for English, `--preset et-32` for CPU-only
+REM preset (e.g. `--preset en-distil` for English, `--preset et-32` for CPU-only
 REM Estonian). Default Estonian model is `et-large` and is picked up
 REM automatically when `--preset` is omitted; the existing
 REM `transcribe_estonian_{Desk,Teams,Online}.bat` bats show this pattern.
@@ -151,8 +151,7 @@ After `_runtime.bat` returns, the bat calls `_variants.bat`, `_banner.bat`, `_tr
 |--------|-------|------|----------|-------|
 | `et-large` (default for Estonian) | TalTechNLP/whisper-large-v3-turbo-et-verbatim | ~1.5 GB | Estonian | Best Estonian accuracy |
 | `et-32` | Same model, float32 CPU | ~1.5 GB | Estonian | CPU-only |
-| `turbo` | Systran/faster-distil-whisper-large-v3 | ~1.5 GB | Multi | Used by English `.bat`s |
+| `en-distil` | Systran/faster-distil-whisper-large-v3 | ~1.5 GB | English only | Used by English `.bat`s |
 | `large8gb` | Systran/faster-whisper-large-v3 | ~3 GB | Multi | Highest accuracy |
-| `distil` | Distilled Whisper | ~756 MB | English | Fastest |
 
 See `docs/Transcription_solution.md` for the full preset / variant matrix.

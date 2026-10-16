@@ -1,5 +1,5 @@
 @echo off
-REM Audio Transcription - ENGLISH, Online / mixed-source (variant 52, turbo preset)
+REM Audio Transcription - ENGLISH, Online / mixed-source (variant 52, en-distil preset)
 REM ** Docker-forced variant **: STT_FORCE_DOCKER=1 makes _runtime.bat skip the
 REM WSL probe and always pick the stt-faster:latest production image. Use to
 REM exercise the docker code path on a machine where the WSL venv is also
@@ -27,9 +27,9 @@ set "STT_CALLER_DIR=%~dp0"
 set "STT_FORCE_DOCKER=1"
 set "STT_TITLE=Audio Transcription - ENGLISH (Online)"
 set "STT_TITLE_SUFFIX=[DOCKER FORCED]"
-set "STT_MODEL=Systran faster-distil-whisper-large-v3 (turbo)"
+set "STT_MODEL=Systran faster-distil-whisper-large-v3 (en-distil)"
 set "STT_LANG=English"
-set "STT_CLI_TAIL=--preset turbo --language en --output-format txt"
+set "STT_CLI_TAIL=--preset en-distil --language en --output-format txt"
 REM Helpers location. Default = WSL via UNC, works both in-place and when
 REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.
 REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"

@@ -76,7 +76,7 @@ class TestProcessCommand:
 
             parser = create_parser()
             args = parser.parse_args(
-                ["process", str(cli_test_folder), "--preset", "turbo", "--no-diarize"],
+                ["process", str(cli_test_folder), "--preset", "en-distil", "--no-diarize"],
             )
 
             mock_model = MagicMock()
@@ -101,6 +101,6 @@ class TestProcessCommand:
             run_log = JsonlRunLog(xdg_data_home / "stt-faster" / "runs.jsonl")
             appended = run_log.tail(1)
             assert len(appended) == 1
-            assert appended[0]["preset"] == "turbo"
+            assert appended[0]["preset"] == "en-distil"
         finally:
             sys.path.remove(scripts_path)

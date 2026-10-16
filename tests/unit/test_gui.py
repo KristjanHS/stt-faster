@@ -176,7 +176,7 @@ def test_build_command_mirrors_teams_bat(tmp_path: Path) -> None:
         "process",
         str(tmp_path),
         "--preset",
-        "turbo",
+        "en-distil",
         "--variant",
         "61",
         "--language",

@@ -21,8 +21,7 @@ The system provides automated batch transcription of audio files with:
 | Preset | Model | Size | Language | Use Case |
 |--------|-------|------|----------|----------|
 | `large8gb` | Whisper large-v3 | ~3GB | Multi | Highest accuracy |
-| `turbo` | Whisper large-v3-turbo | ~1.5GB | Multi | Fast + accurate |
-| `distil` | Distilled Whisper | ~756MB | English | Fastest |
+| `en-distil` | Systran/faster-distil-whisper-large-v3 | ~1.5GB | English only | Fast (`turbo`/`distil` = retired aliases) |
 | `et-32` | Estonian 32-bit | ~1.5GB | Estonian | CPU-optimized |
 
 **Caching**: All models use `snapshot_download()` for HuggingFace cache (`~/.cache/hf/hub/`). Download once, reuse forever.
@@ -105,7 +104,7 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 
 **`process` command:**
 - `input_folder` (required): Path to folder containing audio files
-- `--preset`: Model preset (`turbo`, `distil`, `large8gb`, `et-large`, `et-32`, `small`)
+- `--preset`: Model preset (`en-distil`, `large8gb`, `et-large`, `et-32`, `small`)
 - `--language`: Force language code (e.g., `en`, `et`, `ru`). Auto-detect if not specified
 - `--output-format`: Output format (`txt`, `json`, `both`) - default: `txt`
 - `--diarize` / `--no-diarize`: Speaker diarization toggle - default: `--diarize` (needs the local speaker model, `make diarization-model`; see [docs/diarization_setup.md](diarization_setup.md))
@@ -186,7 +185,7 @@ A CPU-isolation canary (`tests/unit/test_no_transitive_cuda.py`) asserts `nvidia
 
 ### Windows app (GUI + installer)
 
-- `backend/gui.py`: `GUI_PROFILES` = Estonian→`et-large`, English→`turbo`, both variant 61 (VAD off); config + HF token in `%APPDATA%\stt-faster`.
+- `backend/gui.py`: `GUI_PROFILES` = Estonian→`et-large`, English→`en-distil`, both variant 61 (VAD off); config + HF token in `%APPDATA%\stt-faster`.
 - `installer/setup_gui.py` fetches uv, source, deps, models, ffmpeg+ffprobe into `%LOCALAPPDATA%\stt-faster`; built by `installer/build_installer.bat`, shipped via `make release V=X.Y.Z` (CI attaches the exe).
 - GPU mode (Windows only; dev venvs stay explicit): `nvidia-smi` vs `MIN_GPU_DRIVER`/`MIN_GPU_VRAM_MIB` → `device=cuda` + `gpu-win` extra (cuBLAS/cuDNN wheels, no torch); a failed GPU job re-runs once on CPU.
 - Design history: `docs/plans/archived/2026-09-25-windows-installer-gui-design.md`.
@@ -251,8 +250,8 @@ Generates both `.txt` and `.json` files for the same audio file. Used by `compar
 ## Performance
 
 Typical processing speeds:
-- **Fast preset** (`distil`): ~1-2 seconds per minute of audio
-- **Balanced** (`turbo`, `et-large`): ~2-3 seconds per minute
+- **Fast preset** (`en-distil`): ~1-2 seconds per minute of audio
+- **Balanced** (`et-large`): ~2-3 seconds per minute
 - **Accurate** (`large8gb`): ~3-5 seconds per minute
 
 Speed varies based on:

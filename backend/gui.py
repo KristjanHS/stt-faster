@@ -67,7 +67,7 @@ class GuiProfile:
 # Mirrors scripts/windows/transcribe_{estonian,english}_Teams.bat.
 GUI_PROFILES: dict[str, GuiProfile] = {
     "Estonian": GuiProfile(preset="et-large", language="et"),
-    "English": GuiProfile(preset="turbo", language="en"),
+    "English": GuiProfile(preset="en-distil", language="en"),
 }
 
 

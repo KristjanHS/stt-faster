@@ -1,5 +1,5 @@
 @echo off
-REM Audio Transcription - ENGLISH, Desk-mic / close-talk (variant 44, turbo preset)
+REM Audio Transcription - ENGLISH, Desk-mic / close-talk (variant 44, en-distil preset)
 REM Edit the VARIANTS line below to use a different variant.
 REM Space-separated for multiple variants (e.g. "1 36 44").
 set "VARIANTS=44"
@@ -11,9 +11,9 @@ set "NUM_SPEAKERS=2"
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
 set "STT_TITLE=Audio Transcription - ENGLISH (Desk-mic)"
-set "STT_MODEL=Systran faster-distil-whisper-large-v3 (turbo)"
+set "STT_MODEL=Systran faster-distil-whisper-large-v3 (en-distil)"
 set "STT_LANG=English"
-set "STT_CLI_TAIL=--preset turbo --language en --output-format txt"
+set "STT_CLI_TAIL=--preset en-distil --language en --output-format txt"
 REM Helpers location. Default = WSL via UNC, works both in-place and when
 REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.
 REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"

@@ -73,7 +73,7 @@ Batch audio transcription with Estonian (default) and English models, with speak
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --preset large8gb
 ```
 
-**Model presets**: `et-large` (Estonian, default), `large8gb` (English/multi, best accuracy), `turbo` (fast), `distil` (fastest)
+**Model presets**: `et-large` (Estonian, default), `large8gb` (English/multi, best accuracy), `en-distil` (fastest, English only)
 
 **Output**: Files moved to `processed/` subfolder with `.txt` transcripts (range timestamps + speaker labels by default). Use `--output-format both` for `.json` alongside, or `--no-diarize` to skip speaker labels. Failed files in `failed/` subfolder.
 
@@ -89,13 +89,13 @@ make docker-build-prod
 make diarization-model rnnoise-model
 
 # Process audio files using Docker wrapper
-./scripts/transcribe-docker process /path/to/audio --preset turbo
+./scripts/transcribe-docker process /path/to/audio --preset en-distil
 
 # Or run directly
 docker run --rm \
   -v $(pwd):/workspace \
   -v ~/.cache/hf:/home/appuser/.cache/hf \
-  stt-faster:latest process /workspace/audio --preset turbo
+  stt-faster:latest process /workspace/audio --preset en-distil
 ```
 
 The image carries no models: pass the speaker and RNNoise models as read-only mounts, see [docs/diarization_setup.md § Docker](docs/diarization_setup.md#docker).

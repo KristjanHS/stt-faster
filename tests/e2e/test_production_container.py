@@ -422,7 +422,7 @@ class TestProductionDiarization:
             model_host_dir, model_container_dir = container_model_mount(speaker_model_dir)
 
             # Mirror the English Windows bats (transcribe_english_*.bat):
-            # `process /workspace --preset turbo --language en
+            # `process /workspace --preset en-distil --language en
             #  --output-format txt --diarize --num-speakers 2`.
             result = run_docker_with_env(
                 image=production_image,
@@ -430,7 +430,7 @@ class TestProductionDiarization:
                     "process",
                     "/workspace",
                     "--preset",
-                    "turbo",
+                    "en-distil",
                     "--language",
                     "en",
                     "--output-format",

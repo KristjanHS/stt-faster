@@ -8,7 +8,7 @@ This directory contains **development/test Docker configuration** for running in
 
 **Location:** `../Dockerfile` (project root)  
 **Purpose:** Run stt-faster without installing Python/dependencies  
-**Usage:** `./scripts/transcribe-docker process ./audio --preset turbo`
+**Usage:** `./scripts/transcribe-docker process ./audio --preset en-distil`
 
 See [Main README](../README.md#docker-usage) for full usage guide.
 
@@ -31,7 +31,7 @@ See [Main README](../README.md#docker-usage) for full usage guide.
 docker build -t stt-faster:latest .
 
 # Use the wrapper script (recommended)
-./scripts/transcribe-docker process /path/to/audio --preset turbo
+./scripts/transcribe-docker process /path/to/audio --preset en-distil
 
 # Or run directly
 docker run --rm -v $(pwd):/workspace stt-faster:latest process /workspace/audio.mp3
@@ -57,7 +57,7 @@ docker run --rm -v $(pwd):/workspace stt-faster:latest process /workspace/audio.
 
 ```bash
 # Process all files in directory
-./scripts/transcribe-docker process ./audio --preset turbo
+./scripts/transcribe-docker process ./audio --preset en-distil
 
 # List available models
 ./scripts/transcribe-docker list-models
@@ -191,7 +191,7 @@ The dev/test Docker setup is used in CI workflows:
 docker build -t stt-faster:latest .
 
 # Test as end user would
-./scripts/transcribe-docker process ./test_audio --preset turbo
+./scripts/transcribe-docker process ./test_audio --preset en-distil
 ```
 
 ### Test with Dev Docker

@@ -264,7 +264,7 @@ def pick_model(
     This is the main entry point for loading models. It uses configuration-driven
     model selection with automatic device selection and GPU->CPU fallback.
 
-    Available presets: et-large, turbo, distil, large8gb, small
+    Available presets: see PRESETS in model_config.py
 
     Args:
         preset: Model preset name (see PRESETS in model_config.py)

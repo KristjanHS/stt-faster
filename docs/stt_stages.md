@@ -61,8 +61,7 @@ This document lists all stages in the speech-to-text pipeline with their paramet
 |--------|-------|--------|--------------|----------|
 | `et-large` | TalTechNLP/whisper-large-v3-turbo-et-verbatim | cuda | float16 | Estonian |
 | `et-32` | TalTechNLP/whisper-large-v3-turbo-et-verbatim | cpu | float32 | Estonian |
-| `turbo` | Systran/faster-distil-whisper-large-v3 | cuda | float16 | Multi |
-| `distil` | Systran/faster-distil-whisper-large-v3 | cuda | float16 | Multi |
+| `en-distil` | Systran/faster-distil-whisper-large-v3 | cuda | float16 | English only |
 | `large8gb` | Systran/faster-whisper-large-v3 | cuda | int8_float16 | Multi |
 | `small` | small | cpu | int8 | Multi |
 

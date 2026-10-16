@@ -4,8 +4,11 @@ This module defines available model presets and their configurations,
 separating configuration from model loading logic.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Literal
+
+LOGGER = logging.getLogger(__name__)
 
 DeviceType = Literal["cpu", "cuda"]
 ComputeType = Literal["int8", "float16", "int8_float16", "float32"]
@@ -44,12 +47,8 @@ PRESETS: dict[str, ModelConfig] = {
         is_estonian=True,
     ),
     # English/multilingual models (Systran faster-whisper)
-    "turbo": ModelConfig(
-        model_id="Systran/faster-distil-whisper-large-v3",
-        device="cuda",
-        compute_type="float16",
-    ),
-    "distil": ModelConfig(
+    # distil-whisper: English-only training data; use large8gb for any other language.
+    "en-distil": ModelConfig(
         model_id="Systran/faster-distil-whisper-large-v3",
         device="cuda",
         compute_type="float16",
@@ -67,12 +66,15 @@ PRESETS: dict[str, ModelConfig] = {
     ),
 }
 
+# Retired preset names, still accepted so existing scripts keep working.
+PRESET_ALIASES: dict[str, str] = {"turbo": "en-distil", "distil": "en-distil"}
+
 
 def get_preset(name: str) -> ModelConfig:
     """Get model configuration by preset name.
 
     Args:
-        name: Preset name (e.g., 'et-large', 'turbo')
+        name: Preset name (e.g., 'et-large', 'en-distil'); retired aliases resolve with a warning
 
     Returns:
         ModelConfig for the requested preset
@@ -80,6 +82,9 @@ def get_preset(name: str) -> ModelConfig:
     Raises:
         KeyError: If preset name is not recognized
     """
+    if name in PRESET_ALIASES:
+        LOGGER.warning("Preset '%s' was renamed to '%s'", name, PRESET_ALIASES[name])
+        name = PRESET_ALIASES[name]
     if name not in PRESETS:
         available = ", ".join(PRESETS.keys())
         raise KeyError(f"Unknown preset '{name}'. Available: {available}")
