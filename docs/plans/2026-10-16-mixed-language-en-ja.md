@@ -67,8 +67,13 @@ Focus: `model_config.py`, `gui.py` GUI_PROFILES, `installer/setup_gui.py` MODELS
 profile emits `--preset large8gb --language multi`.
 
 ### Stage 4 — verify, review, A/B [USER]
-Full `pytest tests/unit tests/integration -q --no-cov` + `make pyright`, code review.
-Then A/B on the user's recording (path owed by user):
+Done: suite 463 passed, pyright 0 errors, review fixes in bf96797.
+Synthetic smoke (JSUT JA sentence looped between EN, scratch clip) — inconclusive, real audio owed:
+- large8gb: Japanese decoded once a 30 s window is mostly JA; `multi` made no visible difference; content
+  at EN↔JA boundaries dropped (synthetic repeats exaggerate this).
+- ja-en-distil: per-window switching works, but emits **no timestamps** (all segments `0.0-0.0`) —
+  breaks timestamps + diarization alignment unless fixed (try `without_timestamps`/`chunk_length=15`).
+A/B on the user's recording (path owed by user):
 ```
 .venv/bin/python -m backend.cli.main transcribe process <dir> --preset large8gb --language multi --variant 61 --output-format txt --no-diarize
 .venv/bin/python -m backend.cli.main transcribe process <dir> --preset ja-en-distil --language multi --variant 61 --output-format txt --no-diarize
