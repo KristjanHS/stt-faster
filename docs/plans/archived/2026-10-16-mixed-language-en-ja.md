@@ -1,6 +1,6 @@
 # Mixed-language (English + Japanese) transcription
 
-Status: IN PROGRESS
+Status: ✅ SHIPPED — only the user A/B (Stage 4) remains
 Date: 2026-10-16
 
 ## Problem
