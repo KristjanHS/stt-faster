@@ -1,5 +1,5 @@
 @echo off
-REM Audio Transcription - JAPANESE + ENGLISH mixed, Desk-mic / close-talk (variant 44, large8gb preset)
+REM Audio Transcription - MIXED LANGUAGE, Desk-mic / close-talk (variant 44, large8gb preset)
 REM Edit the VARIANTS line below to use a different variant.
 REM Space-separated for multiple variants (e.g. "1 36 44").
 set "VARIANTS=44"
@@ -10,9 +10,9 @@ set "NUM_SPEAKERS=2"
 
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
-set "STT_TITLE=Audio Transcription - JAPANESE + ENGLISH (Desk-mic)"
+set "STT_TITLE=Audio Transcription - MIXED LANGUAGE (Desk-mic)"
 set "STT_MODEL=Systran faster-whisper-large-v3 (large8gb), per-segment language"
-set "STT_LANG=Japanese + English (auto)"
+set "STT_LANG=Auto per segment"
 set "STT_CLI_TAIL=--preset large8gb --language multi --output-format txt"
 REM Helpers location. Default = WSL via UNC, works both in-place and when
 REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.

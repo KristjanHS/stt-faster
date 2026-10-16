@@ -73,7 +73,10 @@ Synthetic smoke (JSUT JA sentence looped between EN, scratch clip) — inconclus
   at EN↔JA boundaries dropped (synthetic repeats exaggerate this).
 - ja-en-distil: per-window switching works, but emits **no timestamps** (all segments `0.0-0.0`) —
   breaks timestamps + diarization alignment unless fixed (try `without_timestamps`/`chunk_length=15`).
-A/B on the user's recording (path owed by user):
+- Test-recording language scan: accented English windows detect as **`et` at 0.8-0.96**, so `multi`
+  may decode them as Estonian. Candidate fix: restrict per-window detection to an allowed set (`en`,`ja`).
+A/B clip: `data/test_mixed_en_ja.wav` (gitignored), run via `transcribe_mixed_Desk.bat` vs the same
+with `--preset ja-en-distil` (DIARIZE=0):
 ```
 .venv/bin/python -m backend.cli.main transcribe process <dir> --preset large8gb --language multi --variant 61 --output-format txt --no-diarize
 .venv/bin/python -m backend.cli.main transcribe process <dir> --preset ja-en-distil --language multi --variant 61 --output-format txt --no-diarize

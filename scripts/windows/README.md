@@ -24,7 +24,7 @@ After setup, every bat in `scripts\windows\` works without further configuration
 | `transcribe_english_Desk.bat` | English | 44 | Desk-mic English (`en-distil` preset) |
 | `transcribe_english_Teams.bat` | English | 61 | Teams / video-call English (`en-distil` preset) |
 | `transcribe_english_Online.bat` | English | 52 | Online / mixed-source English (`en-distil` preset) |
-| `transcribe_japanese_Desk.bat` | Japanese + English | 44 | Desk-mic mixed EN/JA meetings (`large8gb`, `--language multi`) |
+| `transcribe_mixed_Desk.bat` | Mixed (auto) | 44 | Desk-mic mixed-language audio (`large8gb`, `--language multi`) |
 | `compare_variants.bat` | Estonian | all builtin variants | Comparison run across every variant in the registry; also generates the HTML report |
 | `report_only.bat` | – | – | Regenerates the variant HTML report from existing outputs |
 | `check_recent.bat` | – | – | Shows recent transcription run history (`stt-faster db recent`) |
