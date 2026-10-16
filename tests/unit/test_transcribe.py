@@ -24,6 +24,7 @@ from backend.transcribe import (
     _round_floats,
     pick_model,
     resolve_language,
+    restrict_languages,
     segment_to_payload,
     transcribe,
     transcribe_and_save,
@@ -227,10 +228,77 @@ class TestPickModel:
         (None, "et-large", ("et", False)),
         (None, "large8gb", (None, False)),
         ("ja", "large8gb", ("ja", False)),
+        ("en+ja", "et-large", (None, True)),
     ],
 )
 def test_resolve_language(language: str | None, preset: str, expected: tuple[str | None, bool]) -> None:
     assert resolve_language(language, preset) == expected
+
+
+class RankingWhisper:
+    """Stands in for the CTranslate2 Whisper: ranks accented English as Estonian."""
+
+    def detect_language(self, _features: object) -> list[list[tuple[str, float]]]:
+        return [[("<|et|>", 0.44), ("<|en|>", 0.41), ("<|ja|>", 0.10), ("<|fi|>", 0.05)]]
+
+
+class DetectingModel(RecordingModel):
+    """Records the language the (possibly restricted) detector would pick at transcribe time."""
+
+    supported_languages = ("en", "et", "fi", "ja")
+
+    def __init__(self) -> None:
+        super().__init__([], FakeTranscriptionInfo(language="en", language_probability=0.9, duration=5.0))
+        self.model: Any = RankingWhisper()
+        self.picked: list[str] = []
+
+    def transcribe(self, *args: Any, **kwargs: Any) -> Any:
+        self.picked.append(self.model.detect_language(None)[0][0][0])
+        return super().transcribe(*args, **kwargs)
+
+
+def test_restrict_languages_filters_and_renormalises_without_touching_original() -> None:
+    model = DetectingModel()
+    view: Any = restrict_languages(cast(WhisperModel, model), ("en", "ja"))
+
+    assert view.model.detect_language(None) == [
+        [("<|en|>", pytest.approx(0.41 / 0.51)), ("<|ja|>", pytest.approx(0.10 / 0.51))]
+    ]
+    assert model.model.detect_language(None)[0][0][0] == "<|et|>"
+    with pytest.raises(ValueError, match="xx"):
+        restrict_languages(cast(WhisperModel, model), ("en", "xx"))
+
+
+@pytest.mark.parametrize("language,expected", [("en+ja", "<|en|>"), ("multi", "<|et|>")])
+def test_transcribe_paths_restrict_detection_for_plus_language(tmp_path: Path, language: str, expected: str) -> None:
+    processed_path = tmp_path / "processed.wav"
+    processed_path.write_text("data")
+    runs: list[DetectingModel] = []
+
+    def picker(_preset: str) -> DetectingModel:
+        runs.append(DetectingModel())
+        return runs[-1]
+
+    transcribe(
+        "/path/to/audio.wav",
+        preset="large8gb",
+        language=language,
+        preprocess_config_provider=lambda: PreprocessConfig(enabled=False),
+        preprocess_runner=lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+        model_picker=picker,
+    )
+    for runner in (transcribe_with_baseline_params, transcribe_with_minimal_params):
+        runner(
+            "/path/to/audio.wav",
+            "large8gb",
+            language,
+            PreprocessConfig(enabled=False),
+            lambda path, cfg: FakePreprocessResult(processed_path),  # noqa: ARG005
+            TranscriptionConfig(),
+            model_picker=picker,
+        )
+
+    assert [run.picked for run in runs] == [[expected]] * 3
 
 
 class TestRoundFloats:

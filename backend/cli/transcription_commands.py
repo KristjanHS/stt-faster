@@ -545,7 +545,12 @@ def create_app(*, process_fn: Callable[[argparse.Namespace], int] = cmd_process)
         input_folder: Annotated[str, typer.Argument(help="Path to input folder containing audio files")],
         preset: Annotated[str, typer.Option("--preset", "-p", help="Model preset name")] = "et-large",
         language: Annotated[
-            str | None, typer.Option("--language", "-l", help="Language code, or 'multi' for per-segment auto-detect")
+            str | None,
+            typer.Option(
+                "--language",
+                "-l",
+                help="Language code, 'multi' (per-segment auto-detect), or 'en+ja' (auto-detect among those)",
+            ),
         ] = None,
         output_format: Annotated[
             str, typer.Option("--output-format", "-f", help="Output format: txt, json, or both")

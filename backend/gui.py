@@ -68,7 +68,7 @@ class GuiProfile:
 GUI_PROFILES: dict[str, GuiProfile] = {
     "Estonian": GuiProfile(preset="et-large", language="et"),
     "English": GuiProfile(preset="en-distil", language="en"),
-    "Mixed (auto)": GuiProfile(preset="large8gb", language="multi"),
+    "Mixed EN/JA": GuiProfile(preset="large8gb", language="en+ja"),
 }
 
 

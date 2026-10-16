@@ -73,7 +73,7 @@ Batch audio transcription with Estonian (default) and English models, with speak
 .venv/bin/python scripts/transcribe_manager.py process /path/to/audio --preset large8gb
 ```
 
-**Model presets**: `et-large` (Estonian, default), `large8gb` (English/multi, best accuracy), `en-distil` (fastest, English only), `ja-en-distil` (fast Japanese + English; use with `--language multi`)
+**Model presets**: `et-large` (Estonian, default), `large8gb` (English/multi, best accuracy), `en-distil` (fastest, English only), `ja-en-distil` (fast Japanese + English; use with `--language en+ja`)
 
 **Output**: Files moved to `processed/` subfolder with `.txt` transcripts (range timestamps + speaker labels by default). Use `--output-format both` for `.json` alongside, or `--no-diarize` to skip speaker labels. Failed files in `failed/` subfolder.
 

@@ -24,7 +24,7 @@ After setup, every bat in `scripts\windows\` works without further configuration
 | `transcribe_english_Desk.bat` | English | 44 | Desk-mic English (`en-distil` preset) |
 | `transcribe_english_Teams.bat` | English | 61 | Teams / video-call English (`en-distil` preset) |
 | `transcribe_english_Online.bat` | English | 52 | Online / mixed-source English (`en-distil` preset) |
-| `transcribe_mixed_Desk.bat` | Mixed (auto) | 44 | Desk-mic mixed-language audio (`large8gb`, `--language multi`) |
+| `transcribe_mixed_Desk.bat` | Mixed EN/JA | 44 | Desk-mic mixed English/Japanese audio (`large8gb`, `--language en+ja`) |
 | `compare_variants.bat` | Estonian | all builtin variants | Comparison run across every variant in the registry; also generates the HTML report |
 | `report_only.bat` | – | – | Regenerates the variant HTML report from existing outputs |
 | `check_recent.bat` | – | – | Shows recent transcription run history (`stt-faster db recent`) |
@@ -153,7 +153,7 @@ After `_runtime.bat` returns, the bat calls `_variants.bat`, `_banner.bat`, `_tr
 | `et-large` (default for Estonian) | TalTechNLP/whisper-large-v3-turbo-et-verbatim | ~1.5 GB | Estonian | Best Estonian accuracy |
 | `et-32` | Same model, float32 CPU | ~1.5 GB | Estonian | CPU-only |
 | `en-distil` | Systran/faster-distil-whisper-large-v3 | ~1.5 GB | English only | Used by English `.bat`s |
-| `large8gb` | Systran/faster-whisper-large-v3 | ~3 GB | Multi | Highest accuracy; GUI Mixed (auto) profile |
+| `large8gb` | Systran/faster-whisper-large-v3 | ~3 GB | Multi | Highest accuracy; GUI Mixed EN/JA profile |
 | `ja-en-distil` | kotoba-tech/kotoba-whisper-bilingual-v1.0-faster | ~1.5 GB | Japanese + English | Fast mixed EN/JA |
 
 See `docs/Transcription_solution.md` for the full preset / variant matrix.

@@ -23,6 +23,7 @@ export HF_XET_HIGH_PERFORMANCE=1
 python transcribe.py
 """
 
+import copy
 import json
 import logging
 import math
@@ -435,16 +436,64 @@ def format_segments_as_text(segments: list[dict[str, Any]], *, include_timestamp
 MULTILINGUAL = "multi"
 
 
+def candidate_languages(language: str | None) -> tuple[str, ...] | None:
+    """``en+ja`` ⇒ ``("en", "ja")``: per-segment auto-detect limited to those codes; else ``None``."""
+    if language is None or "+" not in language:
+        return None
+    return tuple(code.strip() for code in language.split("+") if code.strip())
+
+
 def resolve_language(language: str | None, preset: str) -> tuple[str | None, bool]:
     """Map the requested language to faster-whisper's ``(language, multilingual)``.
 
-    ``multi`` ⇒ auto-detect per segment (mixed-language audio); unset on an ``et-*`` preset ⇒ ``et``.
+    ``multi`` or ``en+ja`` ⇒ auto-detect per segment (mixed-language audio; the ``+`` form is
+    narrowed by :func:`restrict_languages`); unset on an ``et-*`` preset ⇒ ``et``.
     """
-    if language == MULTILINGUAL:
+    if language == MULTILINGUAL or candidate_languages(language):
         return None, True
     if language is None and preset.startswith("et-"):
         return "et", False
     return language, False
+
+
+class _LanguageRestrictedWhisper:
+    """CTranslate2 Whisper wrapper whose ``detect_language`` ranks only the allowed codes.
+
+    faster-whisper 1.2.1 has no candidate-language option: both the up-front and the per-segment
+    (``multilingual=True``) detection take the argmax over all 99 languages from
+    ``WhisperModel.model.detect_language`` — so accented English can land on ``et``. Filtering
+    (and renormalising) here covers both detection paths.
+    """
+
+    def __init__(self, inner: Any, languages: tuple[str, ...]) -> None:
+        self._inner = inner
+        self._tokens = {f"<|{code}|>" for code in languages}
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
+
+    def detect_language(self, *args: Any, **kwargs: Any) -> list[list[tuple[str, float]]]:
+        restricted: list[list[tuple[str, float]]] = []
+        for ranked in self._inner.detect_language(*args, **kwargs):
+            kept = [(token, prob) for token, prob in ranked if token in self._tokens]
+            total = sum(prob for _, prob in kept) or 1.0
+            restricted.append([(token, prob / total) for token, prob in kept])
+        return restricted
+
+
+def restrict_languages(model: WhisperModel, languages: tuple[str, ...]) -> WhisperModel:
+    """Return a shallow view of ``model`` whose language detection only picks from ``languages``.
+
+    The cached model itself is left untouched, so other runs sharing it stay unrestricted.
+    """
+    # The local WhisperModel stub omits ``model`` / ``supported_languages``.
+    loaded: Any = model
+    unknown = sorted(set(languages) - set(loaded.supported_languages))
+    if unknown:
+        raise ValueError(f"Unsupported language code(s) for this model: {', '.join(unknown)}")
+    view: Any = copy.copy(loaded)
+    view.model = _LanguageRestrictedWhisper(loaded.model, languages)
+    return cast(WhisperModel, view)
 
 
 def _collect_segments(
@@ -685,12 +734,19 @@ def transcribe(
         # Auto-detect language based on preset if not explicitly provided
         requested_language = language
         applied_language, multilingual = resolve_language(requested_language, preset)
+        languages = candidate_languages(requested_language)
+        if languages:
+            model = restrict_languages(model, languages)
 
         # Log language configuration
         if applied_language:
             LOGGER.info("Language: %s (forced)", applied_language)
         else:
-            LOGGER.info("Language: auto-detect%s", " per segment" if multilingual else "")
+            LOGGER.info(
+                "Language: auto-detect%s%s",
+                " per segment" if multilingual else "",
+                f" among {', '.join(languages)}" if languages else "",
+            )
 
         LOGGER.info("Transcribing audio")
         reporter.stage("transcribe")

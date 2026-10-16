@@ -18,9 +18,11 @@ from backend.progress import REPORTER, ProgressReporter
 from backend.transcribe import (
     FLOAT_PRECISION,
     TranscriptionMetrics,
+    candidate_languages,
     maybe_log_progress,
     pick_model,
     resolve_language,
+    restrict_languages,
     segment_to_payload,
 )
 from backend.variants.preprocess_steps import create_preprocess_runner
@@ -621,11 +623,18 @@ def _run_transcription(
     reporter.stage("load model")
     model = (model_picker or pick_model)(preset)
     LOGGER.info("Model loaded, ready for transcription")
+    languages = candidate_languages(requested_language)
+    if languages:
+        model = restrict_languages(model, languages)
 
     if applied_language:
         LOGGER.info("Language: %s (forced)", applied_language)
     else:
-        LOGGER.info("Language: auto-detect%s", " per segment" if transcribe_kwargs.get("multilingual") else "")
+        LOGGER.info(
+            "Language: auto-detect%s%s",
+            " per segment" if transcribe_kwargs.get("multilingual") else "",
+            f" among {', '.join(languages)}" if languages else "",
+        )
 
     reporter.stage("transcribe")
     transcribe_start = time.time()

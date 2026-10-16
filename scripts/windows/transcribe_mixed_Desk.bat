@@ -11,9 +11,9 @@ set "NUM_SPEAKERS=2"
 setlocal enabledelayedexpansion
 set "STT_CALLER_DIR=%~dp0"
 set "STT_TITLE=Audio Transcription - MIXED LANGUAGE (Desk-mic)"
-set "STT_MODEL=Systran faster-whisper-large-v3 (large8gb), per-segment language"
-set "STT_LANG=Auto per segment"
-set "STT_CLI_TAIL=--preset large8gb --language multi --output-format txt"
+set "STT_MODEL=Systran faster-whisper-large-v3 (large8gb), per-segment EN/JA"
+set "STT_LANG=Auto per segment (English or Japanese only)"
+set "STT_CLI_TAIL=--preset large8gb --language en+ja --output-format txt"
 REM Helpers location. Default = WSL via UNC, works both in-place and when
 REM copied next to audio. Edit if your repo lives elsewhere. Trailing \ required.
 REM   set "STT_HELPERS_DIR=C:\projects\stt-faster\scripts\windows\"

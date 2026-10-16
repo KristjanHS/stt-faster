@@ -88,7 +88,7 @@ def create_parser() -> argparse.ArgumentParser:
     process_parser.add_argument(
         "--language",
         default=None,
-        help="Force language code (e.g., 'en', 'et'), or 'multi' for mixed-language audio. Default: auto-detect.",
+        help="Language code ('en', 'et'), 'multi' for mixed audio, or 'en+ja' to limit detection. Default: auto.",
     )
     process_parser.add_argument(
         "--output-format",
