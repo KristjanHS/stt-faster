@@ -781,8 +781,8 @@ def transcribe_with_baseline_params(
 ) -> dict[str, Any]:
     """Transcribe with baseline parameters, using faster-whisper library defaults.
 
-    This is a true baseline that only passes language (if needed) and vad_filter
-    (if explicitly set). All other parameters are omitted, allowing faster-whisper
+    This is a true baseline that only passes language / multilingual (if needed) and
+    vad_filter (if explicitly set). All other parameters are omitted, allowing faster-whisper
     to use its own internal defaults — so skip counts cannot be tracked (the
     thresholds the library applied are unknown to us).
 
