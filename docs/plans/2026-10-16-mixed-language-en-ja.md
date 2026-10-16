@@ -73,12 +73,19 @@ Synthetic smoke (JSUT JA sentence looped between EN, scratch clip) — inconclus
   at EN↔JA boundaries dropped (synthetic repeats exaggerate this).
 - ja-en-distil: per-window switching works, but emits **no timestamps** (all segments `0.0-0.0`) —
   breaks timestamps + diarization alignment unless fixed (try `without_timestamps`/`chunk_length=15`).
-- Test-recording language scan: accented English windows detect as **`et` at 0.8-0.96**, so `multi`
-  may decode them as Estonian. Candidate fix: restrict per-window detection to an allowed set (`en`,`ja`).
-A/B clip: `data/test_mixed_en_ja.wav` (gitignored), run via `transcribe_mixed_Desk.bat` vs the same
-with `--preset ja-en-distil` (DIARIZE=0):
+- Real recording on large8gb `multi`: Japanese much better, accented English decoded as Estonian (garbled).
+A/B clip: `data/test_mixed_en_ja.wav` (gitignored), run via `transcribe_mixed_{large,distil}_Desk.bat`
+(both `--language en+ja`, DIARIZE=0):
 ```
-.venv/bin/python -m backend.cli.main transcribe process <dir> --preset large8gb --language multi --variant 61 --output-format txt --no-diarize
-.venv/bin/python -m backend.cli.main transcribe process <dir> --preset ja-en-distil --language multi --variant 61 --output-format txt --no-diarize
+.venv/bin/python -m backend.cli.main transcribe process <dir> --preset large8gb --language en+ja --variant 61 --output-format txt --no-diarize
+.venv/bin/python -m backend.cli.main transcribe process <dir> --preset ja-en-distil --language en+ja --variant 61 --output-format txt --no-diarize
 ```
 User reads the Japanese stretches → pick the GUI Mixed default.
+
+### Stage 5 — `--language en+ja` (shipped 811ac66)
+`+`-joined codes ⇒ `multilingual=True` with `restrict_languages()` filtering CT2 `detect_language`
+to those codes. GUI profile "Mixed EN/JA"; both Windows mixed .bat files use `en+ja`.
+
+### Stage 6 — `ja-en-distil` timestamps
+Focus: why kotoba-bilingual segments come out `0.0-0.0` (Stage 4 smoke) and a preset-level fix.
+Test: segments from a real decode of the fixture clip on that preset have `end > start`.
