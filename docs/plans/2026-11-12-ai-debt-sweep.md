@@ -157,7 +157,7 @@ Report-only counts worth knowing:
 
 ## Hand-offs
 
-- `security-reviewer`: none. All 770 gitleaks rows are in gitignored cache directories or `.env`.
+- `security-reviewer`: none; all gitleaks rows are in ignored paths.
 
 ## Stage 1 — deprecated-api (tier 2)
 
