@@ -45,7 +45,7 @@ dependencies = [
 # cpu/cu130 extra (`--extra gui`) is the lean Windows GUI install: transcription
 # only; `--diarize` warns and is skipped.
 # pyannote 4.0.4 = community-1 model; audio fed as PyAV-decoded tensors, bypassing
-# torchcodec. Design: docs/plans/archived/2026-05-21-pyannote-community-1-migration-design.md §2.
+# torchcodec. Design: docs/plans/archive/2026-05-21-pyannote-community-1-migration-design.md §2.
 cpu = [
     "torch>=2.8.0,<3.0.0",
     "torchaudio>=2.8.0,<3.0.0",

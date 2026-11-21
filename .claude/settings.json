@@ -2,7 +2,6 @@
   "permissions": {
     "deny": [
       "Read(**/*.ipynb)",
-      "Read(./docs/archived/**)",
       "Read(**/*.egg-info/**)",
       "Read(**/__pycache__/**)",
       "Read(**/.venv/**)",

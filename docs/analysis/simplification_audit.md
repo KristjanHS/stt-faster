@@ -198,7 +198,7 @@ Pressure-test (2026-05-19) traced the relationship between `backend/preprocess/o
 `backend/model_config.py` (model presets), `backend/preprocess/config.py` (env-var ingest), and `backend/run_config.py` (composite `RunConfig`) compose rather than duplicate. The "add a field, touch 3 places" friction is real but pressure-testing for boundary reasons should come **before** any consolidation pass — same trap as 6.4. Not actionable in this audit.
 
 ### 6.6 Stale archived plan
-`docs/plans/archived/archit_audit_problem1_solutions.md` embeds `TranscriptionDatabase(db_path)` example code. With P2.1 patched to keep the class as a façade (see above), the staleness risk is downgraded — the imports remain correct. Leave as-is unless the façade approach changes.
+`docs/plans/archive/archit_audit_problem1_solutions.md` embeds `TranscriptionDatabase(db_path)` example code. With P2.1 patched to keep the class as a façade (see above), the staleness risk is downgraded — the imports remain correct. Leave as-is unless the façade approach changes.
 
 ---
 

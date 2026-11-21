@@ -5,7 +5,7 @@ Lives in `tests/integration/` because it exercises a single subsystem
 container-backed pipeline. The Docker pipeline equivalent is
 `tests/e2e/test_production_container.py::TestProductionDiarization`.
 
-Plan: docs/plans/archived/2026-05-21-diarization-txt-default-design.md §6.
+Plan: docs/plans/archive/2026-05-21-diarization-txt-default-design.md §6.
 
 Skips cleanly when the speaker model is not installed (`make diarization-model`) or
 when the licensed fixture (`tests/fixtures/audio/two_speakers_10s.wav`)

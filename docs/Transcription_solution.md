@@ -170,7 +170,7 @@ Core dependencies (in `pyproject.toml`):
 
 ### CPU / GPU install variants
 
-`./run_uv.sh` installs CPU torch wheels by default. GPU hosts run `make use-gpu` once per machine to switch to the `cu130` extra (writes the gitignored `.stt-variant.local`; linked worktrees without their own file inherit the main checkout's); subsequent syncs auto-pick GPU. `make use-cpu` switches back; `make show-variant` prints the current value. Runtime torch/torchaudio floors live in `docs/diarization_setup.md`. Historical design (shipped): `docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`.
+`./run_uv.sh` installs CPU torch wheels by default. GPU hosts run `make use-gpu` once per machine to switch to the `cu130` extra (writes the gitignored `.stt-variant.local`; linked worktrees without their own file inherit the main checkout's); subsequent syncs auto-pick GPU. `make use-cpu` switches back; `make show-variant` prints the current value. Runtime torch/torchaudio floors live in `docs/diarization_setup.md`. Historical design (shipped): `docs/plans/archive/2026-05-21-cuda-deps-cpu-gpu-extras-design.md`.
 
 **Mechanism.** `pyproject.toml` declares two mutually-exclusive extras `cpu` and `cu130` via `[tool.uv.conflicts]`, with `[tool.uv.sources]` binding `torch` + `torchaudio` to the matching `pytorch-cpu` / `pytorch-cu130` index per extra. `torch`, `torchaudio` and `pyannote.audio` live **in the extras, not in base deps**; the base closure has no torch (guarded by `tests/unit/test_lean_deps.py`). A single `uv.lock` holds both resolutions.
 
@@ -189,7 +189,7 @@ A CPU-isolation canary (`tests/unit/test_no_transitive_cuda.py`) asserts `nvidia
 - `backend/gui.py`: `GUI_PROFILES` = Estonian→`et-large`, English→`en-distil`, Mixed EN/JA→`large8gb` + `--language en+ja` (per-segment detect limited to those codes; `multi` = all 99), all variant 61 (VAD off); config + HF token in `%APPDATA%\stt-faster`.
 - `installer/setup_gui.py` fetches uv, source, deps, models, ffmpeg+ffprobe into `%LOCALAPPDATA%\stt-faster`; built by `installer/build_installer.bat`, shipped via `make release V=X.Y.Z` (CI attaches the exe).
 - GPU mode (Windows only; dev venvs stay explicit): `nvidia-smi` vs `MIN_GPU_DRIVER`/`MIN_GPU_VRAM_MIB` → `device=cuda` + `gpu-win` extra (cuBLAS/cuDNN wheels, no torch); a failed GPU job re-runs once on CPU.
-- Design history: `docs/plans/archived/2026-09-25-windows-installer-gui-design.md`.
+- Design history: `docs/plans/archive/2026-09-25-windows-installer-gui-design.md`.
 
 ## Output Formats
 

@@ -148,8 +148,8 @@ Report-only counts worth knowing:
 | H12 | `scripts/compare_transcription_variants.py:138` | chained `startswith` where `:144` already uses the tuple form | tuple `startswith` |
 | H13 | `backend/cli/db.py:42`, `:55`; `backend/transcribe.py:702`, `:707`; `backend/services/json_output_writer.py:25`; `tests/unit/test_architecture.py:72`; `scripts/new_project_git_setup.py:51` | stdlib one-liners reimplemented (`fromisoformat` accepts `Z` on 3.12, `x or default`, `Path.write_text` / `read_text`, `Path.cwd()`) | rewrite each; behaviour-identical |
 | H14 | `backend/variants/steps.py:576`, `backend/model_config.py:100`, `backend/run_config.py:155`, `scripts/generate_variant_diffs.py:205` | `.keys()` where iterating the dict suffices | drop `.keys()` |
-| H15 | `docker/README.md:158`, `:252` | cite `.cursor/plans/archived/architecture_refactoring_plan.md`, which moved to `docs/plans/archived/` | fix the path or delete the stale Ollama pointer |
-| H16 | `docs/analysis/simplification_audit.md` | dated audit with 17 dead path cites, outside `archived/` | confirm it is fully consumed, then `git mv` into `docs/plans/archived/` |
+| H15 | `docker/README.md:158`, `:252` | cite `.cursor/plans/archived/architecture_refactoring_plan.md`, which moved to `docs/plans/archive/` | fix the path or delete the stale Ollama pointer |
+| H16 | `docs/analysis/simplification_audit.md` | dated audit with 17 dead path cites, outside `archive/` | confirm it is fully consumed, then `git mv` into `docs/plans/archive/` |
 | H17 | `backend/transcribe.py:272` | docstring `Args` omits `resolver`, `loader`, `tokenizer_loader` | add them |
 | H18 | `scripts/variant_checks/` | excluded from ruff, carries 40 dead `# noqa`, and `verify_all_variants.py` uses `mock.patch` (banned in tests) | decide: delete the directory if unused, or bring it under ruff |
 | H19 | `tests/conftest.py:101`, `:119` | unexplained HF-token minimum length `30`, duplicated | name it `_MIN_HF_TOKEN_LEN` |

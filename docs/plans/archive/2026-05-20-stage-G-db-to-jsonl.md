@@ -284,7 +284,7 @@ Rich-handler setup (Stage F.1.b's `setup_logging()` call in `cli/main.py`) stays
 | R-5 | A test in `test_transcribe_processor.py` depends on `update_status("failed", error_msg)` ordering | Low | Med | When swapping fixtures, walk each `get_status` assertion site and replace with the equivalent assertion on the JSONL record's `files[N].status` + `files[N].error_message`. |
 | R-6 | Migration script can't open the production DB (WAL still broken) | Already happened — WAL was moved aside this session | Med | The WAL backup at `transcribe_state.duckdb.wal.bak` was preserved. If a fresh WAL has appeared by implementation time, re-apply the move. Document in script header. |
 | R-7 | `pyproject.toml` removes `duckdb` but a deferred import remains somewhere | Low | High (CI breaks) | `grep -rn '\bduckdb\b' backend/ scripts/ tests/` must return 0 hits before the PR lands. Pyright + ruff F401 sweep. |
-| R-8 | Plan-hygiene violation: this doc grows stale if Stage G is split across sessions | Med | Low | Update §0 status line and §6 commit list as commits land. Archive to `docs/plans/archived/` once the PR merges. |
+| R-8 | Plan-hygiene violation: this doc grows stale if Stage G is split across sessions | Med | Low | Update §0 status line and §6 commit list as commits land. Archive to `docs/plans/archive/` once the PR merges. |
 
 ## 6. Order of operations (commits within the PR)
 

@@ -4,7 +4,7 @@
 **Date**: 2026-05-21
 **Owner**: Kristjan
 **Supersedes**: none
-**Related**: `archived/2026-05-21-portable-windows-setup-design.md` (shares `_runtime.bat` infrastructure),
+**Related**: `archive/2026-05-21-portable-windows-setup-design.md` (shares `_runtime.bat` infrastructure),
 `docs/diarization_setup.md` (HF_TOKEN setup that pairs with this)
 
 ## §0 — Implementation note (added at archive time)

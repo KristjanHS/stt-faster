@@ -114,7 +114,7 @@ setup-uv:
 
 # Variant-aware sync: ./run_uv.sh reads .stt-variant.local (cpu by default) and
 # passes the matching --extra to `uv sync`. See
-# docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
+# docs/plans/archive/2026-05-21-cuda-deps-cpu-gpu-extras-design.md.
 sync:
 	@./run_uv.sh
 
@@ -212,7 +212,7 @@ integration:
 # Export pip-compatible requirements files from uv.lock, split per uv extra.
 # - requirements.txt    : CPU variant (canonical; matches `uv sync --extra cpu`)
 # - requirements-gpu.txt: cu130 GPU variant (sidecar; audited via pip-audit-gpu)
-# See docs/plans/archived/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.7.
+# See docs/plans/archive/2026-05-21-cuda-deps-cpu-gpu-extras-design.md §5.7.
 export-reqs: export-reqs-cpu export-reqs-cu130
 
 export-reqs-cpu:
