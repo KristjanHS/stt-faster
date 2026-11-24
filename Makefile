@@ -227,14 +227,25 @@ export-reqs-cu130:
 
 # --- CI helper targets (used by workflows) -----------------------------------
 
-# audits the already existing venv
+# pip-audit over the uv.lock export, without installing anything:
+# - `--no-deps --disable-pip`: the export is the full pinned closure, so pip-audit
+#   just looks each pin up in the vuln DB. Letting it pip-install instead failed:
+#   its pip only searches PyPI, which has no torch==X+cpu / X+cu130 wheels.
+# - Local version labels (`+cpu`, `+cu130`) are stripped first: PyPI's vuln DB has
+#   no entry for them, so torch/torchaudio would be skipped as "not found on PyPI".
+#   Upstream advisories for torch==X apply to the PyTorch-index builds of X.
+# $(call pip_audit_reqs,<requirements file>)
+pip_audit_reqs = tmp=$$(mktemp) && trap 'rm -f "$$tmp"' EXIT && \
+	sed -E 's/^([A-Za-z0-9._-]+==[^+ ;]+)\+[^ ;]+/\1/' $(1) > "$$tmp" && \
+	uvx --from pip-audit pip-audit -r "$$tmp" --no-deps --disable-pip
+
 pip-audit: export-reqs-cpu
 	@echo ">> Auditing CPU dependencies (based on requirements.txt)"
-	uvx --from pip-audit pip-audit -r requirements.txt
+	$(call pip_audit_reqs,requirements.txt)
 
 pip-audit-gpu: export-reqs-cu130
 	@echo ">> Auditing GPU dependencies (based on requirements-gpu.txt)"
-	uvx --from pip-audit pip-audit -r requirements-gpu.txt
+	$(call pip_audit_reqs,requirements-gpu.txt)
 
 uv-sync-test:
 	uv sync --extra "$$(./scripts/select_variant.sh)" --group test --frozen
