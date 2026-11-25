@@ -2,19 +2,19 @@
 
 This directory contains **development/test Docker configuration** for running integration tests in containers.
 
-## 🎯 Two Docker Setups
+## Two Docker Setups
 
-### 1️⃣ **Production Docker** (for end users)
+### **Production Docker** (for end users)
 
 **Location:** `../Dockerfile` (project root)  
 **Purpose:** Run stt-faster without installing Python/dependencies  
 **Usage:** `./scripts/transcribe-docker process ./audio --preset en-distil`
 
-See [Main README](../README.md#docker-usage) for full usage guide.
+See [Main README](../README.md) for the project overview.
 
 ---
 
-### 2️⃣ **Dev/Test Docker** (this directory)
+### **Dev/Test Docker** (this directory)
 
 **Location:** `docker/docker-compose.yml` + `docker/app.Dockerfile`  
 **Purpose:** Run tests in containers (used by CI and developers)  
@@ -22,7 +22,7 @@ See [Main README](../README.md#docker-usage) for full usage guide.
 
 ---
 
-## 📦 Production Docker (End Users)
+## Production Docker (End Users)
 
 ### Quick Start
 
@@ -39,11 +39,11 @@ docker run --rm -v $(pwd):/workspace stt-faster:latest process /workspace/audio.
 
 ### Features
 
-- ✅ No Python installation required
-- ✅ No dependency management needed
-- ✅ Minimal image size (production deps only)
-- ✅ Models cached in `~/.cache/hf`
-- ✅ State persisted in `~/.local/share/stt-faster`
+- No Python installation required
+- No dependency management needed
+- Minimal image size (production deps only)
+- Models cached in `~/.cache/hf`
+- State persisted in `~/.local/share/stt-faster`
 
 ### Volume Mounts
 
@@ -71,7 +71,7 @@ STT_DOCKER_IMAGE=my-stt:v1 ./scripts/transcribe-docker process ./audio
 
 ---
 
-## 🧪 Dev/Test Docker (Developers)
+## Dev/Test Docker (Developers)
 
 ### Purpose
 
@@ -133,7 +133,7 @@ docker compose -f docker/docker-compose.yml down
 
 ---
 
-## 🔧 Architecture Notes
+## Architecture Notes
 
 ### Why Two Dockerfiles?
 
@@ -154,13 +154,9 @@ docker compose -f docker/docker-compose.yml down
 **Previous setup** included an Ollama container for LLM/RAG features.  
 **Current state:** Removed (not needed for pure transcription tool).
 
-If you need LLM features:
-- See `.cursor/plans/archived/architecture_refactoring_plan.md` (historical refactor plan)
-- Consider Issue #1: Identity Crisis
-
 ---
 
-## 🚀 CI/CD Integration
+## CI/CD Integration
 
 The dev/test Docker setup is used in CI workflows:
 
@@ -175,7 +171,7 @@ The dev/test Docker setup is used in CI workflows:
 
 ---
 
-## 📝 Development Workflow
+## Development Workflow
 
 ### Local Development (no Docker)
 
@@ -245,9 +241,8 @@ docker compose -f docker/docker-compose.yml config | grep volumes -A 10
 
 ---
 
-## 📚 Further Reading
+## Further Reading
 
-- [Main README](../README.md) - Project overview and setup
-- [Testing Approach](../docs/testing_approach.md) - Test strategy
-- [Architecture Plan (archived)](../.cursor/plans/archived/architecture_refactoring_plan.md) - Historical refactor plan, completed
+- [Main README](../README.md): project overview and setup
+- [Testing Approach](../docs/testing_approach.md): test strategy
 
