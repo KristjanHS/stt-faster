@@ -1,4 +1,4 @@
-# Audio Transcription - Technical Reference
+# Audio Transcription: Technical Reference
 
 Batch audio transcription system with Estonian and multilingual Whisper models, featuring flexible variant configurations for preprocessing and transcription parameter optimization.
 
@@ -15,7 +15,7 @@ The system provides automated batch transcription of audio files with:
 ## Models
 
 ### Estonian (Default)
-**TalTechNLP/whisper-large-v3-turbo-et-verbatim** - Fine-tuned on 1400h Estonian audio, ~1.5GB, preset: `et-large`
+**TalTechNLP/whisper-large-v3-turbo-et-verbatim**: fine-tuned on 1400h of Estonian audio, ~1.5GB, preset `et-large`
 
 ### English/Multilingual
 | Preset | Model | Size | Language | Use Case |
@@ -107,10 +107,10 @@ The variant system allows selecting from 16 pre-configured combinations of prepr
 - `input_folder` (required): Path to folder containing audio files
 - `--preset`: Model preset (`en-distil`, `large8gb`, `et-large`, `et-32`, `small`)
 - `--language`: Force language code (e.g., `en`, `et`); `multi` = per-segment auto-detect for mixed-language audio (e.g. English + Japanese). Auto-detect once (first 30 s) if not specified
-- `--output-format`: Output format (`txt`, `json`, `both`) - default: `txt`
-- `--diarize` / `--no-diarize`: Speaker diarization toggle - default: `--diarize` (needs the local speaker model, `make diarization-model`; see [docs/diarization_setup.md](diarization_setup.md))
-- `--num-speakers N`: Expected speaker count - default: `2`
-- `--variant`: Variant number (1-16) - default: uses standard configuration
+- `--output-format`: Output format (`txt`, `json`, `both`), default `txt`
+- `--diarize` / `--no-diarize`: Speaker diarization toggle, default `--diarize` (needs the local speaker model, `make diarization-model`; see [docs/diarization_setup.md](diarization_setup.md))
+- `--num-speakers N`: Expected speaker count, default `2`
+- `--variant`: Variant number (1-16), defaults to the standard configuration
 
 **Run history (`stt-faster db ...`):**
 - `db recent --limit N`: Show the most recent N runs in compact format
