@@ -18,7 +18,6 @@
       "Read(**/AGENTS.md)",
       "Read(**/CODEX_RULES.md)",
       "Read(**/gemini.md)",
-      "Read(**/logs/**)",
       "Read(**/reports/**)",
       "Read(**/tmp*/**)",
       "Read(**/*.db)",
