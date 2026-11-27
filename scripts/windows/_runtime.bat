@@ -79,12 +79,11 @@ if /i "%STT_AUDIO_DIR_RESOLVED:~0,2%"=="E:" set "STT_AUDIO_DIR_WSL=/mnt/e%STT_AU
 
 REM ---- Runtime probes: WSL first (unless forced docker), then Docker ----
 REM WSL probe: WSL installed AND the hardcoded repo has a usable .venv.
-REM Double-quote the WSL-side path: harmless on space-free paths (today's
-REM hardcoded value) and defensible if the constant is ever edited to a path
-REM containing spaces.
+REM Every STT_WSL_REPO use goes through `bash -c`, path unquoted: `wsl -e` alone and
+REM a quoted "~" both leave the tilde literal, so the probe fails into CPU-only docker.
 set "STT_RUNTIME=none"
 if /i not "%STT_FORCE_DOCKER%"=="1" (
-    where wsl >nul 2>nul && wsl -e test -x "%STT_WSL_REPO%/.venv/bin/python" >nul 2>nul && set "STT_RUNTIME=wsl"
+    where wsl >nul 2>nul && wsl -e bash -c "test -x %STT_WSL_REPO%/.venv/bin/python" >nul 2>nul && set "STT_RUNTIME=wsl"
 )
 
 REM Docker probe: docker on PATH AND the production image is already built.

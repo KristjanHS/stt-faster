@@ -39,7 +39,7 @@ REM The whole HF repo dir is mounted: snapshot files are symlinks into ../../blo
 set "DOCKER_MODEL_ARGS="
 set "STT_DIAR_REPO_WIN="
 set "STT_RNNOISE_WIN="
-for /f "usebackq delims=" %%p in (`wsl -e wslpath -w "!STT_WSL_REPO!/models/sh.rnnn" 2^>nul`) do set "STT_RNNOISE_WIN=%%p"
+for /f "usebackq delims=" %%p in (`wsl -e bash -c "wslpath -w !STT_WSL_REPO!/models/sh.rnnn" 2^>nul`) do set "STT_RNNOISE_WIN=%%p"
 
 if "!STT_DIARIZE_ON!"=="1" (
     REM Checked inside WSL: config.yaml is a Linux symlink into ../../blobs.

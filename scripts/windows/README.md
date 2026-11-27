@@ -119,7 +119,7 @@ Results land next to the audio file:
 ## Troubleshooting
 
 **Banner says `runtime: docker` but you expected `wsl`**
-→ The WSL probe failed. Check `where wsl` returns a path and `wsl -e test -x ~/projects/stt-faster/.venv/bin/python` exits 0. Edit `STT_WSL_REPO=` in `_runtime.bat` if the WSL repo lives elsewhere.
+→ The WSL probe failed. Check `where wsl` returns a path and `wsl -e bash -c "test -x ~/projects/stt-faster/.venv/bin/python"` exits 0. Edit `STT_WSL_REPO=` in `_runtime.bat` if the WSL repo lives elsewhere.
 
 **ERROR: no runtime available**
 → Neither WSL nor Docker is usable. Install Docker Desktop, start it, and run `setup.bat` from the repo root to build the image.
@@ -135,7 +135,7 @@ Results land next to the audio file:
 
 Every transcribe bat calls `_runtime.bat` first. The helper:
 
-1. Probes WSL: `where wsl` AND `wsl -e test -x <STT_WSL_REPO>/.venv/bin/python`. Both pass → `STT_RUNTIME=wsl`. Skipped when the caller sets `STT_FORCE_DOCKER=1`.
+1. Probes WSL: `where wsl` AND `wsl -e bash -c "test -x <STT_WSL_REPO>/.venv/bin/python"`. Both pass → `STT_RUNTIME=wsl`. Skipped when the caller sets `STT_FORCE_DOCKER=1`.
 2. If still unset, probes Docker: `where docker` AND `docker image inspect stt-faster:latest`. Both pass → `STT_RUNTIME=docker`.
 3. If docker is on PATH but the image is missing AND `STT_NO_AUTOBUILD` is not `1`, prompts to build it (`docker build -t stt-faster:latest .` from the repo root). On Y + successful build → `STT_RUNTIME=docker`. On N / build-failed / repo-not-detected, exits non-zero.
 4. If both probes (and auto-build) failed, prints `ERROR: no runtime available` and exits non-zero.
