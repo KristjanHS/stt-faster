@@ -158,7 +158,7 @@ docker compose -f docker/docker-compose.yml down
 
 ## CI/CD Integration
 
-The integration and E2E jobs in `.github/workflows/python-lint-test.yml` (run only locally under `act`) start the dev/test Docker setup and run the tests from the host:
+The integration and E2E jobs in `.github/workflows/python-lint-test.yml` (run only under `act` on `workflow_dispatch` or `schedule`) start the dev/test Docker setup and run the tests from the host. They still wait for an `ollama` service that `docker-compose.yml` no longer defines, so they time out until that wait step is removed:
 
 ```yaml
 # .github/workflows/python-lint-test.yml (integration job)
