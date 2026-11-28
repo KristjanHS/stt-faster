@@ -158,15 +158,15 @@ docker compose -f docker/docker-compose.yml down
 
 ## CI/CD Integration
 
-The dev/test Docker setup is used in CI workflows:
+The integration and E2E jobs in `.github/workflows/python-lint-test.yml` (run only locally under `act`) start the dev/test Docker setup and run the tests from the host:
 
 ```yaml
-# .github/workflows/test.yml
-- name: Run tests in Docker
-  run: |
-    docker compose -f docker/docker-compose.yml up -d
-    docker compose -f docker/docker-compose.yml exec -T app \
-        python -m pytest tests/unit tests/integration -v
+# .github/workflows/python-lint-test.yml (integration job)
+- name: Build and start services
+  run: docker compose -f docker/docker-compose.yml up -d --build
+- name: Run integration tests
+  run: >-
+    uv run -m pytest tests/integration -q --junitxml=reports/junit_integration.xml
 ```
 
 ---
